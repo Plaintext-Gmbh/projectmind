@@ -1,0 +1,124 @@
+:root {
+  /* dark, slightly cool palette */
+  --bg-0: #0e1117;
+  --bg-1: #161b22;
+  --bg-2: #1e242c;
+  --bg-3: #2a313c;
+  --fg-0: #e6edf3;
+  --fg-1: #b1bac4;
+  --fg-2: #6e7781;
+  --accent: #7ee787;
+  --accent-2: #58a6ff;
+  --warn: #f0883e;
+  --error: #f85149;
+  --service: #7ee787;
+  --controller: #58a6ff;
+  --rest-controller: #79c0ff;
+  --repository: #d2a8ff;
+  --component: #ffa657;
+  --configuration: #ff7b72;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+
+  --mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg-0);
+  color: var(--fg-0);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+button {
+  background: var(--bg-2);
+  color: var(--fg-0);
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+button:hover {
+  background: var(--bg-3);
+  border-color: var(--accent-2);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+input[type='text'] {
+  background: var(--bg-1);
+  color: var(--fg-0);
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg-3);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-2);
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-right: 4px;
+  font-family: var(--mono);
+}
+
+.badge.service {
+  background: color-mix(in srgb, var(--service) 25%, transparent);
+  color: var(--service);
+}
+.badge.controller,
+.badge.rest-controller {
+  background: color-mix(in srgb, var(--controller) 25%, transparent);
+  color: var(--controller);
+}
+.badge.repository {
+  background: color-mix(in srgb, var(--repository) 25%, transparent);
+  color: var(--repository);
+}
+.badge.component {
+  background: color-mix(in srgb, var(--component) 25%, transparent);
+  color: var(--component);
+}
+.badge.configuration {
+  background: color-mix(in srgb, var(--configuration) 25%, transparent);
+  color: var(--configuration);
+}

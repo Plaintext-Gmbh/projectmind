@@ -6,6 +6,7 @@ members = [
     "crates/mcp-server",
     "plugins/lang-java",
     "plugins/framework-spring",
+    "app/src-tauri",
 ]
 
 [workspace.package]

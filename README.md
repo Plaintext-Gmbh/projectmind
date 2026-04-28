@@ -32,7 +32,9 @@ The Phase 1 MVP ships a **Rust MCP server** (`plaintext-ide-mcp`) that Claude Co
 
 Smoke-tested against a real Spring Boot repo (`plaintext-app`): **417 classes parsed, 30 services detected, full bean-injection graph**.
 
-## Build (Ubuntu / Debian)
+## Build the MCP server (Ubuntu / Debian)
+
+This is the path you want for **using `plaintext-ide` from Claude Code on Ubuntu** — no GUI required.
 
 ```bash
 # Prerequisites — install once
@@ -49,7 +51,7 @@ cargo build --release --bin plaintext-ide-mcp
 # Result: target/release/plaintext-ide-mcp
 ```
 
-## Build (macOS)
+## Build the MCP server (macOS)
 
 ```bash
 # Prerequisites — Homebrew + Rust
@@ -60,6 +62,44 @@ source "$HOME/.cargo/env"
 git clone git@github.com:daniel-marthaler/plaintext-ide.git
 cd plaintext-ide
 cargo build --release --bin plaintext-ide-mcp
+```
+
+## Build the Tauri shell (optional, GUI)
+
+The Tauri app is the read-only graphical browser. It is the same engine, just with a UI on top.
+
+### Ubuntu / Debian
+
+```bash
+# Tauri prerequisites
+sudo apt install -y \
+  libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+  librsvg2-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev patchelf
+
+# Node toolchain (for the frontend)
+curl -fsSL https://get.pnpm.io/install.sh | sh -
+
+# Build
+cd app
+pnpm install
+pnpm tauri build
+```
+
+### macOS
+
+```bash
+# Node toolchain
+brew install pnpm
+
+cd app
+pnpm install
+pnpm tauri build
+```
+
+Run the app in dev mode (live-reload):
+
+```bash
+cd app && pnpm tauri dev
 ```
 
 ## Use with Claude Code
@@ -101,7 +141,7 @@ CI runs on **Ubuntu 22.04** and **macOS 14** for every push and pull request.
 
 ## Architecture
 
-A Cargo workspace with five crates:
+A Cargo workspace with six crates plus a Svelte frontend:
 
 | Crate | Purpose |
 |---|---|
@@ -110,6 +150,8 @@ A Cargo workspace with five crates:
 | `crates/mcp-server` | The `plaintext-ide-mcp` binary (JSON-RPC over stdio) |
 | `plugins/lang-java` | Java parser via Tree-sitter |
 | `plugins/framework-spring` | Spring stereotypes + bean graph |
+| `app/src-tauri` | Tauri shell (Rust backend exposing Tauri commands) |
+| `app/src/` | Svelte + TypeScript frontend with Mermaid integration |
 
 Phase 1 plugins are **statically registered**. Phase 2 will add dynamic loading from a `./plugins/` directory next to the binary, so third-party plugins can drop in `.so` / `.dylib` files.
 

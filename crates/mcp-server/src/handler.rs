@@ -4,8 +4,6 @@
 
 //! Method dispatch and shared server state.
 
-use std::path::PathBuf;
-
 use plaintext_ide_core::{Engine, Repository};
 use plaintext_ide_framework_spring::SpringPlugin;
 use plaintext_ide_lang_java::JavaPlugin;
@@ -105,14 +103,6 @@ where
         DispatchError::invalid_params("no repository open — call open_repo first")
     })?;
     f(repo)
-}
-
-/// Resolve a possibly-relative path against the current repository's root.
-pub(crate) fn resolve_path(state: &ServerState, p: &str) -> PathBuf {
-    state.repo.as_ref().map_or_else(
-        || PathBuf::from(p),
-        |repo| repo.absolute(std::path::Path::new(p)),
-    )
 }
 
 #[derive(Debug, Deserialize)]

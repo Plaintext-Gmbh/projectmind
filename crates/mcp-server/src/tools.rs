@@ -4,8 +4,6 @@
 
 //! Tool definitions and `tools/call` dispatch.
 
-use std::path::PathBuf;
-
 use plaintext_ide_core::git;
 use plaintext_ide_plugin_api::FrameworkPlugin;
 use serde::Deserialize;
@@ -387,12 +385,6 @@ fn escape_id(raw: &str) -> String {
         }
     }
     s
-}
-
-/// Re-exported for unused-warning suppression in tests.
-#[allow(dead_code)]
-pub(crate) fn unused_path_resolver(state: &ServerState, p: &str) -> PathBuf {
-    crate::handler::resolve_path(state, p)
 }
 
 #[cfg(test)]
