@@ -6,6 +6,7 @@
 
 use plaintext_ide_core::{diagram, git};
 use plaintext_ide_framework_spring::SpringPlugin;
+use plaintext_ide_plugin_api::FrameworkPlugin;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
@@ -154,6 +155,11 @@ pub(crate) fn list() -> Value {
                 "inputSchema": no_args_schema()
             },
             {
+                "name": "relations",
+                "description": "Return the full bean / injection graph as JSON: list of {from, to, kind, cross_module}.",
+                "inputSchema": no_args_schema()
+            },
+            {
                 "name": "plugin_info",
                 "description": "List active plugins (languages and frameworks).",
                 "inputSchema": no_args_schema()
@@ -177,6 +183,7 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "find_class" => find_class(state, parsed.arguments).await,
         "class_outline" => class_outline(state, parsed.arguments).await,
         "module_summary" => module_summary(state).await,
+        "relations" => relations(state).await,
         "plugin_info" => plugin_info(state).await,
         other => Err(DispatchError::invalid_params(format!(
             "unknown tool: {other}"
@@ -460,6 +467,43 @@ async fn module_summary(state: &Mutex<ServerState>) -> DispatchResult {
         }
         Ok(text_result(
             serde_json::to_string_pretty(&modules).unwrap_or_default(),
+        ))
+    })
+}
+
+async fn relations(state: &Mutex<ServerState>) -> DispatchResult {
+    let state = state.lock().await;
+    let spring = SpringPlugin::new();
+    with_repo(&state, |repo| {
+        // Map fqn → module to detect cross-module edges.
+        let mut node_module: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::default();
+        for (mid, module) in &repo.modules {
+            for class in module.classes.values() {
+                node_module.insert(class.fqn.clone(), mid.clone());
+            }
+        }
+        let mut edges: Vec<Value> = Vec::new();
+        for module in repo.modules.values() {
+            for rel in spring.relations(module) {
+                let from_mod = node_module.get(&rel.from).cloned();
+                let to_mod = node_module.get(&rel.to).cloned();
+                let cross = match (&from_mod, &to_mod) {
+                    (Some(a), Some(b)) => a != b,
+                    _ => false,
+                };
+                edges.push(json!({
+                    "from": rel.from,
+                    "to": rel.to,
+                    "kind": rel.kind,
+                    "from_module": from_mod,
+                    "to_module": to_mod,
+                    "cross_module": cross,
+                }));
+            }
+        }
+        Ok(text_result(
+            serde_json::to_string_pretty(&edges).unwrap_or_else(|_| "[]".into()),
         ))
     })
 }
