@@ -44,14 +44,24 @@ Smoke-tested against a real Spring Boot multi-module repo (`plaintext-app`): **4
 
 This is the path you want for **using `plaintext-ide` from Claude Code on Ubuntu** — no GUI required.
 
+The repo ships an installer for the impatient:
+
 ```bash
-# Prerequisites — install once
+git clone git@github.com:daniel-marthaler/plaintext-ide.git
+cd plaintext-ide
+./scripts/install-ubuntu.sh             # MCP server only
+# or:
+./scripts/install-ubuntu.sh --with-app  # also build the Tauri shell
+```
+
+The script installs build prerequisites, the Rust toolchain (via rustup, if missing), then builds and prints a ready-made `.mcp.json` snippet. If you'd rather install manually:
+
+```bash
 sudo apt update
 sudo apt install -y build-essential pkg-config libssl-dev cmake git curl
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
 
-# Build
 git clone git@github.com:daniel-marthaler/plaintext-ide.git
 cd plaintext-ide
 cargo build --release --bin plaintext-ide-mcp
