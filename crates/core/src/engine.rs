@@ -82,6 +82,9 @@ impl Engine {
 
     /// Walk a repository, parse files with registered language plugins, then enrich with
     /// framework plugins.
+    ///
+    /// If one or more `pom.xml` files are found, the repository is split into Maven modules.
+    /// Otherwise the whole repo is treated as a single module.
     pub fn open_repo(&self, path: &Path) -> Result<Repository, RepositoryError> {
         let path = std::fs::canonicalize(path)
             .map_err(|_| RepositoryError::InvalidPath(path.to_path_buf()))?;
@@ -92,10 +95,16 @@ impl Engine {
 
         let mut repo = Repository::new(path.clone());
 
-        // Phase 1 strategy: treat the whole repo as one module.
-        // Phase 2 will detect Maven / Gradle / Cargo / npm modules.
-        let module = self.parse_root(&path)?;
-        repo.insert_module(module);
+        let maven_modules = crate::maven::discover(&path);
+        if maven_modules.is_empty() {
+            let module = self.parse_root(&path)?;
+            repo.insert_module(module);
+        } else {
+            info!(modules = maven_modules.len(), "Maven multi-module project detected");
+            for m in self.parse_maven_modules(&path, &maven_modules)? {
+                repo.insert_module(m);
+            }
+        }
 
         info!(class_count = repo.class_count(), "repo parsed");
         Ok(repo)
@@ -113,14 +122,7 @@ impl Engine {
             classes: BTreeMap::new(),
         };
 
-        // Index plugins by extension.
-        let mut by_ext: BTreeMap<&'static str, &dyn LanguagePlugin> = BTreeMap::new();
-        for p in &self.languages {
-            for ext in p.file_extensions() {
-                by_ext.insert(*ext, p.as_ref());
-            }
-        }
-
+        let by_ext = self.index_languages_by_extension();
         if by_ext.is_empty() {
             warn!("no language plugins registered, skipping parse");
             return Ok(module);
@@ -142,27 +144,99 @@ impl Engine {
             let Some(plugin) = by_ext.get(ext) else {
                 continue;
             };
-
-            match std::fs::read_to_string(path) {
-                Ok(source) => {
-                    if let Err(err) = plugin.parse_file(path, &source, &mut module) {
-                        warn!(file = %path.display(), error = %err, "parse failed");
-                    } else {
-                        debug!(file = %path.display(), "parsed");
-                    }
-                }
-                Err(err) => warn!(file = %path.display(), error = %err, "read failed"),
-            }
+            self.parse_file_into(path, *plugin, &mut module);
         }
 
-        // Run framework plugins.
         for fw in &self.frameworks {
             if let Err(err) = fw.enrich(&mut module) {
                 warn!(plugin = fw.info().id, error = %err, "framework enrich failed");
             }
         }
-
         Ok(module)
+    }
+
+    fn parse_maven_modules(
+        &self,
+        repo_root: &Path,
+        modules: &[crate::maven::MavenModule],
+    ) -> Result<Vec<Module>, RepositoryError> {
+        let by_ext = self.index_languages_by_extension();
+        if by_ext.is_empty() {
+            warn!("no language plugins registered, skipping parse");
+            return Ok(Vec::new());
+        }
+
+        // Initialize one Module per Maven module.
+        let mut out: BTreeMap<String, Module> = BTreeMap::new();
+        for mvn in modules {
+            out.insert(
+                mvn.coordinate(),
+                Module {
+                    id: mvn.coordinate(),
+                    name: mvn.artifact_id.clone(),
+                    root: mvn.root.clone(),
+                    classes: BTreeMap::new(),
+                },
+            );
+        }
+
+        // Walk the whole repo once, attribute each file to the deepest module that contains it.
+        let walker = WalkBuilder::new(repo_root)
+            .standard_filters(true)
+            .hidden(false)
+            .build();
+        for entry in walker.filter_map(Result::ok) {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let Some(ext) = path.extension().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let Some(plugin) = by_ext.get(ext) else {
+                continue;
+            };
+            let Some(mvn) = crate::maven::attribute(modules, path) else {
+                continue;
+            };
+            if let Some(module) = out.get_mut(&mvn.coordinate()) {
+                self.parse_file_into(path, *plugin, module);
+            }
+        }
+
+        // Enrich each module with framework plugins.
+        for module in out.values_mut() {
+            for fw in &self.frameworks {
+                if let Err(err) = fw.enrich(module) {
+                    warn!(plugin = fw.info().id, error = %err, "framework enrich failed");
+                }
+            }
+        }
+
+        Ok(out.into_values().collect())
+    }
+
+    fn index_languages_by_extension(&self) -> BTreeMap<&'static str, &dyn LanguagePlugin> {
+        let mut by_ext: BTreeMap<&'static str, &dyn LanguagePlugin> = BTreeMap::new();
+        for p in &self.languages {
+            for ext in p.file_extensions() {
+                by_ext.insert(*ext, p.as_ref());
+            }
+        }
+        by_ext
+    }
+
+    fn parse_file_into(&self, path: &Path, plugin: &dyn LanguagePlugin, module: &mut Module) {
+        match std::fs::read_to_string(path) {
+            Ok(source) => {
+                if let Err(err) = plugin.parse_file(path, &source, module) {
+                    warn!(file = %path.display(), error = %err, "parse failed");
+                } else {
+                    debug!(file = %path.display(), "parsed");
+                }
+            }
+            Err(err) => warn!(file = %path.display(), error = %err, "read failed"),
+        }
     }
 }
 

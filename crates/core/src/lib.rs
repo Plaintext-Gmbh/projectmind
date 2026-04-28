@@ -14,7 +14,9 @@
 
 pub mod engine;
 pub mod git;
+pub mod maven;
 pub mod repository;
 
 pub use engine::Engine;
+pub use maven::MavenModule;
 pub use repository::{Repository, RepositoryError};
