@@ -6,6 +6,15 @@ export interface ClassEntry {
   file: string;
   stereotypes: string[];
   kind: string;
+  module: string;
+}
+
+export interface ModuleEntry {
+  id: string;
+  name: string;
+  root: string;
+  classes: number;
+  stereotypes: Record<string, number>;
 }
 
 export interface RepoSummary {
@@ -25,11 +34,17 @@ export async function openRepo(path: string): Promise<RepoSummary> {
   return invoke<RepoSummary>('open_repo', { path });
 }
 
-export async function listClasses(stereotype?: string): Promise<ClassEntry[]> {
-  return invoke<ClassEntry[]>('list_classes', { stereotype });
+export async function listClasses(stereotype?: string, module?: string): Promise<ClassEntry[]> {
+  return invoke<ClassEntry[]>('list_classes', { stereotype, module });
 }
 
-export async function showClass(fqn: string): Promise<{ source: string; file: string; line_start: number; line_end: number }> {
+export async function listModules(): Promise<ModuleEntry[]> {
+  return invoke<ModuleEntry[]>('list_modules');
+}
+
+export async function showClass(
+  fqn: string,
+): Promise<{ source: string; file: string; line_start: number; line_end: number }> {
   return invoke('show_class', { fqn });
 }
 

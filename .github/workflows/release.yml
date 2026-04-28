@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact_name: plaintext-ide-mcp
+            asset_suffix: linux-x86_64
+          - os: macos-14
+            target: aarch64-apple-darwin
+            artifact_name: plaintext-ide-mcp
+            asset_suffix: macos-arm64
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact_name: plaintext-ide-mcp
+            asset_suffix: macos-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release MCP binary
+        run: cargo build --release --bin plaintext-ide-mcp --target ${{ matrix.target }}
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          BIN_PATH="target/${{ matrix.target }}/release/${{ matrix.artifact_name }}"
+          ARCHIVE="${{ matrix.artifact_name }}-${{ matrix.asset_suffix }}.tar.gz"
+          tar czf "$ARCHIVE" -C "$(dirname "$BIN_PATH")" "$(basename "$BIN_PATH")" -C "$GITHUB_WORKSPACE" LICENSE README.md
+          shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}-${{ matrix.asset_suffix }}
+          path: |
+            ${{ matrix.artifact_name }}-${{ matrix.asset_suffix }}.tar.gz
+            ${{ matrix.artifact_name }}-${{ matrix.asset_suffix }}.tar.gz.sha256
+          retention-days: 30
+
+  release:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-22.04
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/*.sha256
+          generate_release_notes: true
+          fail_on_unmatched_files: true

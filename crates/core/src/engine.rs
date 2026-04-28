@@ -100,7 +100,10 @@ impl Engine {
             let module = self.parse_root(&path)?;
             repo.insert_module(module);
         } else {
-            info!(modules = maven_modules.len(), "Maven multi-module project detected");
+            info!(
+                modules = maven_modules.len(),
+                "Maven multi-module project detected"
+            );
             for m in self.parse_maven_modules(&path, &maven_modules)? {
                 repo.insert_module(m);
             }

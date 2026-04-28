@@ -65,6 +65,17 @@ pub struct ClassEntry {
     pub file: PathBuf,
     pub stereotypes: Vec<String>,
     pub kind: String,
+    pub module: String,
+}
+
+/// Per-module summary for the UI.
+#[derive(Debug, Serialize)]
+pub struct ModuleEntry {
+    pub id: String,
+    pub name: String,
+    pub root: PathBuf,
+    pub classes: usize,
+    pub stereotypes: std::collections::BTreeMap<String, u32>,
 }
 
 /// Detailed class data with source code.
@@ -98,6 +109,7 @@ fn open_repo(path: String, state: State<'_, Arc<AppState>>) -> Result<RepoSummar
 #[tauri::command]
 fn list_classes(
     stereotype: Option<String>,
+    module: Option<String>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<Vec<ClassEntry>, String> {
     let guard = state.repo.read();
@@ -105,8 +117,13 @@ fn list_classes(
         .as_ref()
         .ok_or_else(|| "no repository open".to_string())?;
     let mut out = Vec::new();
-    for module in repo.modules.values() {
-        for class in module.classes.values() {
+    for (mod_id, m) in &repo.modules {
+        if let Some(target) = module.as_deref() {
+            if mod_id != target {
+                continue;
+            }
+        }
+        for class in m.classes.values() {
             if let Some(s) = stereotype.as_deref() {
                 if !class.stereotypes.iter().any(|x| x == s) {
                     continue;
@@ -118,9 +135,36 @@ fn list_classes(
                 file: class.file.clone(),
                 stereotypes: class.stereotypes.clone(),
                 kind: format!("{:?}", class.kind).to_lowercase(),
+                module: mod_id.clone(),
             });
         }
     }
+    Ok(out)
+}
+
+#[tauri::command]
+fn list_modules(state: State<'_, Arc<AppState>>) -> Result<Vec<ModuleEntry>, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    let mut out = Vec::new();
+    for module in repo.modules.values() {
+        let mut counts = std::collections::BTreeMap::new();
+        for class in module.classes.values() {
+            for s in &class.stereotypes {
+                *counts.entry(s.clone()).or_insert(0_u32) += 1;
+            }
+        }
+        out.push(ModuleEntry {
+            id: module.id.clone(),
+            name: module.name.clone(),
+            root: module.root.clone(),
+            classes: module.classes.len(),
+            stereotypes: counts,
+        });
+    }
+    out.sort_by_key(|b| std::cmp::Reverse(b.classes));
     Ok(out)
 }
 
@@ -183,6 +227,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_repo,
             list_classes,
+            list_modules,
             show_class,
             list_changes_since,
             show_diagram,

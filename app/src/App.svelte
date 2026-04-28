@@ -4,16 +4,19 @@
   import {
     repo,
     classes,
+    modules,
     selectedClass,
     stereotypeFilter,
+    moduleFilter,
     errorMessage,
     filteredClasses,
     stereotypeCounts,
   } from './lib/store';
-  import { openRepo, listClasses, showClass } from './lib/api';
+  import { openRepo, listClasses, listModules, showClass } from './lib/api';
   import type { ClassEntry } from './lib/api';
   import ClassViewer from './components/ClassViewer.svelte';
   import DiagramView from './components/DiagramView.svelte';
+  import ModuleSidebar from './components/ModuleSidebar.svelte';
 
   let viewMode: 'classes' | 'diagram' = 'classes';
   let diagramKind: 'bean-graph' | 'package-tree' = 'bean-graph';
@@ -33,9 +36,12 @@
     try {
       const summary = await openRepo(path);
       repo.set(summary);
-      const list = await listClasses();
+      const [list, mods] = await Promise.all([listClasses(), listModules()]);
       classes.set(list);
+      modules.set(mods);
       selectedClass.set(null);
+      moduleFilter.set(null);
+      stereotypeFilter.set(null);
       classSource = '';
     } catch (err) {
       errorMessage.set(String(err));
@@ -109,6 +115,7 @@
     </section>
   {:else if viewMode === 'classes'}
     <section class="layout">
+      <ModuleSidebar />
       <aside class="sidebar">
         <div class="filter">
           <button class="chip" class:active={$stereotypeFilter === null} on:click={() => setFilter(null)}>
@@ -289,7 +296,7 @@
 
   .layout {
     display: grid;
-    grid-template-columns: 360px 1fr;
+    grid-template-columns: 220px 360px 1fr;
     flex: 1;
     overflow: hidden;
   }

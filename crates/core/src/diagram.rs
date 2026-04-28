@@ -17,7 +17,10 @@ use crate::Repository;
 /// Mermaid `classDef` for each known stereotype. Unknown stereotypes get the default style.
 const STEREOTYPE_STYLES: &[(&str, &str)] = &[
     ("service", "fill:#163a1d,stroke:#7ee787,color:#cdf6cd"),
-    ("rest-controller", "fill:#1a2c4d,stroke:#79c0ff,color:#cfe6ff"),
+    (
+        "rest-controller",
+        "fill:#1a2c4d,stroke:#79c0ff,color:#cfe6ff",
+    ),
     ("controller", "fill:#1a2c4d,stroke:#58a6ff,color:#cfe6ff"),
     ("repository", "fill:#3a1d4d,stroke:#d2a8ff,color:#ecdcff"),
     ("component", "fill:#3d2010,stroke:#ffa657,color:#fbe7d3"),
@@ -30,10 +33,7 @@ const DEFAULT_STYLE: &str = "fill:#21262d,stroke:#6e7781,color:#c9d1d9";
 /// Render the bean graph for the entire repo, grouped by module (subgraphs) and colour-coded
 /// by primary stereotype.
 #[must_use]
-pub fn render_bean_graph(
-    repo: &Repository,
-    framework: &dyn FrameworkPlugin,
-) -> String {
+pub fn render_bean_graph(repo: &Repository, framework: &dyn FrameworkPlugin) -> String {
     let mut out = String::from("flowchart LR\n");
 
     // 1. Collect relations and the set of nodes they touch (so we don't dump every class).
@@ -41,8 +41,12 @@ pub fn render_bean_graph(
     let mut node_modules: BTreeMap<String, String> = BTreeMap::new(); // fqn → module_id
     for (mod_id, module) in &repo.modules {
         for rel in framework.relations(module) {
-            node_modules.entry(rel.from.clone()).or_insert_with(|| mod_id.clone());
-            node_modules.entry(rel.to.clone()).or_insert_with(|| mod_id.clone());
+            node_modules
+                .entry(rel.from.clone())
+                .or_insert_with(|| mod_id.clone());
+            node_modules
+                .entry(rel.to.clone())
+                .or_insert_with(|| mod_id.clone());
             all_relations.push((mod_id.clone(), rel));
         }
     }
@@ -58,12 +62,20 @@ pub fn render_bean_graph(
     // 3. Render subgraphs per module.
     let mut nodes_by_module: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (fqn, mod_id) in &node_modules {
-        nodes_by_module.entry(mod_id.clone()).or_default().push(fqn.clone());
+        nodes_by_module
+            .entry(mod_id.clone())
+            .or_default()
+            .push(fqn.clone());
     }
 
     for (mod_id, mut nodes) in nodes_by_module {
         nodes.sort();
-        let _ = writeln!(out, "    subgraph {}[\"{}\"]", escape_id(&mod_id), short_module(&mod_id));
+        let _ = writeln!(
+            out,
+            "    subgraph {}[\"{}\"]",
+            escape_id(&mod_id),
+            short_module(&mod_id)
+        );
         for fqn in &nodes {
             let label = simple_name(fqn);
             let _ = writeln!(out, "        {}[\"{}\"]", escape_id(fqn), label);
@@ -72,7 +84,12 @@ pub fn render_bean_graph(
 
         for fqn in &nodes {
             if let Some(stereo) = stereotype_for.get(fqn) {
-                let _ = writeln!(out, "    class {} stereo_{}", escape_id(fqn), sanitize(stereo));
+                let _ = writeln!(
+                    out,
+                    "    class {} stereo_{}",
+                    escape_id(fqn),
+                    sanitize(stereo)
+                );
             }
         }
     }
@@ -91,7 +108,12 @@ pub fn render_bean_graph(
             // Default arrow for Injects, Uses, Other.
             _ => "-->",
         };
-        let _ = writeln!(out, "    {} {symbol} {}", escape_id(&rel.from), escape_id(&rel.to));
+        let _ = writeln!(
+            out,
+            "    {} {symbol} {}",
+            escape_id(&rel.from),
+            escape_id(&rel.to)
+        );
         if from_mod != to_mod {
             cross_module_edges.insert((rel.from.clone(), rel.to.clone()));
         }
@@ -100,14 +122,8 @@ pub fn render_bean_graph(
 
     // 5. Highlight cross-module edges with a class.
     for (from, to) in &cross_module_edges {
-        let _ = writeln!(
-            out,
-            "    linkStyle default stroke:#6e7781,stroke-width:1px"
-        );
-        let _ = writeln!(
-            out,
-            "    %% cross-module: {from} -> {to}"
-        );
+        let _ = writeln!(out, "    linkStyle default stroke:#6e7781,stroke-width:1px");
+        let _ = writeln!(out, "    %% cross-module: {from} -> {to}");
     }
 
     // 6. Mermaid classDef for each stereotype style.
@@ -212,7 +228,9 @@ fn short_module(mod_id: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plaintext_ide_plugin_api::{Annotation, Class, FrameworkPlugin, Module, PluginInfo, Result as PiResult};
+    use plaintext_ide_plugin_api::{
+        Annotation, Class, FrameworkPlugin, Module, PluginInfo, Result as PiResult,
+    };
 
     struct DummyFw;
     impl FrameworkPlugin for DummyFw {

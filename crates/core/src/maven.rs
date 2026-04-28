@@ -138,7 +138,10 @@ fn parse_pom(path: &Path) -> std::io::Result<ParsedPom> {
 
     if out.artifact_id.is_empty() {
         // Fall back to the directory name so the module is at least listed.
-        if let Some(parent_dir) = path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str())
+        if let Some(parent_dir) = path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
         {
             out.artifact_id = parent_dir.to_string();
         } else {
