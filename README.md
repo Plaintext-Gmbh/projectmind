@@ -21,16 +21,24 @@ The Phase 1 MVP ships a **Rust MCP server** (`plaintext-ide-mcp`) that Claude Co
 
 | Tool | What it does |
 |---|---|
-| `open_repo` | Open a repository, parse all Java sources, run framework plugins |
-| `repo_info` | Summary (modules, classes) of the active repo |
-| `list_classes` | List parsed classes (optionally filter by stereotype) |
-| `show_class` | Source of a class with optional line-range highlights |
-| `list_changes_since` | Files changed since a given git ref |
-| `show_diff` | Unified diff between two refs (or ref vs working tree) |
-| `show_diagram` | Mermaid diagram of the bean graph or package tree |
-| `plugin_info` | List active language and framework plugins |
+| `open_repo` | Open a repository. Detects Maven multi-module layout via `pom.xml`; otherwise treats the whole tree as one module. |
+| `repo_info` | Summary (modules, classes) of the active repo. |
+| `module_summary` | Per-module class count and stereotype histogram. |
+| `list_classes` | List parsed classes (filter by stereotype). |
+| `find_class` | Case-insensitive substring search by simple or fully-qualified name. |
+| `class_outline` | Methods, fields, annotations and visibility of a class — without source. |
+| `show_class` | Source of a class with optional line-range highlights. |
+| `list_changes_since` | Files changed since a given git ref. |
+| `show_diff` | Unified diff between two refs (or ref vs working tree). |
+| `show_diagram` | Mermaid bean graph (subgraphs per Maven module, colour-coded by stereotype) or package tree. |
+| `plugin_info` | List active language and framework plugins. |
 
-Smoke-tested against a real Spring Boot repo (`plaintext-app`): **417 classes parsed, 30 services detected, full bean-injection graph**.
+Active framework recognisers in Phase 1:
+
+- **Spring** — `@Service`, `@RestController`, `@Controller`, `@Component`, `@Repository`, `@Configuration`. Constructor and field injection (`@Autowired`, `@Inject`, `@Resource`) become Mermaid edges.
+- **Lombok** — `@Data`, `@Value`, `@Builder`, `@SuperBuilder`, `@*ArgsConstructor`, `@ToString`, `@EqualsAndHashCode`, `@Slf4j`/`@Log*`, `@Getter`, `@Setter`, `@With`, … attached as a `lombok` stereotype with the detected annotations in `class.extras`.
+
+Smoke-tested against a real Spring Boot multi-module repo (`plaintext-app`): **426 classes parsed across 21 Maven modules**, with per-module stereotype histograms and a 200-line Mermaid bean graph that groups beans by module and colours them by stereotype.
 
 ## Build the MCP server (Ubuntu / Debian)
 
@@ -122,12 +130,17 @@ Add to your project's `.mcp.json` (or your global Claude Code config):
 
 Restart Claude Code. From a session, you can then ask things like:
 
-- *"Open the repo at `/home/me/codeplain/plaintext-app` and tell me how many services and controllers there are."*
+- *"Open the repo at `/home/me/codeplain/plaintext-app` and tell me how many services and controllers there are per module."*
+- *"Find any class containing `Auszahl` and outline the most relevant one."*
 - *"Show me the `UserService` class — highlight lines 80-95."*
 - *"Which files changed since HEAD~5? Group them by module."*
 - *"Render the bean graph as a Mermaid diagram."*
 
 The agent will pick the right tool calls from the list above.
+
+### Pre-built binary
+
+When a `v*.*.*` tag is pushed, GitHub Actions publishes a release with `plaintext-ide-mcp` binaries for **Linux x86_64**, **macOS arm64** and **macOS x86_64** (each as a `.tar.gz` plus a `.sha256`). Until the first tag is cut, build from source as shown above.
 
 ## Tests / development
 

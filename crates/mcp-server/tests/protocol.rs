@@ -151,6 +151,62 @@ fn list_classes_filters_by_stereotype() {
 }
 
 #[test]
+fn find_class_returns_matches() {
+    let tmp = TempRepo::create_with_spring_service();
+    let mut s = Server::spawn();
+    let path = tmp.root.to_string_lossy().into_owned();
+    s.call(&format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"open_repo","arguments":{{"path":"{path}"}}}}}}"#
+    ));
+    let resp = s.call(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"find_class","arguments":{"query":"user"}}}"#,
+    );
+    let arr: serde_json::Value =
+        serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let arr = arr.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["fqn"], "demo.UserService");
+}
+
+#[test]
+fn class_outline_returns_methods_and_fields() {
+    let tmp = TempRepo::create_with_class_outline();
+    let mut s = Server::spawn();
+    let path = tmp.root.to_string_lossy().into_owned();
+    s.call(&format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"open_repo","arguments":{{"path":"{path}"}}}}}}"#
+    ));
+    let resp = s.call(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"class_outline","arguments":{"fqn":"demo.Sample"}}}"#,
+    );
+    let outline: serde_json::Value =
+        serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(outline["fqn"], "demo.Sample");
+    let methods = outline["methods"].as_array().unwrap();
+    assert!(methods.iter().any(|m| m["name"] == "doIt"));
+    let fields = outline["fields"].as_array().unwrap();
+    assert!(fields.iter().any(|f| f["name"] == "counter"));
+}
+
+#[test]
+fn module_summary_includes_stereotype_counts() {
+    let tmp = TempRepo::create_with_spring_service();
+    let mut s = Server::spawn();
+    let path = tmp.root.to_string_lossy().into_owned();
+    s.call(&format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"open_repo","arguments":{{"path":"{path}"}}}}}}"#
+    ));
+    let resp = s.call(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"module_summary"}}"#,
+    );
+    let modules: serde_json::Value =
+        serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let modules = modules.as_array().unwrap();
+    assert_eq!(modules.len(), 1);
+    assert!(modules[0]["stereotypes"]["service"].as_u64().unwrap() >= 1);
+}
+
+#[test]
 fn show_diagram_bean_graph_returns_mermaid() {
     let tmp = TempRepo::create_with_spring_service();
     let mut s = Server::spawn();
@@ -202,6 +258,21 @@ impl TempRepo {
         std::fs::write(
             root.join("Plain.java"),
             "package demo;\npublic class Plain {}\n",
+        )
+        .unwrap();
+        Self { root }
+    }
+
+    fn create_with_class_outline() -> Self {
+        let root = std::env::temp_dir().join(format!(
+            "plaintext-ide-it-{}-{}",
+            std::process::id(),
+            uniq()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Sample.java"),
+            "package demo;\npublic class Sample {\n    private int counter;\n    public void doIt() {}\n}\n",
         )
         .unwrap();
         Self { root }
