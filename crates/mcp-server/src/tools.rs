@@ -4,8 +4,8 @@
 
 //! Tool definitions and `tools/call` dispatch.
 
-use plaintext_ide_core::git;
-use plaintext_ide_plugin_api::FrameworkPlugin;
+use plaintext_ide_core::{diagram, git};
+use plaintext_ide_framework_spring::SpringPlugin;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
@@ -333,9 +333,10 @@ async fn show_diagram(state: &Mutex<ServerState>, args: Value) -> DispatchResult
     let args: DiagramArgs = serde_json::from_value(args)
         .map_err(|e| DispatchError::invalid_params(format!("show_diagram: {e}")))?;
     let state = state.lock().await;
+    let spring = SpringPlugin::new();
     with_repo(&state, |repo| match args.kind.as_str() {
-        "bean-graph" => Ok(text_result(render_bean_graph(repo))),
-        "package-tree" => Ok(text_result(render_package_tree(repo))),
+        "bean-graph" => Ok(text_result(diagram::render_bean_graph(repo, &spring))),
+        "package-tree" => Ok(text_result(diagram::render_package_tree(repo))),
         other => Err(DispatchError::invalid_params(format!(
             "unknown diagram: {other}"
         ))),
@@ -477,74 +478,11 @@ fn text_result(text: impl Into<String>) -> Value {
     json!({ "content": [{ "type": "text", "text": text.into() }] })
 }
 
-/// Render the bean graph as a Mermaid `flowchart` for the active framework plugin.
-fn render_bean_graph(repo: &plaintext_ide_core::Repository) -> String {
-    use std::collections::BTreeSet;
-    use std::fmt::Write as _;
-
-    use plaintext_ide_framework_spring::SpringPlugin;
-
-    let spring = SpringPlugin::new();
-    let mut out = String::from("flowchart LR\n");
-    let mut nodes: BTreeSet<String> = BTreeSet::new();
-    for module in repo.modules.values() {
-        for rel in spring.relations(module) {
-            nodes.insert(rel.from.clone());
-            nodes.insert(rel.to.clone());
-            let _ = writeln!(out, "    {}-->{}", escape_id(&rel.from), escape_id(&rel.to));
-        }
-    }
-    for n in &nodes {
-        let _ = writeln!(out, "    {}[\"{}\"]", escape_id(n), n);
-    }
-    if out == "flowchart LR\n" {
-        out.push_str("    empty[(no beans detected)]\n");
-    }
-    out
-}
-
-fn render_package_tree(repo: &plaintext_ide_core::Repository) -> String {
-    use std::collections::BTreeMap;
-    use std::fmt::Write as _;
-
-    let mut tree: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for module in repo.modules.values() {
-        for class in module.classes.values() {
-            let pkg = class
-                .fqn
-                .rsplit_once('.')
-                .map_or(String::new(), |(p, _)| p.to_owned());
-            tree.entry(pkg).or_default().push(class.name.clone());
-        }
-    }
-    let mut out = String::from("graph TD\n");
-    for (pkg, classes) in tree {
-        let pkg_id = if pkg.is_empty() {
-            "<default>".into()
-        } else {
-            pkg.clone()
-        };
-        let pkg_node = escape_id(&pkg_id);
-        let _ = writeln!(out, "    {pkg_node}[\"{pkg_id}\"]");
-        for c in classes {
-            let leaf = escape_id(&format!("{pkg_id}::{c}"));
-            let _ = writeln!(out, "    {leaf}[\"{c}\"]");
-            let _ = writeln!(out, "    {pkg_node}-->{leaf}");
-        }
-    }
-    out
-}
-
+#[cfg(test)]
 fn escape_id(raw: &str) -> String {
-    let mut s = String::with_capacity(raw.len());
-    for ch in raw.chars() {
-        if ch.is_ascii_alphanumeric() {
-            s.push(ch);
-        } else {
-            s.push('_');
-        }
-    }
-    s
+    raw.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
 }
 
 #[cfg(test)]

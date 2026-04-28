@@ -12,6 +12,7 @@
 
 #![warn(missing_docs)]
 
+pub mod diagram;
 pub mod engine;
 pub mod git;
 pub mod maven;
