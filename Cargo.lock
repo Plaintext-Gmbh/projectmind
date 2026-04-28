@@ -2873,6 +2873,7 @@ version = "0.1.0"
 dependencies = [
  "parking_lot",
  "plaintext-ide-core",
+ "plaintext-ide-framework-lombok",
  "plaintext-ide-framework-spring",
  "plaintext-ide-lang-java",
  "plaintext-ide-plugin-api",
@@ -2902,6 +2903,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "plaintext-ide-framework-lombok"
+version = "0.1.0"
+dependencies = [
+ "plaintext-ide-plugin-api",
+ "serde_json",
+]
+
+[[package]]
 name = "plaintext-ide-framework-spring"
 version = "0.1.0"
 dependencies = [
@@ -2926,6 +2935,7 @@ dependencies = [
  "anyhow",
  "clap",
  "plaintext-ide-core",
+ "plaintext-ide-framework-lombok",
  "plaintext-ide-framework-spring",
  "plaintext-ide-lang-java",
  "plaintext-ide-plugin-api",

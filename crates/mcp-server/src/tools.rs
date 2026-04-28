@@ -78,6 +78,27 @@ fn diagram_schema() -> Value {
     })
 }
 
+fn find_class_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "query": { "type": "string", "description": "Case-insensitive substring of the simple or fully-qualified name" },
+            "limit": { "type": "integer", "minimum": 1, "default": 25 }
+        },
+        "required": ["query"]
+    })
+}
+
+fn class_outline_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "fqn": { "type": "string", "description": "Fully-qualified class name" }
+        },
+        "required": ["fqn"]
+    })
+}
+
 /// Tool registry — also serves as the response of `tools/list`.
 pub(crate) fn list() -> Value {
     json!({
@@ -118,6 +139,21 @@ pub(crate) fn list() -> Value {
                 "inputSchema": diagram_schema()
             },
             {
+                "name": "find_class",
+                "description": "Search classes by case-insensitive name substring (simple or FQN).",
+                "inputSchema": find_class_schema()
+            },
+            {
+                "name": "class_outline",
+                "description": "Return the outline of a class (methods, fields, annotations) without source.",
+                "inputSchema": class_outline_schema()
+            },
+            {
+                "name": "module_summary",
+                "description": "Per-module summary (classes, stereotype counts).",
+                "inputSchema": no_args_schema()
+            },
+            {
                 "name": "plugin_info",
                 "description": "List active plugins (languages and frameworks).",
                 "inputSchema": no_args_schema()
@@ -138,6 +174,9 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "list_changes_since" => list_changes_since(state, parsed.arguments).await,
         "show_diff" => show_diff(state, parsed.arguments).await,
         "show_diagram" => show_diagram(state, parsed.arguments).await,
+        "find_class" => find_class(state, parsed.arguments).await,
+        "class_outline" => class_outline(state, parsed.arguments).await,
+        "module_summary" => module_summary(state).await,
         "plugin_info" => plugin_info(state).await,
         other => Err(DispatchError::invalid_params(format!(
             "unknown tool: {other}"
@@ -300,6 +339,127 @@ async fn show_diagram(state: &Mutex<ServerState>, args: Value) -> DispatchResult
         other => Err(DispatchError::invalid_params(format!(
             "unknown diagram: {other}"
         ))),
+    })
+}
+
+#[derive(Deserialize)]
+struct FindClassArgs {
+    query: String,
+    #[serde(default = "default_find_limit")]
+    limit: u32,
+}
+
+fn default_find_limit() -> u32 {
+    25
+}
+
+async fn find_class(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
+    let args: FindClassArgs = serde_json::from_value(args)
+        .map_err(|e| DispatchError::invalid_params(format!("find_class: {e}")))?;
+    let needle = args.query.to_ascii_lowercase();
+    let limit = args.limit as usize;
+    let state = state.lock().await;
+    with_repo(&state, |repo| {
+        let mut out: Vec<Value> = Vec::new();
+        for module in repo.modules.values() {
+            for class in module.classes.values() {
+                let lower_fqn = class.fqn.to_ascii_lowercase();
+                let lower_name = class.name.to_ascii_lowercase();
+                if lower_fqn.contains(&needle) || lower_name.contains(&needle) {
+                    out.push(json!({
+                        "fqn": class.fqn,
+                        "name": class.name,
+                        "stereotypes": class.stereotypes,
+                        "file": class.file,
+                        "line_start": class.line_start,
+                    }));
+                    if out.len() >= limit {
+                        break;
+                    }
+                }
+            }
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(text_result(
+            serde_json::to_string_pretty(&out).unwrap_or_else(|_| "[]".into()),
+        ))
+    })
+}
+
+#[derive(Deserialize)]
+struct ClassOutlineArgs {
+    fqn: String,
+}
+
+async fn class_outline(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
+    let args: ClassOutlineArgs = serde_json::from_value(args)
+        .map_err(|e| DispatchError::invalid_params(format!("class_outline: {e}")))?;
+    let state = state.lock().await;
+    with_repo(&state, |repo| {
+        let (_module, class) = repo.find_class(&args.fqn).ok_or_else(|| {
+            DispatchError::invalid_params(format!("class not found: {}", args.fqn))
+        })?;
+        let body = json!({
+            "fqn": class.fqn,
+            "name": class.name,
+            "kind": class.kind,
+            "visibility": class.visibility,
+            "file": class.file,
+            "line_start": class.line_start,
+            "line_end": class.line_end,
+            "stereotypes": class.stereotypes,
+            "annotations": class.annotations.iter().map(|a| json!({
+                "name": a.name,
+                "raw_args": a.raw_args
+            })).collect::<Vec<_>>(),
+            "methods": class.methods.iter().map(|m| json!({
+                "name": m.name,
+                "visibility": m.visibility,
+                "is_static": m.is_static,
+                "line_start": m.line_start,
+                "line_end": m.line_end,
+                "annotations": m.annotations.iter().map(|a| a.name.clone()).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+            "fields": class.fields.iter().map(|f| json!({
+                "name": f.name,
+                "type": f.type_text,
+                "visibility": f.visibility,
+                "is_static": f.is_static,
+                "line": f.line,
+                "annotations": f.annotations.iter().map(|a| a.name.clone()).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+        });
+        Ok(text_result(
+            serde_json::to_string_pretty(&body).unwrap_or_default(),
+        ))
+    })
+}
+
+async fn module_summary(state: &Mutex<ServerState>) -> DispatchResult {
+    let state = state.lock().await;
+    with_repo(&state, |repo| {
+        let mut modules = Vec::new();
+        for module in repo.modules.values() {
+            let mut counts: std::collections::BTreeMap<String, u32> =
+                std::collections::BTreeMap::default();
+            for class in module.classes.values() {
+                for s in &class.stereotypes {
+                    *counts.entry(s.clone()).or_default() += 1;
+                }
+            }
+            modules.push(json!({
+                "id": module.id,
+                "name": module.name,
+                "root": module.root,
+                "classes": module.classes.len(),
+                "stereotypes": counts,
+            }));
+        }
+        Ok(text_result(
+            serde_json::to_string_pretty(&modules).unwrap_or_default(),
+        ))
     })
 }
 

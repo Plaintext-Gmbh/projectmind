@@ -1,0 +1,16 @@
+[package]
+name = "plaintext-ide-framework-lombok"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Project Lombok recognition for plaintext-ide."
+
+[lints]
+workspace = true
+
+[dependencies]
+plaintext-ide-plugin-api = { workspace = true }
+serde_json               = { workspace = true }

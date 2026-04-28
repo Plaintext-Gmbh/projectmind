@@ -5,6 +5,7 @@
 //! Method dispatch and shared server state.
 
 use plaintext_ide_core::{Engine, Repository};
+use plaintext_ide_framework_lombok::LombokPlugin;
 use plaintext_ide_framework_spring::SpringPlugin;
 use plaintext_ide_lang_java::JavaPlugin;
 use serde::Deserialize;
@@ -25,6 +26,7 @@ impl ServerState {
         let mut engine = Engine::new();
         engine.register_language(Box::new(JavaPlugin::new()));
         engine.register_framework(Box::new(SpringPlugin::new()));
+        engine.register_framework(Box::new(LombokPlugin::new()));
         Self { engine, repo: None }
     }
 }
