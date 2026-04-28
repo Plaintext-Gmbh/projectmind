@@ -1,0 +1,24 @@
+[package]
+name = "plaintext-ide-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Core engine for plaintext-ide: repo loading, plugin registry, pipeline."
+
+[lints]
+workspace = true
+
+[dependencies]
+plaintext-ide-plugin-api = { workspace = true }
+
+anyhow      = { workspace = true }
+thiserror   = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+tracing     = { workspace = true }
+ignore      = { workspace = true }
+walkdir     = { workspace = true }
+git2        = { workspace = true }

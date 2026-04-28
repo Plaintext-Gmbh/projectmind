@@ -1,7 +1,31 @@
-target/
-.idea/
+# Rust
+/target/
+/**/target/
 *.iml
+.idea/
 .vscode/
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Frontend
+node_modules/
+dist/
+dist-ssr/
+.svelte-kit/
+*.local
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Logs
 *.log
+
+# Editor
 *.swp
+*.swo
+
+# plaintext-ide runtime
+.plaintext-ide/cache/

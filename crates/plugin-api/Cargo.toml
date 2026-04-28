@@ -1,0 +1,17 @@
+[package]
+name = "plaintext-ide-plugin-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Public plugin API for plaintext-ide: language, framework, and visualizer traits."
+
+[lints]
+workspace = true
+
+[dependencies]
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
