@@ -399,27 +399,66 @@
     // viewer pane shares the window with the sidebar, and we don't want
     // shift-scrolling on the file list to zoom the doc.
     if (!(ev.target instanceof Node) || !scroller.contains(ev.target)) return;
+    const delta = Math.abs(ev.deltaY) >= Math.abs(ev.deltaX) ? ev.deltaY : ev.deltaX;
+    if (delta === 0) return;
     ev.preventDefault();
-    if (ev.deltaY < 0) zoomIn();
-    else if (ev.deltaY > 0) zoomOut();
+    if (delta < 0) zoomIn();
+    else zoomOut();
   }
 
   function onKey(ev: KeyboardEvent) {
     // Only intercept when this view is on screen.
     if (!scroller || !scroller.isConnected) return;
+
+    // Don't hijack arrows when the user is typing in an input — the picker
+    // and the search bar both want their own arrow handling.
+    const tag = (ev.target as HTMLElement | null)?.tagName;
+    const inField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+
     const cmd = ev.metaKey || ev.ctrlKey;
-    if (!cmd) return;
-    // `=` and `+` share a key on most keyboards. `-` is Minus, `0` is Digit0.
-    if (ev.key === '+' || ev.key === '=' || ev.code === 'Equal') {
-      ev.preventDefault();
-      zoomIn();
-    } else if (ev.key === '-' || ev.code === 'Minus') {
-      ev.preventDefault();
-      zoomOut();
-    } else if (ev.key === '0' || ev.code === 'Digit0') {
-      ev.preventDefault();
-      zoomReset();
+    if (cmd) {
+      // `=` and `+` share a key on most keyboards. `-` is Minus, `0` is Digit0.
+      if (ev.key === '+' || ev.key === '=' || ev.code === 'Equal') {
+        ev.preventDefault();
+        zoomIn();
+      } else if (ev.key === '-' || ev.code === 'Minus') {
+        ev.preventDefault();
+        zoomOut();
+      } else if (ev.key === '0' || ev.code === 'Digit0') {
+        ev.preventDefault();
+        zoomReset();
+      }
+      return;
     }
+
+    // Arrow up / down navigate the TOC: jump to the previous / next heading.
+    if (!inField && !pickerOpen && toc.length > 0) {
+      if (ev.key === 'ArrowDown') {
+        ev.preventDefault();
+        navigateToc(1);
+      } else if (ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        navigateToc(-1);
+      }
+    }
+  }
+
+  /// Move the active TOC entry by `delta` (-1 = previous, +1 = next) and
+  /// scroll to it. With no entry yet active, the first ArrowDown lands on
+  /// the first heading; the first ArrowUp lands on the last.
+  function navigateToc(delta: 1 | -1) {
+    const idx = activeHeadingId
+      ? toc.findIndex((t) => t.id === activeHeadingId)
+      : -1;
+    let next: number;
+    if (idx === -1) {
+      next = delta === 1 ? 0 : toc.length - 1;
+    } else {
+      next = Math.min(toc.length - 1, Math.max(0, idx + delta));
+    }
+    const target = toc[next];
+    if (!target) return;
+    onTocClick(target.id);
   }
 
   onMount(() => {
