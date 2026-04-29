@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+# Local build & release driver for plaintext-ide.
+#
+# This is a Rust + Tauri project (not Java/Maven), so the deploy-to-NAS half of
+# the plaintext-scripts numeric DSL doesn't apply. The numbers we DO support
+# follow the same convention used in the other plaintext-* projects:
+#
+#   ./build 0          dev mode — launches the Tauri shell with hot-reload
+#   ./build 1          full local build (cargo workspace + Tauri bundle)
+#   ./build 2          MAJOR release (X.0.0): bump versions, tag, push
+#   ./build 3          MINOR release (x.X.0): bump versions, tag, push
+#   ./build 4          PATCH release (x.x.X): bump versions, tag, push
+#   ./build 7          run all CI checks locally (fmt + clippy + tests)
+#   ./build mcp        release-build only the MCP server binary
+#   ./build h | help   show this help
+#
+# Numbers 5/6/56 (deploy DEV / PROD on the NAS) are intentionally absent —
+# plaintext-ide is a desktop app released as binaries via GitHub Actions when
+# you push a tag. Pushing a v* tag automatically triggers .github/workflows/
+# release.yml and uploads Mac+Linux artefacts.
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT_DIR"
+
+CARGO_TOML="$ROOT_DIR/Cargo.toml"
+PKG_JSON="$ROOT_DIR/app/package.json"
+TAURI_CONF="$ROOT_DIR/app/src-tauri/tauri.conf.json"
+
+usage() {
+    # Print the leading comment block (everything from line 2 until the first
+    # non-comment line), stripping the leading `# ` prefix.
+    awk '
+        NR == 1 { next }
+        /^#/    { sub(/^#[[:space:]]?/, ""); print; next }
+                { exit }
+    ' "$0"
+}
+
+# Read workspace.package.version from Cargo.toml.
+current_version() {
+    awk '
+        /^\[workspace\.package\]/ { in_block=1; next }
+        in_block && /^\[/         { in_block=0 }
+        in_block && /^version[[:space:]]*=/ {
+            gsub(/[",]/, "")
+            split($0, a, "=")
+            gsub(/[[:space:]]/, "", a[2])
+            print a[2]
+            exit
+        }
+    ' "$CARGO_TOML"
+}
+
+# Bump $1 (major|minor|patch) of the current version. Echoes the new version.
+bump_version() {
+    local part="$1"
+    local cur
+    cur="$(current_version)"
+    if [[ -z "$cur" ]]; then
+        echo "could not read current version from Cargo.toml" >&2
+        exit 1
+    fi
+    IFS='.' read -r maj min pat <<<"$cur"
+    case "$part" in
+        major) maj=$((maj + 1)); min=0; pat=0 ;;
+        minor) min=$((min + 1)); pat=0 ;;
+        patch) pat=$((pat + 1)) ;;
+        *) echo "bump_version: unknown part '$part'" >&2; exit 1 ;;
+    esac
+    echo "${maj}.${min}.${pat}"
+}
+
+# Replace the FIRST occurrence of `version = "X.Y.Z"` inside the
+# [workspace.package] block of Cargo.toml. Anchored so we don't touch
+# dependency versions in [workspace.dependencies].
+write_cargo_version() {
+    local new="$1"
+    python3 - "$CARGO_TOML" "$new" <<'PY'
+import re, sys, pathlib
+path = pathlib.Path(sys.argv[1])
+new  = sys.argv[2]
+text = path.read_text()
+# Find the [workspace.package] block.
+m = re.search(r'(\[workspace\.package\][^\[]*)', text, re.S)
+if not m:
+    sys.exit("workspace.package block not found")
+block = m.group(1)
+new_block, n = re.subn(r'^version\s*=\s*"[^"]+"',
+                       f'version = "{new}"',
+                       block, count=1, flags=re.M)
+if n != 1:
+    sys.exit("version line not found in [workspace.package]")
+path.write_text(text.replace(block, new_block))
+PY
+}
+
+# Update package.json "version" field — root key, not nested.
+write_pkg_json_version() {
+    local new="$1"
+    python3 - "$PKG_JSON" "$new" <<'PY'
+import json, sys, pathlib
+path = pathlib.Path(sys.argv[1])
+new  = sys.argv[2]
+data = json.loads(path.read_text())
+data['version'] = new
+# Preserve trailing newline + 2-space indent the file already uses.
+path.write_text(json.dumps(data, indent=2) + "\n")
+PY
+}
+
+# Update tauri.conf.json "version" — root key.
+write_tauri_conf_version() {
+    local new="$1"
+    python3 - "$TAURI_CONF" "$new" <<'PY'
+import json, sys, pathlib
+path = pathlib.Path(sys.argv[1])
+new  = sys.argv[2]
+data = json.loads(path.read_text())
+data['version'] = new
+path.write_text(json.dumps(data, indent=2) + "\n")
+PY
+}
+
+assert_clean_tree() {
+    if [[ -n "$(git status --porcelain)" ]]; then
+        echo "✗ working tree has uncommitted changes — commit or stash first" >&2
+        git status -s >&2
+        exit 1
+    fi
+}
+
+assert_on_main() {
+    local branch
+    branch="$(git rev-parse --abbrev-ref HEAD)"
+    if [[ "$branch" != "main" && "$branch" != "master" ]]; then
+        echo "✗ not on main/master (current: $branch) — release from main only" >&2
+        exit 1
+    fi
+}
+
+cmd_dev() {
+    echo "→ launching Tauri dev shell"
+    cd "$ROOT_DIR/app"
+    if [[ ! -d node_modules ]]; then
+        echo "→ installing npm deps (first run)"
+        npm install
+    fi
+    exec npm run tauri dev
+}
+
+cmd_build() {
+    echo "→ cargo build --workspace"
+    cargo build --workspace
+    echo "→ tauri build (release bundle)"
+    cd "$ROOT_DIR/app"
+    if [[ ! -d node_modules ]]; then
+        npm install
+    fi
+    npm run tauri build
+}
+
+cmd_mcp_release() {
+    echo "→ release-build MCP server"
+    cargo build --release --bin plaintext-ide-mcp
+    echo "✓ binary at target/release/plaintext-ide-mcp"
+}
+
+cmd_ci() {
+    "$ROOT_DIR/scripts/ci.sh" all
+}
+
+cmd_release() {
+    local part="$1"
+    assert_clean_tree
+    assert_on_main
+
+    local cur new
+    cur="$(current_version)"
+    new="$(bump_version "$part")"
+    echo "→ ${part} release: ${cur} → ${new}"
+
+    write_cargo_version "$new"
+    write_pkg_json_version "$new"
+    write_tauri_conf_version "$new"
+
+    # Refresh Cargo.lock so the bumped workspace version lands there too.
+    cargo update --workspace --offline >/dev/null 2>&1 || cargo update --workspace
+
+    # Sanity: tree must compile after the bump before we tag.
+    cargo check --workspace
+
+    git add Cargo.toml Cargo.lock "$PKG_JSON" "$TAURI_CONF"
+    git commit -m "chore(release): v${new}"
+    git tag -a "v${new}" -m "v${new}"
+    git push origin HEAD
+    git push origin "v${new}"
+    echo "✓ released v${new} — GitHub Actions will publish binaries shortly"
+}
+
+case "${1:-help}" in
+    0)             cmd_dev ;;
+    1)             cmd_build ;;
+    2)             cmd_release major ;;
+    3)             cmd_release minor ;;
+    4)             cmd_release patch ;;
+    7)             cmd_ci ;;
+    mcp)           cmd_mcp_release ;;
+    h|help|-h|--help) usage ;;
+    *)
+        echo "unknown command: $1" >&2
+        usage
+        exit 2
+        ;;
+esac
