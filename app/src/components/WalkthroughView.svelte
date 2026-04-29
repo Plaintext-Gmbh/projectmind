@@ -9,15 +9,15 @@
     ackWalkthrough,
     requestMoreWalkthrough,
     setWalkthroughStep,
+    endWalkthrough,
   } from '../lib/api';
   import type {
     Walkthrough,
     WalkthroughStep,
-    WalkthroughTarget,
     LineRange,
     ClassEntry,
   } from '../lib/api';
-  import { errorMessage } from '../lib/store';
+  import { errorMessage, viewMode, walkthroughCursor } from '../lib/store';
   import ClassViewer from './ClassViewer.svelte';
   import FileView from './FileView.svelte';
   import DiffView from './DiffView.svelte';
@@ -26,7 +26,9 @@
   export let cursorStep: number;
   export let nonce: number = 0;
 
+  // ----- Component state ----------------------------------------------------
   let body: Walkthrough | null = null;
+  let bodyLoading = true;
   let lastLoadedId: string | null = null;
   let lastNonce = -1;
 
@@ -40,35 +42,49 @@
   let targetLoading = false;
   let targetError: string | null = null;
 
+  // UI flow state.
   let feedbackPrompt = false;
   let feedbackText = '';
   let feedbackSubmitting = false;
-  let lastFeedbackKind: 'understood' | 'more_detail' | null = null;
+  /// Set after the user submits "Bitte genauer beschreiben" — the UI
+  /// shows a waiting card until either a new tour arrives (auto-clear) or
+  /// the user opts to keep going manually.
+  let waitingForFollowup = false;
+  /// Set after the user acks the LAST step — the UI shows a "Tour
+  /// abgeschlossen" card with an explicit "Schliessen" button.
+  let tourFinished = false;
 
   $: void load(cursorId, cursorStep, nonce);
   $: step = body && body.steps[cursorStep] ? body.steps[cursorStep] : null;
   $: total = body?.steps.length ?? 0;
   $: progressPct = total === 0 ? 0 : Math.round(((cursorStep + 1) / total) * 100);
+  $: isLastStep = body !== null && cursorStep === body.steps.length - 1;
 
   async function load(id: string, _step: number, n: number) {
+    // Same intent — just (re)load the target if needed.
     if (n === lastNonce && id === lastLoadedId && body !== null) {
-      // Same intent, no body refresh needed — just reload the target.
       await loadTargetForCurrentStep();
       return;
     }
-    lastNonce = n;
-    if (id !== lastLoadedId || body === null) {
-      try {
-        body = await currentWalkthrough();
-        lastLoadedId = body?.id ?? null;
-      } catch (err) {
-        errorMessage.set(String(err));
-        body = null;
-      }
+    // New tour id detected — reset the "waiting / finished" UI flags.
+    if (id !== lastLoadedId) {
+      waitingForFollowup = false;
+      tourFinished = false;
+      feedbackPrompt = false;
+      feedbackText = '';
     }
-    feedbackPrompt = false;
-    feedbackText = '';
-    lastFeedbackKind = null;
+    lastNonce = n;
+    bodyLoading = true;
+    try {
+      const fresh = await currentWalkthrough();
+      body = fresh;
+      lastLoadedId = body?.id ?? null;
+    } catch (err) {
+      errorMessage.set(String(err));
+      body = null;
+    } finally {
+      bodyLoading = false;
+    }
     await loadTargetForCurrentStep();
   }
 
@@ -90,21 +106,16 @@
           await loadClass(t.fqn);
           break;
         case 'file':
-          // Markdown is rendered by FileView; for non-markdown we fetch the
-          // text ourselves so we can pass `highlight` into ClassViewer's
-          // wt-highlight rendering.
-          if (isMarkdown(t.path)) {
-            // FileView handles its own loading.
-          } else {
+          if (!isMarkdown(t.path)) {
             plainSource = await readFileText(t.path);
             plainHighlight = t.highlight ?? [];
           }
+          // Markdown: FileView handles its own loading.
           break;
         case 'diff':
           diffText = await showDiff(t.reference, t.to ?? undefined);
           break;
         case 'note':
-          // Nothing to load.
           break;
       }
     } catch (err) {
@@ -164,9 +175,9 @@
     feedbackSubmitting = true;
     try {
       await ackWalkthrough(body.id, cursorStep);
-      lastFeedbackKind = 'understood';
-      // Auto-advance unless we're already at the end.
-      if (cursorStep < body.steps.length - 1) {
+      if (isLastStep) {
+        tourFinished = true;
+      } else {
         await goTo(cursorStep + 1);
       }
     } catch (err) {
@@ -191,9 +202,9 @@
         cursorStep,
         feedbackText.trim() ? feedbackText.trim() : null,
       );
-      lastFeedbackKind = 'more_detail';
       feedbackPrompt = false;
       feedbackText = '';
+      waitingForFollowup = true;
     } catch (err) {
       errorMessage.set(String(err));
     } finally {
@@ -206,12 +217,48 @@
     feedbackText = '';
   }
 
-  // Render markdown narration to HTML once per step.
-  $: narrationHtml = step?.narration ? marked.parse(step.narration, { gfm: true, breaks: false }) : '';
+  /// User decides not to wait — close the waiting card and resume on the
+  /// current step. The feedback event is still in the log, so the LLM
+  /// can react later.
+  function dismissWaiting() {
+    waitingForFollowup = false;
+  }
 
-  // Keyboard shortcuts: ←/→ to navigate, Enter on focused buttons handled by browser.
+  /// Close the tour. Removes body + feedback, returns the GUI to the
+  /// empty welcome screen.
+  async function closeTour() {
+    try {
+      await endWalkthrough();
+      walkthroughCursor.set(null);
+      viewMode.set('classes');
+    } catch (err) {
+      errorMessage.set(String(err));
+    }
+  }
+
+  // CLI hand-off — phrase the user can say to wake the LLM up.
+  const cliHint = 'plaintext-ide walkthrough_feedback prüfen und Folge-Tour starten';
+  let cliCopied = false;
+  async function copyCli() {
+    try {
+      await navigator.clipboard.writeText(cliHint);
+      cliCopied = true;
+      setTimeout(() => (cliCopied = false), 1500);
+    } catch {
+      // Clipboard unavailable in some Tauri configs — just show "copied" anyway.
+      cliCopied = true;
+      setTimeout(() => (cliCopied = false), 1500);
+    }
+  }
+
+  // Render markdown narration to HTML once per step.
+  $: narrationHtml = step?.narration
+    ? marked.parse(step.narration, { gfm: true, breaks: false })
+    : '';
+
+  // Keyboard shortcuts: ←/→ to navigate.
   function onKey(ev: KeyboardEvent) {
-    if (feedbackPrompt) return;
+    if (feedbackPrompt || waitingForFollowup || tourFinished) return;
     const tag = (ev.target as HTMLElement | null)?.tagName?.toLowerCase();
     if (tag === 'input' || tag === 'textarea') return;
     if (ev.key === 'ArrowRight') {
@@ -229,11 +276,65 @@
   });
 </script>
 
-{#if !body}
-  <section class="empty">
-    <div>
-      <h2>No active walk-through</h2>
-      <p>Ask the LLM to start one via <code>walkthrough_start</code>.</p>
+{#if bodyLoading && body === null}
+  <section class="state-card">
+    <div class="card">
+      <div class="spinner"></div>
+      <h2>Lade Tour…</h2>
+      <p>Hole die Schritte vom MCP-Server.</p>
+    </div>
+  </section>
+{:else if !body}
+  <section class="state-card">
+    <div class="card">
+      <h2>Keine aktive Tour</h2>
+      <p>Bitte deine KI, eine Tour zu starten via <code>walkthrough_start</code>.</p>
+    </div>
+  </section>
+{:else if waitingForFollowup}
+  <section class="state-card">
+    <div class="card waiting">
+      <div class="spinner"></div>
+      <h2>Die KI bereitet eine ergänzende Erklärung vor</h2>
+      <p>
+        Deine Rückfrage ist im Feedback-Log. Geh zurück zu deiner KI-CLI und sag z.B.:
+      </p>
+      <div class="cli-hint">
+        <code>{cliHint}</code>
+        <button class="btn btn-ghost copy-btn" on:click={copyCli}>
+          {cliCopied ? '✓ kopiert' : 'kopieren'}
+        </button>
+      </div>
+      <p class="meta">
+        Sobald die KI <code>walkthrough_start</code> erneut ruft, springt diese Ansicht
+        automatisch in die Folge-Tour.
+      </p>
+      <div class="state-actions">
+        <button class="btn btn-secondary" on:click={dismissWaiting}>
+          Doch alleine weitermachen
+        </button>
+        <button class="btn btn-ghost" on:click={closeTour}>Tour beenden</button>
+      </div>
+    </div>
+  </section>
+{:else if tourFinished}
+  <section class="state-card">
+    <div class="card finished">
+      <div class="check">✓</div>
+      <h2>Tour abgeschlossen</h2>
+      <p><strong>{body.title}</strong> — {body.steps.length} Schritte durchgegangen.</p>
+      <div class="state-actions">
+        <button class="btn btn-primary big" on:click={closeTour}>Schliessen</button>
+        <button
+          class="btn btn-secondary"
+          on:click={() => {
+            tourFinished = false;
+            void goTo(0);
+          }}
+        >
+          Erneut durchgehen
+        </button>
+      </div>
     </div>
   </section>
 {:else}
@@ -279,7 +380,7 @@
     <main class="main">
       {#if step}
         <header class="step-head">
-          <div class="step-pos">Step {cursorStep + 1} of {total}</div>
+          <div class="step-pos">Step {cursorStep + 1} of {total}{isLastStep ? ' (letzter)' : ''}</div>
           <h1 class="step-h">{step.title}</h1>
           {#if step.target.kind !== 'note'}
             <div class="step-target-hint">
@@ -296,7 +397,7 @@
 
         <div class="target">
           {#if targetLoading}
-            <div class="loading">Loading…</div>
+            <div class="loading">Lade Inhalt…</div>
           {:else if targetError}
             <div class="error">⚠ {targetError}</div>
           {:else if step.target.kind === 'class' && classEntry && classMeta}
@@ -307,8 +408,8 @@
               highlightRanges={step.target.highlight ?? []}
             />
           {:else if step.target.kind === 'file' && isMarkdown(step.target.path)}
-            <FileView path={step.target.path} anchor={step.target.anchor ?? null} nonce={nonce} />
-          {:else if step.target.kind === 'file' && classEntry === null}
+            <FileView path={step.target.path} anchor={step.target.anchor ?? null} {nonce} />
+          {:else if step.target.kind === 'file'}
             <pre class="plain"><code>{#each plainSource.split('\n') as line, i (i)}{@const lineNo = i + 1}<span
               class="line"
               class:wt-highlight={plainHighlight.some((r) => lineNo >= r.from && lineNo <= r.to)}
@@ -350,15 +451,19 @@
                 </button>
               </div>
             </div>
-          {:else if lastFeedbackKind === 'more_detail'}
-            <div class="feedback-confirm">
-              ✓ Rückmeldung gesendet — frag die KI in der CLI: <em>„nochmal erklären"</em>.
-            </div>
           {:else}
-            <button class="btn btn-primary big" on:click={understood} disabled={feedbackSubmitting}>
-              ✓ Verstanden
+            <button
+              class="btn btn-primary big"
+              on:click={understood}
+              disabled={feedbackSubmitting || bodyLoading}
+            >
+              {feedbackSubmitting ? '…' : isLastStep ? '✓ Verstanden — Tour beenden' : '✓ Verstanden'}
             </button>
-            <button class="btn btn-secondary big" on:click={askMore} disabled={feedbackSubmitting}>
+            <button
+              class="btn btn-secondary big"
+              on:click={askMore}
+              disabled={feedbackSubmitting || bodyLoading}
+            >
               ? Bitte genauer beschreiben
             </button>
           {/if}
@@ -369,19 +474,98 @@
 {/if}
 
 <style>
-  .empty {
+  /* ----- State cards (loading / waiting / finished) ---------------------- */
+  .state-card {
     display: flex;
     flex: 1;
     align-items: center;
     justify-content: center;
-    color: var(--fg-2);
-    text-align: center;
+    padding: 32px;
+    background: var(--bg-0);
   }
-  .empty h2 {
+  .card {
+    max-width: 560px;
+    text-align: center;
+    background: var(--bg-1);
+    border: 1px solid var(--bg-3);
+    border-radius: 10px;
+    padding: 36px 40px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  }
+  .card h2 {
     margin: 0 0 8px;
     color: var(--fg-0);
+    font-size: 20px;
+    font-weight: 600;
+  }
+  .card p {
+    color: var(--fg-1);
+    margin: 8px 0;
+    line-height: 1.55;
+  }
+  .card.waiting {
+    border-color: var(--accent-2);
+    background: color-mix(in srgb, var(--accent-2) 6%, var(--bg-1));
+  }
+  .card.finished {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-1));
+  }
+  .card .check {
+    font-size: 48px;
+    color: var(--accent);
+    line-height: 1;
+    margin-bottom: 8px;
+  }
+  .card .meta {
+    margin-top: 14px;
+    font-size: 12px;
+    color: var(--fg-2);
   }
 
+  .spinner {
+    width: 28px;
+    height: 28px;
+    border: 3px solid var(--bg-3);
+    border-top-color: var(--accent-2);
+    border-radius: 50%;
+    margin: 0 auto 16px;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .cli-hint {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 14px 0 4px;
+    padding: 10px 14px;
+    background: var(--bg-0);
+    border: 1px solid var(--bg-3);
+    border-radius: 6px;
+    text-align: left;
+  }
+  .cli-hint code {
+    flex: 1;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--fg-0);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .state-actions {
+    margin-top: 22px;
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  /* ----- Main layout ----------------------------------------------------- */
   .root {
     display: grid;
     grid-template-columns: 280px 1fr;
@@ -389,7 +573,6 @@
     overflow: hidden;
   }
 
-  /* Sidebar -------------------------------------------------------------- */
   .sidebar {
     display: flex;
     flex-direction: column;
@@ -503,7 +686,6 @@
     cursor: not-allowed;
   }
 
-  /* Main ----------------------------------------------------------------- */
   .main {
     display: flex;
     flex-direction: column;
@@ -592,7 +774,6 @@
     padding-left: 9px;
   }
 
-  /* Narration ------------------------------------------------------------ */
   .narration {
     background: color-mix(in srgb, var(--accent-2) 8%, var(--bg-1));
     border-bottom: 1px solid var(--bg-3);
@@ -642,7 +823,6 @@
   .narration-body :global(ul),
   .narration-body :global(ol) { padding-left: 1.5em; }
 
-  /* Actions -------------------------------------------------------------- */
   .actions {
     display: flex;
     gap: 12px;
@@ -653,6 +833,7 @@
     flex-shrink: 0;
   }
 
+  /* ----- Buttons --------------------------------------------------------- */
   .btn {
     border: 1px solid transparent;
     border-radius: 6px;
@@ -688,6 +869,20 @@
     background: var(--bg-3);
     border-color: var(--fg-2);
   }
+  .btn-ghost {
+    background: transparent;
+    color: var(--fg-2);
+    border-color: transparent;
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--bg-2);
+    color: var(--fg-0);
+  }
+  .copy-btn {
+    flex-shrink: 0;
+  }
 
   .feedback-form {
     flex: 1;
@@ -717,15 +912,5 @@
     display: flex;
     gap: 8px;
     justify-content: flex-end;
-  }
-
-  .feedback-confirm {
-    color: var(--accent);
-    font-size: 13px;
-    padding: 6px 0;
-  }
-  .feedback-confirm em {
-    color: var(--fg-0);
-    font-style: italic;
   }
 </style>

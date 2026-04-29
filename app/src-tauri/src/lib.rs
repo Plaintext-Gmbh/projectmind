@@ -317,6 +317,23 @@ fn walkthrough_request_more(
     wt::append_feedback(event).map_err(|e| e.to_string())
 }
 
+/// End the active tour from the GUI side. Removes body + feedback log
+/// and resets the view intent so the user lands back on the empty
+/// welcome screen. The LLM can detect that no tour is active anymore
+/// via `current_state`.
+#[tauri::command]
+fn end_walkthrough() -> Result<(), String> {
+    wt::clear().map_err(|e| e.to_string())?;
+    let prev = state::read().ok().flatten().unwrap_or_default();
+    let payload = UiState {
+        repo_root: prev.repo_root,
+        view: ViewIntent::default(),
+        ..UiState::default()
+    };
+    state::write(payload).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Move the active tour's pointer (manual sidebar click). Publishes a
 /// new UiState so the LLM can observe where the user navigated to.
 #[tauri::command]
@@ -457,6 +474,7 @@ pub fn run() {
             walkthrough_ack,
             walkthrough_request_more,
             set_walkthrough_step,
+            end_walkthrough,
         ])
         .setup(|app| {
             spawn_state_watcher(app.handle().clone());

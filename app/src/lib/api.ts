@@ -140,6 +140,10 @@ export async function setWalkthroughStep(id: string, step: number): Promise<void
   return invoke<void>('set_walkthrough_step', { id, step });
 }
 
+export async function endWalkthrough(): Promise<void> {
+  return invoke<void>('end_walkthrough');
+}
+
 export interface UiState {
   version: number;
   repo_root: string | null;
