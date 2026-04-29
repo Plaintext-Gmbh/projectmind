@@ -4,6 +4,9 @@
 
 //! Tool definitions and `tools/call` dispatch.
 
+use std::path::PathBuf;
+
+use plaintext_ide_core::state::{self, UiState, ViewIntent};
 use plaintext_ide_core::{diagram, git};
 use plaintext_ide_framework_spring::SpringPlugin;
 use plaintext_ide_plugin_api::FrameworkPlugin;
@@ -91,12 +94,26 @@ fn find_class_schema() -> Value {
 }
 
 fn class_outline_schema() -> Value {
+    fqn_schema()
+}
+
+fn fqn_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
             "fqn": { "type": "string", "description": "Fully-qualified class name" }
         },
         "required": ["fqn"]
+    })
+}
+
+fn file_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "path": { "type": "string", "description": "Absolute path to the file" }
+        },
+        "required": ["path"]
     })
 }
 
@@ -163,6 +180,26 @@ pub(crate) fn list() -> Value {
                 "name": "plugin_info",
                 "description": "List active plugins (languages and frameworks).",
                 "inputSchema": no_args_schema()
+            },
+            {
+                "name": "view_class",
+                "description": "Tell the GUI to switch to the classes view and open the given class. MCP-driven navigation; takes precedence over manual GUI navigation.",
+                "inputSchema": fqn_schema()
+            },
+            {
+                "name": "view_diff",
+                "description": "Tell the GUI to switch to the diff view between two git refs (or `ref` vs working tree).",
+                "inputSchema": ref_schema()
+            },
+            {
+                "name": "view_file",
+                "description": "Tell the GUI to open an arbitrary file. Markdown is rendered (mermaid blocks + images embedded); other extensions show as plain source.",
+                "inputSchema": file_schema()
+            },
+            {
+                "name": "view_diagram",
+                "description": "Tell the GUI to switch to the diagram view (`bean-graph` or `package-tree`).",
+                "inputSchema": diagram_schema()
             }
         ]
     })
@@ -185,6 +222,10 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "module_summary" => module_summary(state).await,
         "relations" => relations(state).await,
         "plugin_info" => plugin_info(state).await,
+        "view_class" => view_class(state, parsed.arguments).await,
+        "view_diff" => view_diff(parsed.arguments),
+        "view_file" => view_file(parsed.arguments),
+        "view_diagram" => view_diagram(parsed.arguments),
         other => Err(DispatchError::invalid_params(format!(
             "unknown tool: {other}"
         ))),
@@ -200,18 +241,28 @@ async fn open_repo(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
     let args: OpenRepoArgs = serde_json::from_value(args)
         .map_err(|e| DispatchError::invalid_params(format!("open_repo: {e}")))?;
 
-    let mut state = state.lock().await;
-    let repo = state
+    let mut server_state = state.lock().await;
+    let repo = server_state
         .engine
         .open_repo(std::path::Path::new(&args.path))
         .map_err(|e| DispatchError::internal(format!("open_repo failed: {e}")))?;
 
+    let root = repo.root.clone();
     let summary = json!({
         "root": repo.root,
         "modules": repo.modules.len(),
         "classes": repo.class_count(),
     });
-    state.repo = Some(repo);
+    server_state.repo = Some(repo);
+
+    // Tell the GUI to follow. Best-effort — if the statefile cannot be written
+    // (read-only home, etc.), MCP-only usage still works.
+    publish_state(UiState {
+        repo_root: Some(root),
+        view: ViewIntent::default(),
+        ..UiState::default()
+    });
+
     Ok(text_result(summary.to_string()))
 }
 
@@ -518,6 +569,121 @@ async fn plugin_info(state: &Mutex<ServerState>) -> DispatchResult {
 }
 
 /// Wrap a string into the MCP tool-result content array.
+// ----- view_* tools: drive the GUI via the shared state file ----------------
+
+#[derive(Deserialize)]
+struct ViewClassArgs {
+    fqn: String,
+}
+
+async fn view_class(server_state: &Mutex<ServerState>, args: Value) -> DispatchResult {
+    let args: ViewClassArgs = serde_json::from_value(args)
+        .map_err(|e| DispatchError::invalid_params(format!("view_class: {e}")))?;
+    // Best-effort: validate the class exists in the currently-open repo so we
+    // don't hand the GUI a dangling FQN. If no repo is open we still publish —
+    // the GUI may have a different repo loaded that does have it.
+    {
+        let server_state = server_state.lock().await;
+        if let Some(repo) = server_state.repo.as_ref() {
+            if repo.find_class(&args.fqn).is_none() {
+                return Err(DispatchError::invalid_params(format!(
+                    "class not found: {}",
+                    args.fqn
+                )));
+            }
+        }
+    }
+
+    let prev = state::read().ok().flatten().unwrap_or_default();
+    publish_state(UiState {
+        repo_root: prev.repo_root,
+        view: ViewIntent::Classes {
+            selected_fqn: Some(args.fqn.clone()),
+        },
+        ..UiState::default()
+    });
+    Ok(text_result(
+        json!({"ok": true, "fqn": args.fqn}).to_string(),
+    ))
+}
+
+fn view_diff(args: Value) -> DispatchResult {
+    let args: RefArgs = serde_json::from_value(args)
+        .map_err(|e| DispatchError::invalid_params(format!("view_diff: {e}")))?;
+    let prev = state::read().ok().flatten().unwrap_or_default();
+    publish_state(UiState {
+        repo_root: prev.repo_root,
+        view: ViewIntent::Diff {
+            reference: args.from_ref.clone(),
+            to: args.to.clone(),
+        },
+        ..UiState::default()
+    });
+    Ok(text_result(
+        json!({"ok": true, "ref": args.from_ref, "to": args.to}).to_string(),
+    ))
+}
+
+#[derive(Deserialize)]
+struct ViewFileArgs {
+    path: String,
+}
+
+fn view_file(args: Value) -> DispatchResult {
+    let args: ViewFileArgs = serde_json::from_value(args)
+        .map_err(|e| DispatchError::invalid_params(format!("view_file: {e}")))?;
+    let path = PathBuf::from(&args.path);
+    if !path.is_absolute() {
+        return Err(DispatchError::invalid_params(format!(
+            "view_file: path must be absolute: {}",
+            args.path
+        )));
+    }
+    let prev = state::read().ok().flatten().unwrap_or_default();
+    publish_state(UiState {
+        repo_root: prev.repo_root,
+        view: ViewIntent::File { path: path.clone() },
+        ..UiState::default()
+    });
+    Ok(text_result(json!({"ok": true, "path": path}).to_string()))
+}
+
+#[derive(Deserialize)]
+struct DiagramKindArgs {
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+fn view_diagram(args: Value) -> DispatchResult {
+    let args: DiagramKindArgs = serde_json::from_value(args)
+        .map_err(|e| DispatchError::invalid_params(format!("view_diagram: {e}")))?;
+    if args.kind != "bean-graph" && args.kind != "package-tree" {
+        return Err(DispatchError::invalid_params(format!(
+            "unknown diagram type: {}",
+            args.kind
+        )));
+    }
+    let prev = state::read().ok().flatten().unwrap_or_default();
+    publish_state(UiState {
+        repo_root: prev.repo_root,
+        view: ViewIntent::Diagram {
+            diagram_kind: args.kind.clone(),
+        },
+        ..UiState::default()
+    });
+    Ok(text_result(
+        json!({"ok": true, "type": args.kind}).to_string(),
+    ))
+}
+
+/// Best-effort statefile write. Failures are logged but never bubble up: the
+/// MCP server stays usable when there's no GUI / no writable cache directory.
+fn publish_state(state: UiState) {
+    if let Err(err) = plaintext_ide_core::state::write(state) {
+        tracing::warn!(error = %err, "failed to publish UI state");
+    }
+}
+
 fn text_result(text: impl Into<String>) -> Value {
     json!({ "content": [{ "type": "text", "text": text.into() }] })
 }
