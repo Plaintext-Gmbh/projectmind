@@ -131,22 +131,23 @@
             </button>
           {/each}
         </div>
-        <ul class="class-list">
+        <ul class="class-list" role="listbox" aria-label="Classes">
           {#each $filteredClasses as c (c.fqn)}
-            <li
-              class:selected={$selectedClass?.fqn === c.fqn}
-              on:click={() => handleSelect(c)}
-              on:keydown={(e) => e.key === 'Enter' && handleSelect(c)}
-              role="button"
-              tabindex="0"
-            >
-              <span class="class-name">{c.name}</span>
-              <span class="class-fqn">{c.fqn}</span>
-              <span class="stereotypes">
-                {#each c.stereotypes as s}
-                  <span class="badge {s}">{s}</span>
-                {/each}
-              </span>
+            <li role="option" aria-selected={$selectedClass?.fqn === c.fqn}>
+              <button
+                type="button"
+                class="class-row"
+                class:selected={$selectedClass?.fqn === c.fqn}
+                on:click={() => handleSelect(c)}
+              >
+                <span class="class-name">{c.name}</span>
+                <span class="class-fqn">{c.fqn}</span>
+                <span class="stereotypes">
+                  {#each c.stereotypes as s}
+                    <span class="badge {s}">{s}</span>
+                  {/each}
+                </span>
+              </button>
             </li>
           {/each}
         </ul>
@@ -344,22 +345,36 @@
   }
 
   .class-list li {
-    padding: 8px 12px;
     border-bottom: 1px solid var(--bg-2);
+  }
+
+  .class-row {
+    width: 100%;
+    padding: 8px 12px;
+    background: transparent;
+    border: 0;
+    border-left: 3px solid transparent;
+    color: inherit;
+    text-align: left;
     cursor: pointer;
     display: flex;
     flex-direction: column;
     gap: 2px;
+    font: inherit;
   }
 
-  .class-list li:hover {
+  .class-row:hover {
     background: var(--bg-2);
   }
 
-  .class-list li.selected {
+  .class-row:focus-visible {
+    outline: 2px solid var(--accent-2);
+    outline-offset: -2px;
+  }
+
+  .class-row.selected {
     background: color-mix(in srgb, var(--accent-2) 18%, var(--bg-1));
-    border-left: 3px solid var(--accent-2);
-    padding-left: 9px;
+    border-left-color: var(--accent-2);
   }
 
   .class-name {
