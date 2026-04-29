@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use projectmind_core::file_access;
+use projectmind_browser_host::{self as browser_host, BrowserHostConfig};
 use projectmind_core::state::{self, UiState, ViewIntent};
 use projectmind_core::walkthrough::{self as wt, Walkthrough, WalkthroughStep};
 use projectmind_core::{diagram, git, html};
@@ -203,6 +203,17 @@ fn file_schema() -> Value {
     })
 }
 
+fn open_browser_repo_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "path": { "type": "string", "description": "Absolute path to the repository root. Defaults to the currently-open repo or current statefile repo." },
+            "port": { "type": "integer", "minimum": 0, "maximum": 65535, "description": "Port to bind; 0 means choose a free port." },
+            "open_browser": { "type": "boolean", "default": true, "description": "Open the default browser on this machine after starting." }
+        }
+    })
+}
+
 /// Tool registry — also serves as the response of `tools/list`.
 #[allow(clippy::too_many_lines)]
 pub(crate) fn list() -> Value {
@@ -322,6 +333,21 @@ pub(crate) fn list() -> Value {
                 "name": "walkthrough_feedback",
                 "description": "Read user feedback events recorded against the active tour. Each event is one click on the GUI's Verstanden / Genauer-buttons. Useful when the LLM wants to react to the user (e.g. expand a step that was flagged with `more_detail`).",
                 "inputSchema": walkthrough_feedback_schema()
+            },
+            {
+                "name": "open_browser_repo",
+                "description": "Start the LAN browser host, open a repository, and return tokenized browser URLs. This binds to 0.0.0.0 and requires the returned random token for all API calls.",
+                "inputSchema": open_browser_repo_schema()
+            },
+            {
+                "name": "browser_status",
+                "description": "Return the running LAN browser host status, including tokenized URLs, or null if it has not been started.",
+                "inputSchema": no_args_schema()
+            },
+            {
+                "name": "stop_browser",
+                "description": "Forget the LAN browser host status for this MCP process. The listener exits when the process exits.",
+                "inputSchema": no_args_schema()
             }
         ]
     })
@@ -348,13 +374,16 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "list_html_snippets" => list_html_snippets(state).await,
         "view_class" => view_class(state, parsed.arguments).await,
         "view_diff" => view_diff(parsed.arguments),
-        "view_file" => view_file(state, parsed.arguments).await,
+        "view_file" => view_file(parsed.arguments),
         "view_diagram" => view_diagram(parsed.arguments),
         "walkthrough_start" => walkthrough_start(parsed.arguments),
         "walkthrough_append" => walkthrough_append(parsed.arguments),
         "walkthrough_set_step" => walkthrough_set_step(parsed.arguments),
         "walkthrough_clear" => walkthrough_clear_handler(),
         "walkthrough_feedback" => walkthrough_feedback(parsed.arguments),
+        "open_browser_repo" => open_browser_repo(state, parsed.arguments).await,
+        "browser_status" => browser_status(),
+        "stop_browser" => stop_browser(),
         other => Err(DispatchError::invalid_params(format!(
             "unknown tool: {other}"
         ))),
@@ -780,7 +809,7 @@ struct ViewFileArgs {
     anchor: Option<String>,
 }
 
-async fn view_file(server_state: &Mutex<ServerState>, args: Value) -> DispatchResult {
+fn view_file(args: Value) -> DispatchResult {
     let args: ViewFileArgs = serde_json::from_value(args)
         .map_err(|e| DispatchError::invalid_params(format!("view_file: {e}")))?;
     let path = PathBuf::from(&args.path);
@@ -791,20 +820,9 @@ async fn view_file(server_state: &Mutex<ServerState>, args: Value) -> DispatchRe
         )));
     }
     let prev = state::read().ok().flatten().unwrap_or_default();
-    let repo_root = {
-        let server_state = server_state.lock().await;
-        server_state
-            .repo
-            .as_ref()
-            .map(|repo| repo.root.clone())
-            .or_else(|| prev.repo_root.clone())
-            .ok_or_else(|| DispatchError::invalid_params("view_file: no repository open"))?
-    };
-    let path = file_access::canonical_file_in_repo(&repo_root, &path)
-        .map_err(|e| DispatchError::invalid_params(format!("view_file: {e}")))?;
     let anchor = args.anchor.clone();
     publish_state(UiState {
-        repo_root: Some(repo_root),
+        repo_root: prev.repo_root,
         view: ViewIntent::File {
             path: path.clone(),
             anchor: anchor.clone(),
@@ -993,6 +1011,95 @@ fn walkthrough_feedback(args: Value) -> DispatchResult {
         "events": events,
     });
     Ok(text_result(body.to_string()))
+}
+
+#[derive(Deserialize)]
+struct OpenBrowserRepoArgs {
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    port: Option<u16>,
+    #[serde(default = "default_open_browser")]
+    open_browser: bool,
+}
+
+fn default_open_browser() -> bool {
+    true
+}
+
+async fn open_browser_repo(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
+    let args: OpenBrowserRepoArgs = serde_json::from_value(args)
+        .map_err(|e| DispatchError::invalid_params(format!("open_browser_repo: {e}")))?;
+    let path = if let Some(path) = args.path {
+        PathBuf::from(path)
+    } else {
+        let guard = state.lock().await;
+        guard
+            .repo
+            .as_ref()
+            .map(|repo| repo.root.clone())
+            .or_else(|| state::read().ok().flatten().and_then(|s| s.repo_root))
+            .ok_or_else(|| {
+                DispatchError::invalid_params(
+                    "open_browser_repo: no path given and no repository is open",
+                )
+            })?
+    };
+    if !path.is_absolute() {
+        return Err(DispatchError::invalid_params(format!(
+            "open_browser_repo: path must be absolute: {}",
+            path.display()
+        )));
+    }
+
+    let asset_dir = locate_web_dist().map_err(|e| {
+        DispatchError::internal(format!(
+            "open_browser_repo: could not locate frontend dist: {e}"
+        ))
+    })?;
+    let status = browser_host::start(BrowserHostConfig {
+        repo_root: Some(path),
+        port: args.port.unwrap_or(0),
+        asset_dir,
+        open_browser: args.open_browser,
+    })
+    .map_err(|e| DispatchError::internal(format!("open_browser_repo: {e}")))?;
+    Ok(text_result(
+        serde_json::to_string_pretty(&status).unwrap_or_else(|_| "{}".into()),
+    ))
+}
+
+fn browser_status() -> DispatchResult {
+    Ok(text_result(
+        serde_json::to_string_pretty(&browser_host::status()).unwrap_or_else(|_| "null".into()),
+    ))
+}
+
+fn stop_browser() -> DispatchResult {
+    browser_host::stop();
+    Ok(text_result(json!({"ok": true}).to_string()))
+}
+
+fn locate_web_dist() -> anyhow::Result<PathBuf> {
+    if let Some(path) = std::env::var_os("PROJECTMIND_WEB_DIST") {
+        let path = PathBuf::from(path);
+        if path.join("index.html").is_file() {
+            return Ok(path);
+        }
+    }
+    let cwd = std::env::current_dir()?;
+    let cwd_candidate = cwd.join("app/dist");
+    if cwd_candidate.join("index.html").is_file() {
+        return Ok(cwd_candidate);
+    }
+    let exe = std::env::current_exe()?;
+    for ancestor in exe.ancestors() {
+        let candidate = ancestor.join("app/dist");
+        if candidate.join("index.html").is_file() {
+            return Ok(candidate);
+        }
+    }
+    anyhow::bail!("set PROJECTMIND_WEB_DIST or run from the ProjectMind repo root")
 }
 
 /// Best-effort statefile write. Failures are logged but never bubble up: the

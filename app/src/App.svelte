@@ -26,6 +26,10 @@
     listModules,
     showClass,
     currentState,
+    browserToken,
+    clearBrowserToken,
+    isTauriRuntime,
+    setBrowserToken,
   } from './lib/api';
   import type { ClassEntry, UiState } from './lib/api';
   import ClassViewer from './components/ClassViewer.svelte';
@@ -36,7 +40,6 @@
   import MarkdownIndex from './components/MarkdownIndex.svelte';
   import ModuleSidebar from './components/ModuleSidebar.svelte';
   import WalkthroughView from './components/WalkthroughView.svelte';
-  import { language, languages, t } from './lib/i18n';
   import { resizable } from './lib/resizable';
 
   type Theme = 'dark' | 'light';
@@ -69,13 +72,17 @@
 
   // The Code tab falls back to "Files" when the repo has no parsed classes
   // (e.g. a docs-only or office-style folder).
-  $: codeTabLabel = $repo && $repo.classes === 0 ? $t('nav.files') : $t('nav.code');
+  $: codeTabLabel = $repo && $repo.classes === 0 ? 'Files' : 'Code';
 
   let diagramKind: 'bean-graph' | 'package-tree' = 'bean-graph';
   let classSource = '';
   let classMeta: { file: string; line_start: number; line_end: number } | null = null;
   let loading = false;
+  let browserMode = false;
+  let browserAuthorized = true;
+  let tokenInput = '';
   let unlistenState: (() => void) | null = null;
+  let statePoll: ReturnType<typeof setInterval> | null = null;
   let lastSeq = 0;
   /// True while we're applying an MCP-driven state change. Prevents the
   /// resulting load() from re-publishing and triggering an event loop.
@@ -110,9 +117,36 @@
   }
 
   async function pickAndOpen() {
+    if (browserMode) {
+      const picked = window.prompt('Absolute repository path on the ProjectMind host');
+      if (picked) await load(picked);
+      return;
+    }
     const picked = await openDialog({ directory: true, multiple: false });
     if (!picked || Array.isArray(picked)) return;
     await load(picked);
+  }
+
+  async function useBrowserToken() {
+    const token = tokenInput.trim();
+    if (!token) return;
+    setBrowserToken(token);
+    browserAuthorized = true;
+    errorMessage.set(null);
+    try {
+      const initial = await currentState();
+      if (initial) await applyState(initial);
+    } catch (err) {
+      browserAuthorized = false;
+      errorMessage.set(String(err));
+    }
+  }
+
+  function forgetBrowserToken() {
+    clearBrowserToken();
+    browserAuthorized = false;
+    tokenInput = '';
+    repo.set(null);
   }
 
   async function load(path: string, opts: { silent?: boolean } = {}) {
@@ -214,17 +248,45 @@
   }
 
   onMount(async () => {
+    browserMode = !isTauriRuntime();
+    if (browserMode && !browserToken()) {
+      browserAuthorized = false;
+      return;
+    }
     // Pick up wherever we left off (or whatever the MCP server has set since).
-    const initial = await currentState();
-    if (initial) await applyState(initial);
+    try {
+      const initial = await currentState();
+      if (initial) await applyState(initial);
+    } catch (err) {
+      if (browserMode) {
+        browserAuthorized = false;
+        errorMessage.set(String(err));
+        return;
+      }
+      throw err;
+    }
 
-    unlistenState = await listen<UiState>('state-changed', (ev) => {
-      void applyState(ev.payload);
-    });
+    if (!browserMode) {
+      unlistenState = await listen<UiState>('state-changed', (ev) => {
+        void applyState(ev.payload);
+      });
+    } else {
+      statePoll = setInterval(() => {
+        void currentState()
+          .then((s) => {
+            if (s) return applyState(s);
+            return undefined;
+          })
+          .catch((err) => {
+            errorMessage.set(String(err));
+          });
+      }, 1500);
+    }
   });
 
   onDestroy(() => {
     unlistenState?.();
+    if (statePoll) clearInterval(statePoll);
   });
 </script>
 
@@ -240,12 +302,12 @@
         </span>
         <span class="status">
           <span class="dot"></span>
-          {$t('app.repoStats', { classes: $repo.classes, modules: $repo.modules })}
+          {$repo.classes} classes • {$repo.modules} module{$repo.modules === 1 ? '' : 's'}
         </span>
       {:else}
         <span class="status">
           <span class="dot dim"></span>
-          {$t('app.noRepository')}
+          no repository
         </span>
       {/if}
     </div>
@@ -269,7 +331,7 @@
             viewMode.set('diagram');
           }}
         >
-          {$t('nav.diagrams')}
+          Diagrams
         </button>
       {/if}
       {#if !$repo || ($repo && $repo.markdown_count > 0)}
@@ -280,7 +342,7 @@
             followingMcp.set(false);
             viewMode.set('md');
           }}
-          title={$t('nav.markdownTitle')}
+          title="Browse markdown files in this repository"
         >
           MD
         </button>
@@ -293,7 +355,7 @@
             followingMcp.set(false);
             viewMode.set('html');
           }}
-          title={$t('nav.htmlTitle')}
+          title="Browse HTML files and snippets in this repository"
         >
           HTML
         </button>
@@ -303,37 +365,30 @@
           class:active={$viewMode === 'walkthrough'}
           class="walkthrough-btn"
           on:click={() => viewMode.set('walkthrough')}
-          title={$t('nav.walkthroughTitle')}
+          title="Resume the active walk-through"
         >
-          ▶ {$t('nav.walkthrough')}
+          ▶ Walk-through
         </button>
       {/if}
       {#if $viewMode === 'diff'}
-        <button class="active">{$t('nav.diff')}</button>
+        <button class="active">Diff</button>
       {/if}
       {#if $followingMcp}
-        <span class="follow" title={$t('nav.followingMcpTitle')}>
-          {$t('nav.followingMcp')}
+        <span class="follow" title="GUI is following an MCP-issued view intent. Click any tab to continue manually.">
+          following MCP
         </span>
       {/if}
+      {#if browserMode}
+        <button on:click={forgetBrowserToken} title="Forget the browser access token">Token</button>
+      {/if}
       <button on:click={pickAndOpen} disabled={loading}>
-        {loading ? '...' : $t('nav.openRepo')}
+        {loading ? '…' : 'Open repo'}
       </button>
-      <select
-        class="language-select"
-        bind:value={$language}
-        aria-label={$t('language.label')}
-        title={$t('language.label')}
-      >
-        {#each languages as lang (lang.code)}
-          <option value={lang.code}>{lang.label}</option>
-        {/each}
-      </select>
       <button
         class="theme-toggle"
         on:click={toggleTheme}
-        title={$t('theme.switchTo', { mode: theme === 'dark' ? $t('theme.light') : $t('theme.dark') })}
-        aria-label={$t('theme.toggle')}
+        title="Switch to {theme === 'dark' ? 'light' : 'dark'} mode"
+        aria-label="Toggle theme"
       >
         {theme === 'dark' ? '☀' : '☾'}
       </button>
@@ -344,16 +399,37 @@
     <div class="error">⚠ {$errorMessage}</div>
   {/if}
 
-  {#if !$repo}
+  {#if browserMode && !browserAuthorized}
+    <section class="empty">
+      <form class="token-panel" on:submit|preventDefault={useBrowserToken}>
+        <img class="welcome-logo" src="/logo.png" alt="ProjectMind" />
+        <h1>ProjectMind</h1>
+        <p class="claim">LAN browser access</p>
+        <label for="browser-token">Access token</label>
+        <input
+          id="browser-token"
+          bind:value={tokenInput}
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="Paste the token from the LLM CLI"
+        />
+        <button type="submit">Connect</button>
+      </form>
+    </section>
+  {:else if !$repo}
     <section class="empty">
       <div class="welcome">
         <img class="welcome-logo" src="/logo.png" alt="ProjectMind" />
         <h1>ProjectMind</h1>
-        <p class="claim">{$t('welcome.claim')}</p>
-        <p class="by">{$t('welcome.by')}</p>
-        <button on:click={pickAndOpen}>{$t('welcome.open')}</button>
+        <p class="claim">Your project, explained by AI.</p>
+        <p class="by">by Plaintext</p>
+        <button on:click={pickAndOpen}>Open a repository to begin</button>
         <p class="hint">
-          {$t('welcome.hint')}
+          {#if browserMode}
+            Enter an absolute path on the ProjectMind host, or open one from the LLM CLI.
+          {:else}
+            Or use the <code>projectmind-mcp</code> server with your favourite LLM CLI — see the README.
+          {/if}
         </p>
       </div>
     </section>
@@ -369,19 +445,19 @@
           max: 480,
           initial: 220,
         }}
-        title={$t('app.resizeTitle')}
+        title="Drag to resize · double-click to reset"
       ></div>
       <aside class="sidebar">
         {#if $packageFilter !== null}
           <div class="path-bar">
-            <span class="path-label">{$t('app.package')}</span>
-            <code class="path-value">{$packageFilter || $t('app.defaultPackage')}</code>
-            <button class="path-clear" on:click={() => packageFilter.set(null)} title={$t('app.clearPackageFilter')}>×</button>
+            <span class="path-label">package</span>
+            <code class="path-value">{$packageFilter || '(default)'}</code>
+            <button class="path-clear" on:click={() => packageFilter.set(null)} title="Clear package filter">×</button>
           </div>
         {/if}
         <div class="filter">
           <button class="chip" class:active={$stereotypeFilter === null} on:click={() => setFilter(null)}>
-            {$t('app.all')} <span class="count">{$filteredClasses.length}</span>
+            all <span class="count">{$filteredClasses.length}</span>
           </button>
           {#each Object.entries($stereotypeCounts) as [name, count]}
             <button
@@ -393,7 +469,7 @@
             </button>
           {/each}
         </div>
-        <ul class="class-list" role="listbox" aria-label={$t('app.classesLabel')}>
+        <ul class="class-list" role="listbox" aria-label="Classes">
           {#each $filteredClasses as c (`${c.module}::${c.fqn}`)}
             <li role="option" aria-selected={$selectedClass?.fqn === c.fqn}>
               <button
@@ -423,7 +499,7 @@
           max: 720,
           initial: 360,
         }}
-        title={$t('app.resizeTitle')}
+        title="Drag to resize · double-click to reset"
       ></div>
       <main class="viewer">
         {#if $selectedClass}
@@ -433,7 +509,7 @@
             meta={classMeta}
           />
         {:else}
-          <div class="placeholder">{$t('app.selectClass')}</div>
+          <div class="placeholder">Select a class on the left.</div>
         {/if}
       </main>
     </section>
@@ -441,12 +517,12 @@
     <section class="diagram-view">
       <div class="diagram-tabs">
         <button class:active={diagramKind === 'bean-graph'} on:click={() => (diagramKind = 'bean-graph')}>
-          {$t('diagram.beanGraph')}
+          Bean graph
         </button>
         <button class:active={diagramKind === 'package-tree'} on:click={() => (diagramKind = 'package-tree')}>
-          {$t('diagram.packageTree')}
+          Package tree
         </button>
-        <span class="diagram-hint">{$t('diagram.drillHint')}</span>
+        <span class="diagram-hint">Click a node to drill into it</span>
       </div>
       <DiagramView kind={diagramKind} />
     </section>
@@ -471,7 +547,7 @@
   {:else}
     <section class="empty">
       <div class="welcome">
-        <p class="hint">{$t('app.noView')}</p>
+        <p class="hint">No view selected. Pick Code, Diagrams or HTML above, or send an MCP intent.</p>
       </div>
     </section>
   {/if}
@@ -517,6 +593,39 @@
     margin-left: auto;
     margin-right: auto;
     box-shadow: 0 8px 32px color-mix(in srgb, #2d2bfe 35%, transparent);
+  }
+
+  .token-panel {
+    display: grid;
+    gap: 12px;
+    width: min(420px, calc(100vw - 40px));
+    padding: 28px;
+    background: var(--bg-1);
+    border: 1px solid var(--bg-3);
+    border-radius: 8px;
+    box-shadow: 0 18px 48px color-mix(in srgb, #000 28%, transparent);
+  }
+
+  .token-panel h1,
+  .token-panel p {
+    margin: 0;
+    text-align: center;
+  }
+
+  .token-panel label {
+    font-size: 12px;
+    color: var(--fg-3);
+  }
+
+  .token-panel input {
+    min-width: 0;
+    padding: 10px 12px;
+    color: var(--fg-1);
+    background: var(--bg-0);
+    border: 1px solid var(--bg-3);
+    border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px;
   }
 
   .title {
@@ -588,23 +697,6 @@
     text-align: center;
     font-size: 15px;
     line-height: 1;
-  }
-
-  .language-select {
-    background: var(--bg-1);
-    color: var(--fg-1);
-    border: 1px solid var(--bg-3);
-    border-radius: 4px;
-    padding: 5px 8px;
-    font: inherit;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  .language-select:hover,
-  .language-select:focus {
-    border-color: var(--accent-2);
-    color: var(--fg-0);
-    outline: none;
   }
 
   .walkthrough-btn {
@@ -687,6 +779,13 @@
     margin-top: 32px;
     color: var(--fg-2);
     font-size: 12px;
+  }
+
+  .welcome code {
+    font-family: var(--mono);
+    background: var(--bg-2);
+    padding: 1px 6px;
+    border-radius: 3px;
   }
 
   .layout {

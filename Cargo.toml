@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/plugin-api",
     "crates/core",
+    "crates/browser-host",
     "crates/mcp-server",
     "plugins/lang-java",
     "plugins/lang-rust",
