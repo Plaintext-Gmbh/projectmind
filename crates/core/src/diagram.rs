@@ -91,6 +91,14 @@ pub fn render_bean_graph(repo: &Repository, framework: &dyn FrameworkPlugin) -> 
                     sanitize(stereo)
                 );
             }
+            // Drilldown: click a class node → host registers `onNodeClick`.
+            let _ = writeln!(
+                out,
+                "    click {id} call onNodeClick(\"class\",\"{m}\",\"{fqn}\")",
+                id = escape_id(fqn),
+                m = js_arg(&mod_id),
+                fqn = js_arg(fqn)
+            );
         }
     }
 
@@ -172,8 +180,39 @@ pub fn render_package_tree(repo: &Repository) -> String {
             }
         }
         out.push_str("    end\n");
+        // Drilldown clicks: emit *outside* the subgraph block — Mermaid does not
+        // allow `click` directives inside `subgraph` ... `end`.
+        for (pkg, classes) in packages {
+            let pkg_node = escape_id(&format!("{mod_id}::{pkg}"));
+            let _ = writeln!(
+                out,
+                "    click {pkg_node} call onNodeClick(\"package\",\"{m}\",\"{p}\")",
+                m = js_arg(mod_id),
+                p = js_arg(pkg)
+            );
+            for c in classes {
+                let leaf = escape_id(&format!("{mod_id}::{pkg}::{c}"));
+                let fqn = if pkg == "<default>" {
+                    c.clone()
+                } else {
+                    format!("{pkg}.{c}")
+                };
+                let _ = writeln!(
+                    out,
+                    "    click {leaf} call onNodeClick(\"class\",\"{m}\",\"{f}\")",
+                    m = js_arg(mod_id),
+                    f = js_arg(&fqn)
+                );
+            }
+        }
     }
     out
+}
+
+/// Escape a string for use as a Mermaid `click ... call fn("...")` argument.
+/// Mermaid passes the literal text to JS, so we prevent quote/backslash injection.
+fn js_arg(raw: &str) -> String {
+    raw.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn stereotype_lookup(repo: &Repository) -> BTreeMap<String, String> {
@@ -319,5 +358,44 @@ mod tests {
         assert!(out.contains("subgraph"));
         assert!(out.contains("\"a.b\""));
         assert!(out.contains("\"X\""));
+    }
+
+    #[test]
+    fn package_tree_emits_click_directives_for_drilldown() {
+        let mut repo = Repository::default();
+        let mut m1 = Module {
+            id: "g:m1".into(),
+            ..Default::default()
+        };
+        m1.classes.insert("a.b.X".into(), class("a.b.X", "service"));
+        repo.insert_module(m1);
+        let out = render_package_tree(&repo);
+        // package node click → onNodeClick("package", module, pkg)
+        assert!(
+            out.contains("call onNodeClick(\"package\",\"g:m1\",\"a.b\")"),
+            "missing package click in:\n{out}"
+        );
+        // leaf class click → onNodeClick("class", module, fqn)
+        assert!(
+            out.contains("call onNodeClick(\"class\",\"g:m1\",\"a.b.X\")"),
+            "missing class click in:\n{out}"
+        );
+    }
+
+    #[test]
+    fn bean_graph_emits_click_directives_for_drilldown() {
+        let mut repo = Repository::default();
+        let mut m1 = Module {
+            id: "g:m1".into(),
+            ..Default::default()
+        };
+        m1.classes.insert("a.A".into(), class("a.A", "service"));
+        m1.classes.insert("a.B".into(), class("a.B", "controller"));
+        repo.insert_module(m1);
+        let out = render_bean_graph(&repo, &DummyFw);
+        assert!(
+            out.contains("call onNodeClick(\"class\",\"g:m1\",\"a.A\")"),
+            "missing class click in:\n{out}"
+        );
     }
 }

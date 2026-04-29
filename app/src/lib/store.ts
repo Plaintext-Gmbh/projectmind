@@ -7,25 +7,45 @@ export const classes = writable<ClassEntry[]>([]);
 export const selectedClass = writable<ClassEntry | null>(null);
 export const stereotypeFilter = writable<string | null>(null);
 export const moduleFilter = writable<string | null>(null);
+export const packageFilter = writable<string | null>(null);
 export const errorMessage = writable<string | null>(null);
+export const viewMode = writable<'classes' | 'diagram'>('classes');
+
+function packageOf(fqn: string): string {
+  const idx = fqn.lastIndexOf('.');
+  return idx === -1 ? '' : fqn.slice(0, idx);
+}
+
+function inPackage(fqn: string, pkg: string): boolean {
+  if (pkg === '') return packageOf(fqn) === '';
+  const own = packageOf(fqn);
+  return own === pkg || own.startsWith(pkg + '.');
+}
 
 export const filteredClasses = derived(
-  [classes, stereotypeFilter, moduleFilter],
-  ([$classes, $stereo, $mod]) =>
+  [classes, stereotypeFilter, moduleFilter, packageFilter],
+  ([$classes, $stereo, $mod, $pkg]) =>
     $classes.filter(
       (c) =>
         ($stereo === null || c.stereotypes.includes($stereo)) &&
-        ($mod === null || c.module === $mod),
+        ($mod === null || c.module === $mod) &&
+        ($pkg === null || inPackage(c.fqn, $pkg)),
     ),
 );
 
-export const stereotypeCounts = derived([classes, moduleFilter], ([$classes, $mod]) => {
-  const filtered = $mod === null ? $classes : $classes.filter((c) => c.module === $mod);
-  const counts: Record<string, number> = {};
-  for (const c of filtered) {
-    for (const s of c.stereotypes) {
-      counts[s] = (counts[s] || 0) + 1;
+export const stereotypeCounts = derived(
+  [classes, moduleFilter, packageFilter],
+  ([$classes, $mod, $pkg]) => {
+    const filtered = $classes.filter(
+      (c) =>
+        ($mod === null || c.module === $mod) && ($pkg === null || inPackage(c.fqn, $pkg)),
+    );
+    const counts: Record<string, number> = {};
+    for (const c of filtered) {
+      for (const s of c.stereotypes) {
+        counts[s] = (counts[s] || 0) + 1;
+      }
     }
-  }
-  return counts;
-});
+    return counts;
+  },
+);

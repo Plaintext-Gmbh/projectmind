@@ -1,7 +1,17 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
+  import { get } from 'svelte/store';
   import mermaid from 'mermaid';
   import { showDiagram } from '../lib/api';
+  import type { ClassEntry } from '../lib/api';
+  import {
+    classes,
+    selectedClass,
+    moduleFilter,
+    packageFilter,
+    stereotypeFilter,
+    viewMode,
+  } from '../lib/store';
 
   export let kind: 'bean-graph' | 'package-tree';
 
@@ -48,7 +58,33 @@
       flowchart: { htmlLabels: false, useMaxWidth: false },
       class: { htmlLabels: false, useMaxWidth: false },
     });
+    // Mermaid `click N call onNodeClick("kind","module","target")` directives
+    // resolve against window. Drilldown: class → open it, package → filter
+    // the class list, module → filter by module.
+    (window as unknown as Record<string, unknown>).onNodeClick = handleNodeClick;
   });
+
+  onDestroy(() => {
+    delete (window as unknown as Record<string, unknown>).onNodeClick;
+  });
+
+  function handleNodeClick(kind: string, moduleId: string, target: string) {
+    if (kind === 'class') {
+      const match = get(classes).find(
+        (c: ClassEntry) => c.module === moduleId && c.fqn === target,
+      );
+      if (match) {
+        selectedClass.set(match);
+        viewMode.set('classes');
+      }
+    } else if (kind === 'package') {
+      moduleFilter.set(moduleId);
+      packageFilter.set(target);
+      stereotypeFilter.set(null);
+      selectedClass.set(null);
+      viewMode.set('classes');
+    }
+  }
 
   function resetView() {
     scale = 1;

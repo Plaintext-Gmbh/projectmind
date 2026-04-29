@@ -8,9 +8,11 @@
     selectedClass,
     stereotypeFilter,
     moduleFilter,
+    packageFilter,
     errorMessage,
     filteredClasses,
     stereotypeCounts,
+    viewMode,
   } from './lib/store';
   import { openRepo, listClasses, listModules, showClass } from './lib/api';
   import type { ClassEntry } from './lib/api';
@@ -18,11 +20,33 @@
   import DiagramView from './components/DiagramView.svelte';
   import ModuleSidebar from './components/ModuleSidebar.svelte';
 
-  let viewMode: 'classes' | 'diagram' = 'classes';
   let diagramKind: 'bean-graph' | 'package-tree' = 'bean-graph';
   let classSource = '';
   let classMeta: { file: string; line_start: number; line_end: number } | null = null;
   let loading = false;
+
+  // Whenever selectedClass changes (from sidebar click *or* a diagram drilldown)
+  // load the source for the right-hand viewer.
+  let lastLoadedFqn: string | null = null;
+  $: void loadSourceFor($selectedClass);
+
+  async function loadSourceFor(c: ClassEntry | null) {
+    if (!c) {
+      classSource = '';
+      classMeta = null;
+      lastLoadedFqn = null;
+      return;
+    }
+    if (c.fqn === lastLoadedFqn) return;
+    lastLoadedFqn = c.fqn;
+    try {
+      const r = await showClass(c.fqn);
+      classSource = r.source;
+      classMeta = { file: r.file, line_start: r.line_start, line_end: r.line_end };
+    } catch (err) {
+      errorMessage.set(String(err));
+    }
+  }
 
   function basename(p: string): string {
     const idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
@@ -47,6 +71,7 @@
       selectedClass.set(null);
       moduleFilter.set(null);
       stereotypeFilter.set(null);
+      packageFilter.set(null);
       classSource = '';
     } catch (err) {
       errorMessage.set(String(err));
@@ -55,15 +80,8 @@
     }
   }
 
-  async function handleSelect(c: ClassEntry) {
+  function handleSelect(c: ClassEntry) {
     selectedClass.set(c);
-    try {
-      const r = await showClass(c.fqn);
-      classSource = r.source;
-      classMeta = { file: r.file, line_start: r.line_start, line_end: r.line_end };
-    } catch (err) {
-      errorMessage.set(String(err));
-    }
   }
 
   function setFilter(s: string | null) {
@@ -97,10 +115,10 @@
       {/if}
     </div>
     <nav>
-      <button class:active={viewMode === 'classes'} on:click={() => (viewMode = 'classes')}>
+      <button class:active={$viewMode === 'classes'} on:click={() => viewMode.set('classes')}>
         Classes
       </button>
-      <button class:active={viewMode === 'diagram'} on:click={() => (viewMode = 'diagram')}>
+      <button class:active={$viewMode === 'diagram'} on:click={() => viewMode.set('diagram')}>
         Diagrams
       </button>
       <button on:click={pickAndOpen} disabled={loading}>
@@ -124,13 +142,20 @@
         </p>
       </div>
     </section>
-  {:else if viewMode === 'classes'}
+  {:else if $viewMode === 'classes'}
     <section class="layout">
       <ModuleSidebar />
       <aside class="sidebar">
+        {#if $packageFilter !== null}
+          <div class="path-bar">
+            <span class="path-label">package</span>
+            <code class="path-value">{$packageFilter || '(default)'}</code>
+            <button class="path-clear" on:click={() => packageFilter.set(null)} title="Clear package filter">×</button>
+          </div>
+        {/if}
         <div class="filter">
           <button class="chip" class:active={$stereotypeFilter === null} on:click={() => setFilter(null)}>
-            all <span class="count">{$classes.length}</span>
+            all <span class="count">{$filteredClasses.length}</span>
           </button>
           {#each Object.entries($stereotypeCounts) as [name, count]}
             <button
@@ -184,6 +209,7 @@
         <button class:active={diagramKind === 'package-tree'} on:click={() => (diagramKind = 'package-tree')}>
           Package tree
         </button>
+        <span class="diagram-hint">Click a node to drill into it</span>
       </div>
       <DiagramView kind={diagramKind} />
     </section>
@@ -351,6 +377,47 @@
     flex-direction: column;
   }
 
+  .path-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    background: color-mix(in srgb, var(--accent-2) 15%, var(--bg-1));
+    border-bottom: 1px solid var(--bg-3);
+    font-size: 12px;
+  }
+
+  .path-label {
+    color: var(--fg-2);
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.05em;
+  }
+
+  .path-value {
+    flex: 1;
+    font-family: var(--mono);
+    color: var(--fg-0);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .path-clear {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border-radius: 50%;
+    font-size: 14px;
+    line-height: 1;
+    background: var(--bg-2);
+    color: var(--fg-1);
+  }
+  .path-clear:hover {
+    background: var(--bg-3);
+    color: var(--fg-0);
+  }
+
   .filter {
     padding: 8px;
     display: flex;
@@ -462,5 +529,11 @@
   .diagram-tabs button.active {
     border-color: var(--accent-2);
     color: var(--accent-2);
+  }
+
+  .diagram-hint {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--fg-2);
   }
 </style>
