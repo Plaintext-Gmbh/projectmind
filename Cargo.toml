@@ -73,6 +73,10 @@ git2 = { version = "0.19", default-features = false, features = ["vendored-libgi
 # XML (for Maven pom.xml parsing)
 quick-xml = "0.36"
 
+# Filesystem
+dirs   = "5"
+notify = "6"
+
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
 

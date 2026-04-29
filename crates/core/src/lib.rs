@@ -18,6 +18,7 @@ pub mod engine;
 pub mod git;
 pub mod maven;
 pub mod repository;
+pub mod state;
 
 pub use cargo::CargoCrate;
 pub use engine::Engine;
