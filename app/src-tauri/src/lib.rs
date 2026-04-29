@@ -176,11 +176,12 @@ fn show_class(fqn: String, state: State<'_, Arc<AppState>>) -> Result<ClassDetai
     let repo = guard
         .as_ref()
         .ok_or_else(|| "no repository open".to_string())?;
-    let (_, class) = repo
+    let (module, class) = repo
         .find_class(&fqn)
         .ok_or_else(|| format!("class not found: {fqn}"))?;
-    let abs = repo.absolute(&class.file);
-    let source = std::fs::read_to_string(&abs).map_err(|e| e.to_string())?;
+    let abs = module.root.join(&class.file);
+    let source =
+        std::fs::read_to_string(&abs).map_err(|e| format!("read {}: {e}", abs.display()))?;
     Ok(ClassDetails {
         fqn: class.fqn.clone(),
         file: class.file.clone(),

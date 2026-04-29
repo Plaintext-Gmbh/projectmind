@@ -140,7 +140,11 @@ fn strip_kv(line: &str, key: &str) -> Option<String> {
     let unquoted = after_eq
         .strip_prefix('"')
         .and_then(|s| s.strip_suffix('"'))
-        .or_else(|| after_eq.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))?;
+        .or_else(|| {
+            after_eq
+                .strip_prefix('\'')
+                .and_then(|s| s.strip_suffix('\''))
+        })?;
     if unquoted.is_empty() {
         None
     } else {
@@ -158,13 +162,12 @@ mod tests {
     }
 
     fn tmpdir() -> PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
         let p = std::env::temp_dir().join(format!(
             "plaintext-ide-cargo-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&p).unwrap();
         p

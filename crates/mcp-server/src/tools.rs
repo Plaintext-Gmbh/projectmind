@@ -279,10 +279,10 @@ async fn show_class(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
         .map_err(|e| DispatchError::invalid_params(format!("show_class: {e}")))?;
     let state = state.lock().await;
     with_repo(&state, |repo| {
-        let (_module_id, class) = repo.find_class(&args.fqn).ok_or_else(|| {
+        let (module, class) = repo.find_class(&args.fqn).ok_or_else(|| {
             DispatchError::invalid_params(format!("class not found: {}", args.fqn))
         })?;
-        let abs_file = repo.absolute(&class.file);
+        let abs_file = module.root.join(&class.file);
         let source = std::fs::read_to_string(&abs_file)
             .map_err(|e| DispatchError::internal(format!("read {}: {e}", abs_file.display())))?;
 

@@ -35,11 +35,14 @@ impl Repository {
     }
 
     /// Find a class by fully-qualified name across all modules.
+    ///
+    /// Returns the owning module so callers can resolve `class.file` (which is
+    /// stored relative to the module root) back to an absolute path.
     #[must_use]
-    pub fn find_class(&self, fqn: &str) -> Option<(&str, &plaintext_ide_plugin_api::Class)> {
-        for (mid, module) in &self.modules {
+    pub fn find_class(&self, fqn: &str) -> Option<(&Module, &plaintext_ide_plugin_api::Class)> {
+        for module in self.modules.values() {
             if let Some(class) = module.classes.get(fqn) {
-                return Some((mid.as_str(), class));
+                return Some((module, class));
             }
         }
         None
@@ -109,7 +112,7 @@ mod tests {
         repo.insert_module(sample_module());
         let found = repo.find_class("com.example.Foo");
         assert!(found.is_some());
-        assert_eq!(found.unwrap().0, "sample");
+        assert_eq!(found.unwrap().0.id, "sample");
     }
 
     #[test]

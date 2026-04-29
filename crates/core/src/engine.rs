@@ -99,27 +99,24 @@ impl Engine {
         let mut repo = Repository::new(path.clone());
 
         let maven_modules = crate::maven::discover(&path);
-        if !maven_modules.is_empty() {
+        if maven_modules.is_empty() {
+            let cargo_crates = crate::cargo::discover(&path);
+            if cargo_crates.is_empty() {
+                let module = self.parse_root(&path)?;
+                repo.insert_module(module);
+            } else {
+                info!(crates = cargo_crates.len(), "Cargo workspace detected");
+                for m in self.parse_cargo_crates(&path, &cargo_crates)? {
+                    repo.insert_module(m);
+                }
+            }
+        } else {
             info!(
                 modules = maven_modules.len(),
                 "Maven multi-module project detected"
             );
             for m in self.parse_maven_modules(&path, &maven_modules)? {
                 repo.insert_module(m);
-            }
-        } else {
-            let cargo_crates = crate::cargo::discover(&path);
-            if !cargo_crates.is_empty() {
-                info!(
-                    crates = cargo_crates.len(),
-                    "Cargo workspace detected"
-                );
-                for m in self.parse_cargo_crates(&path, &cargo_crates)? {
-                    repo.insert_module(m);
-                }
-            } else {
-                let module = self.parse_root(&path)?;
-                repo.insert_module(module);
             }
         }
 

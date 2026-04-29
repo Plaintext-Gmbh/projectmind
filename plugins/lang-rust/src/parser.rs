@@ -38,8 +38,7 @@ pub(crate) fn parse(file: &Path, source: &str, module: &mut Module) -> Result<()
     let rel_file = relative(file, &module.root);
 
     // Pass 1: collect classes (struct/enum/trait/union) keyed by simple name.
-    let mut by_name: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
+    let mut by_name: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let mut cursor = root.walk();
     for child in root.named_children(&mut cursor) {
         if let Some(class) = build_class(child, bytes, namespace.as_deref(), &rel_file) {
@@ -76,10 +75,9 @@ fn build_class(
     rel_file: &Path,
 ) -> Option<Class> {
     let kind = match node.kind() {
-        "struct_item" => ClassKind::Class,
+        "struct_item" | "union_item" => ClassKind::Class,
         "enum_item" => ClassKind::Enum,
         "trait_item" => ClassKind::Interface,
-        "union_item" => ClassKind::Class,
         _ => return None,
     };
 
@@ -249,17 +247,15 @@ fn simple_type_name(type_node: Node<'_>, bytes: &[u8]) -> String {
 fn collect_outer_attributes(node: Node<'_>, bytes: &[u8]) -> Vec<Annotation> {
     // Outer attributes precede the item as siblings under the same parent in tree-sitter-rust;
     // they are NOT children of the item itself. So we walk backwards from the item node.
-    let parent = match node.parent() {
-        Some(p) => p,
-        None => return Vec::new(),
+    let Some(parent) = node.parent() else {
+        return Vec::new();
     };
 
     // Find this node's index among the parent's children.
     let mut cursor = parent.walk();
     let children: Vec<Node<'_>> = parent.children(&mut cursor).collect();
-    let idx = match children.iter().position(|c| c.id() == node.id()) {
-        Some(i) => i,
-        None => return Vec::new(),
+    let Some(idx) = children.iter().position(|c| c.id() == node.id()) else {
+        return Vec::new();
     };
 
     let mut out = Vec::new();
@@ -270,7 +266,7 @@ fn collect_outer_attributes(node: Node<'_>, bytes: &[u8]) -> Vec<Annotation> {
             "attribute_item" => {
                 expand_attribute(sib, bytes, &mut out);
             }
-            "line_comment" | "block_comment" | "inner_attribute_item" => continue,
+            "line_comment" | "block_comment" | "inner_attribute_item" => {}
             _ => break,
         }
     }
@@ -284,10 +280,7 @@ fn expand_attribute(attr_item: Node<'_>, bytes: &[u8], out: &mut Vec<Annotation>
     // unnamed-field `identifier`/`scoped_identifier` (the path) followed optionally by a
     // `token_tree` (the arguments). The grammar exposes no `path` / `arguments` field
     // names here, so walk children by kind instead.
-    let Some(attr) = attr_item
-        .named_child(0)
-        .filter(|n| n.kind() == "attribute")
-    else {
+    let Some(attr) = attr_item.named_child(0).filter(|n| n.kind() == "attribute") else {
         return;
     };
 
@@ -347,7 +340,10 @@ fn extract_identifiers(node: Node<'_>, bytes: &[u8]) -> Vec<String> {
         if matches!(kind, "identifier" | "type_identifier")
             || (n.named_child_count() == 0
                 && !txt.is_empty()
-                && txt.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_')
+                && txt
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_alphabetic() || c == '_')
                 && txt
                     .chars()
                     .all(|c| c.is_alphanumeric() || c == '_' || c == ':'))
@@ -483,7 +479,7 @@ mod tests {
 
     #[test]
     fn extracts_struct_with_field_and_impl_methods() {
-        let src = r#"
+        let src = r"
             pub struct Counter {
                 pub value: i32,
                 step: u32,
@@ -493,7 +489,7 @@ mod tests {
                 pub fn new(initial: i32) -> Self { Self { value: initial, step: 1 } }
                 pub fn tick(&mut self) { self.value += self.step as i32; }
             }
-        "#;
+        ";
         let m = parse_one(src);
         let class = m
             .classes
@@ -512,7 +508,10 @@ mod tests {
         let new_method = class.methods.iter().find(|m| m.name == "new").unwrap();
         assert!(new_method.is_static, "associated fn `new` should be static");
         let tick = class.methods.iter().find(|m| m.name == "tick").unwrap();
-        assert!(!tick.is_static, "fn taking `&mut self` should not be static");
+        assert!(
+            !tick.is_static,
+            "fn taking `&mut self` should not be static"
+        );
     }
 
     #[test]
