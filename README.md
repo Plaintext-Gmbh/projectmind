@@ -196,6 +196,8 @@ A Cargo workspace with seven crates plus a Svelte frontend:
 
 Phase 1 plugins are **statically registered**. Phase 2 will add dynamic loading from a `./plugins/` directory next to the binary, so third-party plugins can drop in `.so` / `.dylib` files.
 
+See [`docs/SYNC.md`](docs/SYNC.md) for how the MCP server and the Tauri GUI stay in sync (statefile + view intents).
+
 See [`docs/plan/`](docs/plan/) for the full design notes:
 
 - [01-brainstorming-vision.md](docs/plan/01-brainstorming-vision.md) — vision, requirements, user stories
