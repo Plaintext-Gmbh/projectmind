@@ -32,7 +32,7 @@
     isTauriRuntime,
     setBrowserToken,
   } from './lib/api';
-  import type { ClassEntry, ModuleFile, UiState } from './lib/api';
+  import type { ClassEntry, ModuleEntry, ModuleFile, UiState } from './lib/api';
   import ClassViewer from './components/ClassViewer.svelte';
   import DiagramView from './components/DiagramView.svelte';
   import DiffView from './components/DiffView.svelte';
@@ -106,20 +106,25 @@
   // show nothing (the list is per-module by design).
   let moduleFiles: ModuleFile[] = [];
   let moduleFilesLoadedFor: string | null = null;
-  $: void loadModuleFilesFor($moduleFilter);
+  // Re-run on either change: a different filter, OR new modules arriving
+  // (the "all modules" path needs the populated $modules list).
+  $: void loadModuleFilesFor($moduleFilter, $modules);
 
-  async function loadModuleFilesFor(moduleId: string | null) {
-    // Cache key — distinguishes "all modules" (null filter) from a specific id.
-    const token = moduleId ?? '__all__';
+  async function loadModuleFilesFor(moduleId: string | null, mods: ModuleEntry[]) {
+    // Cache key — id of the filter plus the module-set fingerprint, so that
+    // a repo-open which repopulates $modules invalidates a previous "0 mods"
+    // result.
+    const token = `${moduleId ?? '__all__'}::${mods.map((m) => m.id).join(',')}`;
     if (moduleFilesLoadedFor === token) return;
     moduleFilesLoadedFor = token;
     try {
       let items: ModuleFile[];
       if (moduleId) {
         items = await listModuleFiles(moduleId);
+      } else if (mods.length === 0) {
+        items = [];
       } else {
         // "All modules" filter — fan out across every module and merge.
-        const mods = get(modules);
         const lists = await Promise.all(mods.map((m) => listModuleFiles(m.id)));
         items = lists.flat();
       }
