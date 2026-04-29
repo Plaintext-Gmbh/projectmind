@@ -2,7 +2,7 @@
 
 A lightweight, **read-only** architecture browser for source code, designed to work bidirectionally with LLM-driven coding agents (Claude Code, etc.) via the **Model Context Protocol (MCP)**.
 
-> **Status:** Early MVP — the **MCP server works**. The Tauri UI shell is the next milestone.
+> **Status:** Early MVP — the **MCP server** and a basic **Tauri UI** both work. Java + Rust language plugins, Spring + Lombok framework recognisers, Mermaid bean graph and package tree.
 
 ## Why
 
@@ -21,7 +21,7 @@ The Phase 1 MVP ships a **Rust MCP server** (`plaintext-ide-mcp`) that Claude Co
 
 | Tool | What it does |
 |---|---|
-| `open_repo` | Open a repository. Detects Maven multi-module layout via `pom.xml`; otherwise treats the whole tree as one module. |
+| `open_repo` | Open a repository. Detects Maven multi-module layouts (any `pom.xml`) and Cargo workspaces (any `Cargo.toml` with a `[package]`); falls back to a single module otherwise. |
 | `repo_info` | Summary (modules, classes) of the active repo. |
 | `module_summary` | Per-module class count and stereotype histogram. |
 | `list_classes` | List parsed classes (filter by stereotype). |
@@ -33,12 +33,17 @@ The Phase 1 MVP ships a **Rust MCP server** (`plaintext-ide-mcp`) that Claude Co
 | `show_diagram` | Mermaid bean graph (subgraphs per Maven module, colour-coded by stereotype) or package tree. |
 | `plugin_info` | List active language and framework plugins. |
 
+Active language plugins in Phase 1:
+
+- **Java** — Tree-sitter parser. Classes, interfaces, enums, records; methods, fields, annotations, visibility.
+- **Rust** — Tree-sitter parser. Structs, enums, traits, unions; `impl` blocks attach methods and lift `impl Trait for T` as annotations on `T`. Module namespace is derived from the nearest `[package].name`.
+
 Active framework recognisers in Phase 1:
 
 - **Spring** — `@Service`, `@RestController`, `@Controller`, `@Component`, `@Repository`, `@Configuration`. Constructor and field injection (`@Autowired`, `@Inject`, `@Resource`) become Mermaid edges.
 - **Lombok** — `@Data`, `@Value`, `@Builder`, `@SuperBuilder`, `@*ArgsConstructor`, `@ToString`, `@EqualsAndHashCode`, `@Slf4j`/`@Log*`, `@Getter`, `@Setter`, `@With`, … attached as a `lombok` stereotype with the detected annotations in `class.extras`.
 
-Smoke-tested against a real Spring Boot multi-module repo (`plaintext-app`): **426 classes parsed across 21 Maven modules**, with per-module stereotype histograms and a 200-line Mermaid bean graph that groups beans by module and colours them by stereotype.
+Smoke-tested against real codebases: a 21-module Spring Boot Maven monorepo parses to **~500 classes** with stereotype histograms and a Mermaid bean graph grouped by module; an 8-crate Cargo workspace (this repo) parses to ~60 classes with per-crate modules.
 
 ## Build the MCP server (Ubuntu / Debian)
 
@@ -154,25 +159,38 @@ When a `v*.*.*` tag is pushed, GitHub Actions publishes a release with `plaintex
 
 ## Tests / development
 
+The same commands CI runs are wrapped in `scripts/ci.sh`:
+
 ```bash
-cargo test --workspace --all-targets
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
+./scripts/ci.sh check    # cargo fmt --check + cargo clippy
+./scripts/ci.sh test     # cargo test --workspace --all-targets + --doc
+./scripts/ci.sh all      # check + test
 ```
 
-CI runs on **Ubuntu 22.04** and **macOS 14** for every push and pull request.
+If you'd rather invoke cargo directly:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --all-targets
+cargo test --workspace --doc
+```
+
+CI runs on **Ubuntu 22.04** and **macOS 14** for every push and pull request, plus a Linux release-build smoke test.
 
 ## Architecture
 
-A Cargo workspace with six crates plus a Svelte frontend:
+A Cargo workspace with seven crates plus a Svelte frontend:
 
 | Crate | Purpose |
 |---|---|
 | `crates/plugin-api` | Public traits and types (no implementations) |
-| `crates/core` | Repo loader, file walker, plugin pipeline, git helpers |
+| `crates/core` | Repo loader, file walker, plugin pipeline, Maven + Cargo discovery, git helpers |
 | `crates/mcp-server` | The `plaintext-ide-mcp` binary (JSON-RPC over stdio) |
 | `plugins/lang-java` | Java parser via Tree-sitter |
+| `plugins/lang-rust` | Rust parser via Tree-sitter |
 | `plugins/framework-spring` | Spring stereotypes + bean graph |
+| `plugins/framework-lombok` | Lombok annotation recogniser |
 | `app/src-tauri` | Tauri shell (Rust backend exposing Tauri commands) |
 | `app/src/` | Svelte + TypeScript frontend with Mermaid integration |
 
