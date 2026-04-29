@@ -75,6 +75,32 @@ export async function listMarkdownFiles(root: string): Promise<MarkdownFile[]> {
   return invoke<MarkdownFile[]>('list_markdown_files', { root });
 }
 
+export type HtmlKind = 'html' | 'xhtml' | 'jsp' | 'velocity' | 'freemarker';
+
+export interface HtmlFile {
+  abs: string;
+  rel: string;
+  kind: HtmlKind;
+  size: number;
+}
+
+export interface HtmlSnippet {
+  abs: string;
+  rel: string;
+  line: number;
+  lang: string;
+  content: string;
+  tag_count: number;
+}
+
+export async function listHtmlFiles(root: string): Promise<HtmlFile[]> {
+  return invoke<HtmlFile[]>('list_html_files', { root });
+}
+
+export async function findHtmlSnippets(root: string): Promise<HtmlSnippet[]> {
+  return invoke<HtmlSnippet[]>('find_html_snippets', { root });
+}
+
 // ----- Walk-through --------------------------------------------------------
 
 export interface LineRange {

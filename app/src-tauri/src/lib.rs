@@ -22,6 +22,7 @@ use parking_lot::RwLock;
 use plaintext_ide_core::files::{self, MarkdownFile};
 use plaintext_ide_core::git::{self, ChangedFile};
 use plaintext_ide_core::heartbeat;
+use plaintext_ide_core::html::{self, HtmlFile, HtmlSnippet};
 use plaintext_ide_core::state::{self, UiState, ViewIntent};
 use plaintext_ide_core::walkthrough::{
     self as wt, FeedbackEvent, FeedbackKind, FeedbackLog, Walkthrough,
@@ -113,9 +114,19 @@ fn open_repo(path: String, state: State<'_, Arc<AppState>>) -> Result<RepoSummar
     let root = repo.root.clone();
     *state.repo.write() = Some(repo);
     // Publish so the MCP server (and any other consumer) sees what we just opened.
+    // Preserve the existing view intent when the repo path is unchanged — this
+    // happens when applyState() loads the repo in response to an MCP-driven
+    // intent (e.g. walkthrough_start), and we don't want this open_repo write
+    // to clobber the intent that triggered it.
+    let prev = state::read().ok().flatten().unwrap_or_default();
+    let same_repo = prev.repo_root.as_ref() == Some(&root);
     publish_state(UiState {
         repo_root: Some(root),
-        view: ViewIntent::default(),
+        view: if same_repo {
+            prev.view
+        } else {
+            ViewIntent::default()
+        },
         ..UiState::default()
     });
     Ok(summary)
@@ -335,7 +346,7 @@ fn end_walkthrough() -> Result<(), String> {
 }
 
 /// Move the active tour's pointer (manual sidebar click). Publishes a
-/// new UiState so the LLM can observe where the user navigated to.
+/// new `UiState` so the LLM can observe where the user navigated to.
 #[tauri::command]
 fn set_walkthrough_step(id: String, step: u32) -> Result<(), String> {
     let prev = state::read().ok().flatten().unwrap_or_default();
@@ -352,8 +363,7 @@ fn now_secs() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs())
 }
 
 /// List every markdown file under `root` (recursive, gitignore-aware,
@@ -369,6 +379,33 @@ fn list_markdown_files(root: String) -> Result<Vec<MarkdownFile>, String> {
         return Err(format!("root is not a directory: {root}"));
     }
     Ok(files::list_markdown_files(p))
+}
+
+/// List every HTML/XHTML/JSP/template file under `root`. Used by the HTML
+/// browser's file panel.
+#[tauri::command]
+fn list_html_files(root: String) -> Result<Vec<HtmlFile>, String> {
+    let p = std::path::Path::new(&root);
+    if !p.is_absolute() {
+        return Err(format!("root must be absolute: {root}"));
+    }
+    if !p.is_dir() {
+        return Err(format!("root is not a directory: {root}"));
+    }
+    Ok(html::list_html_files(p))
+}
+
+/// Scan source files under `root` for HTML snippets in string literals.
+#[tauri::command]
+fn find_html_snippets(root: String) -> Result<Vec<HtmlSnippet>, String> {
+    let p = std::path::Path::new(&root);
+    if !p.is_absolute() {
+        return Err(format!("root must be absolute: {root}"));
+    }
+    if !p.is_dir() {
+        return Err(format!("root is not a directory: {root}"));
+    }
+    Ok(html::find_html_snippets(p))
 }
 
 /// Best-effort publish: GUI tells the MCP/cooperating processes about its state.
@@ -469,6 +506,8 @@ pub fn run() {
             read_file_text,
             current_state,
             list_markdown_files,
+            list_html_files,
+            find_html_snippets,
             current_walkthrough,
             current_walkthrough_feedback,
             walkthrough_ack,

@@ -23,4 +23,5 @@ ignore      = { workspace = true }
 walkdir     = { workspace = true }
 git2        = { workspace = true }
 quick-xml   = { workspace = true }
+regex       = { workspace = true }
 dirs        = { workspace = true }

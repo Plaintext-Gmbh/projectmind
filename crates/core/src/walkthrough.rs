@@ -235,8 +235,7 @@ fn write_atomic<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs())
 }
 
 // ----- ID generation -------------------------------------------------------
@@ -272,10 +271,8 @@ mod tests {
     use crate::test_lock;
 
     fn override_state(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "plaintext-ide-wt-{name}-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("plaintext-ide-wt-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("current.json");
@@ -344,7 +341,7 @@ mod tests {
         write_body(Walkthrough {
             id: "x".into(),
             title: "x".into(),
-            summary: "".into(),
+            summary: String::new(),
             steps: vec![],
             updated_at: 0,
         })

@@ -32,6 +32,7 @@
   import DiagramView from './components/DiagramView.svelte';
   import DiffView from './components/DiffView.svelte';
   import FileView from './components/FileView.svelte';
+  import HtmlIndex from './components/HtmlIndex.svelte';
   import MarkdownIndex from './components/MarkdownIndex.svelte';
   import ModuleSidebar from './components/ModuleSidebar.svelte';
   import WalkthroughView from './components/WalkthroughView.svelte';
@@ -245,15 +246,17 @@
     <nav>
       <button
         class:active={$viewMode === 'classes'}
+        disabled={!$repo}
         on:click={() => {
           followingMcp.set(false);
           viewMode.set('classes');
         }}
       >
-        Classes
+        Code
       </button>
       <button
         class:active={$viewMode === 'diagram'}
+        disabled={!$repo}
         on:click={() => {
           followingMcp.set(false);
           viewMode.set('diagram');
@@ -263,6 +266,7 @@
       </button>
       <button
         class:active={$viewMode === 'md' || $viewMode === 'file'}
+        disabled={!$repo}
         on:click={() => {
           followingMcp.set(false);
           viewMode.set('md');
@@ -270,6 +274,17 @@
         title="Browse markdown files in this repository"
       >
         MD
+      </button>
+      <button
+        class:active={$viewMode === 'html'}
+        disabled={!$repo}
+        on:click={() => {
+          followingMcp.set(false);
+          viewMode.set('html');
+        }}
+        title="Browse HTML files and snippets in this repository"
+      >
+        HTML
       </button>
       {#if $walkthroughCursor}
         <button
@@ -398,6 +413,8 @@
     />
   {:else if $viewMode === 'md'}
     <MarkdownIndex />
+  {:else if $viewMode === 'html'}
+    <HtmlIndex />
   {:else if $viewMode === 'file' && $fileView}
     <FileView
       path={$fileView.path}
@@ -409,7 +426,7 @@
   {:else}
     <section class="empty">
       <div class="welcome">
-        <p class="hint">No view selected. Pick Classes or Diagrams above, or send an MCP intent.</p>
+        <p class="hint">No view selected. Pick Code, Diagrams or HTML above, or send an MCP intent.</p>
       </div>
     </section>
   {/if}

@@ -18,6 +18,7 @@ pub mod engine;
 pub mod files;
 pub mod git;
 pub mod heartbeat;
+pub mod html;
 pub mod maven;
 pub mod repository;
 pub mod state;
@@ -37,5 +38,5 @@ pub(crate) fn test_lock() -> std::sync::MutexGuard<'static, ()> {
     static M: OnceLock<Mutex<()>> = OnceLock::new();
     M.get_or_init(|| Mutex::new(()))
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }

@@ -65,7 +65,7 @@ pub fn list_markdown_files(root: &Path) -> Vec<MarkdownFile> {
                 .unwrap_or("")
                 .to_string()
         });
-        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        let size = entry.metadata().map_or(0, |m| m.len());
         out.push(MarkdownFile {
             abs: path.to_path_buf(),
             rel,
@@ -101,10 +101,8 @@ mod tests {
     use super::*;
 
     fn tmp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "plaintext-ide-files-{name}-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("plaintext-ide-files-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir

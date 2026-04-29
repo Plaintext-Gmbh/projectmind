@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use plaintext_ide_core::state::{self, UiState, ViewIntent};
 use plaintext_ide_core::walkthrough::{self as wt, Walkthrough, WalkthroughStep};
-use plaintext_ide_core::{diagram, git};
+use plaintext_ide_core::{diagram, git, html};
 use plaintext_ide_framework_spring::SpringPlugin;
 use plaintext_ide_plugin_api::FrameworkPlugin;
 use serde::Deserialize;
@@ -203,6 +203,7 @@ fn file_schema() -> Value {
 }
 
 /// Tool registry — also serves as the response of `tools/list`.
+#[allow(clippy::too_many_lines)]
 pub(crate) fn list() -> Value {
     json!({
         "tools": [
@@ -264,6 +265,16 @@ pub(crate) fn list() -> Value {
             {
                 "name": "plugin_info",
                 "description": "List active plugins (languages and frameworks).",
+                "inputSchema": no_args_schema()
+            },
+            {
+                "name": "list_html",
+                "description": "List HTML / XHTML / JSP / template files (.html .htm .xhtml .jsp .vm .ftl) in the open repository.",
+                "inputSchema": no_args_schema()
+            },
+            {
+                "name": "list_html_snippets",
+                "description": "Scan source files (.java .kt .groovy .scala) for HTML snippets in string literals (≥2 tags).",
                 "inputSchema": no_args_schema()
             },
             {
@@ -332,6 +343,8 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "module_summary" => module_summary(state).await,
         "relations" => relations(state).await,
         "plugin_info" => plugin_info(state).await,
+        "list_html" => list_html(state).await,
+        "list_html_snippets" => list_html_snippets(state).await,
         "view_class" => view_class(state, parsed.arguments).await,
         "view_diff" => view_diff(parsed.arguments),
         "view_file" => view_file(parsed.arguments),
@@ -674,6 +687,26 @@ async fn relations(state: &Mutex<ServerState>) -> DispatchResult {
     })
 }
 
+async fn list_html(state: &Mutex<ServerState>) -> DispatchResult {
+    let state = state.lock().await;
+    with_repo(&state, |repo| {
+        let files = html::list_html_files(&repo.root);
+        Ok(text_result(
+            serde_json::to_string_pretty(&files).unwrap_or_else(|_| "[]".into()),
+        ))
+    })
+}
+
+async fn list_html_snippets(state: &Mutex<ServerState>) -> DispatchResult {
+    let state = state.lock().await;
+    with_repo(&state, |repo| {
+        let snippets = html::find_html_snippets(&repo.root);
+        Ok(text_result(
+            serde_json::to_string_pretty(&snippets).unwrap_or_else(|_| "[]".into()),
+        ))
+    })
+}
+
 async fn plugin_info(state: &Mutex<ServerState>) -> DispatchResult {
     let state = state.lock().await;
     let body = json!({
@@ -895,11 +928,9 @@ fn walkthrough_set_step(args: Value) -> DispatchResult {
     let body = wt::read_body()
         .map_err(|e| DispatchError::internal(format!("walkthrough_set_step: {e}")))?
         .ok_or_else(|| {
-            DispatchError::invalid_params(
-                "walkthrough_set_step: no active tour".to_string(),
-            )
+            DispatchError::invalid_params("walkthrough_set_step: no active tour".to_string())
         })?;
-    let last = body.steps.len().saturating_sub(1) as u32;
+    let last = u32::try_from(body.steps.len().saturating_sub(1)).unwrap_or(u32::MAX);
     let clamped = args.index.min(last);
     let prev = state::read().ok().flatten().unwrap_or_default();
     publish_state(UiState {
@@ -944,11 +975,7 @@ fn walkthrough_feedback(args: Value) -> DispatchResult {
     let log = wt::read_feedback()
         .map_err(|e| DispatchError::internal(format!("walkthrough_feedback: {e}")))?;
     let since = args.since_ts.unwrap_or(0);
-    let events: Vec<&_> = log
-        .events
-        .iter()
-        .filter(|e| e.ts > since)
-        .collect();
+    let events: Vec<&_> = log.events.iter().filter(|e| e.ts > since).collect();
     let body = json!({
         "since_ts": since,
         "events": events,

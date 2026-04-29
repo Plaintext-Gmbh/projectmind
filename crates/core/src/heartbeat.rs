@@ -31,7 +31,9 @@ pub struct Heartbeat {
 #[must_use]
 pub fn heartbeat_path() -> PathBuf {
     let state = crate::state::statefile_path();
-    let parent = state.parent().map_or_else(std::env::temp_dir, Path::to_path_buf);
+    let parent = state
+        .parent()
+        .map_or_else(std::env::temp_dir, Path::to_path_buf);
     parent.join("ui-heartbeat.json")
 }
 
@@ -74,8 +76,7 @@ pub fn is_alive(stale_after: Duration) -> bool {
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs())
 }
 
 #[cfg(test)]
@@ -84,10 +85,8 @@ mod tests {
     use crate::test_lock;
 
     fn override_state_path(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "plaintext-ide-hb-{name}-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("plaintext-ide-hb-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("current.json");

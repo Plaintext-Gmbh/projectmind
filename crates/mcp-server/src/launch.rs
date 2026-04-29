@@ -84,12 +84,7 @@ fn resolve_app() -> Option<PathBuf> {
             return Some(pb);
         }
     }
-    for cand in platform_candidates() {
-        if cand.exists() {
-            return Some(cand);
-        }
-    }
-    None
+    platform_candidates().into_iter().find(|cand| cand.exists())
 }
 
 #[cfg(target_os = "macos")]
