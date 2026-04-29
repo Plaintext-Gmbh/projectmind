@@ -1,0 +1,19 @@
+[package]
+name = "plaintext-ide-lang-rust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Rust language plugin for plaintext-ide (Tree-sitter based)."
+
+[lints]
+workspace = true
+
+[dependencies]
+plaintext-ide-plugin-api = { workspace = true }
+
+tree-sitter      = { workspace = true }
+tree-sitter-rust = { workspace = true }
+tracing          = { workspace = true }

@@ -8,6 +8,7 @@ use plaintext_ide_core::{Engine, Repository};
 use plaintext_ide_framework_lombok::LombokPlugin;
 use plaintext_ide_framework_spring::SpringPlugin;
 use plaintext_ide_lang_java::JavaPlugin;
+use plaintext_ide_lang_rust::RustPlugin;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
@@ -25,6 +26,7 @@ impl ServerState {
     pub(crate) fn new() -> Self {
         let mut engine = Engine::new();
         engine.register_language(Box::new(JavaPlugin::new()));
+        engine.register_language(Box::new(RustPlugin::new()));
         engine.register_framework(Box::new(SpringPlugin::new()));
         engine.register_framework(Box::new(LombokPlugin::new()));
         Self { engine, repo: None }

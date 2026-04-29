@@ -2876,6 +2876,7 @@ dependencies = [
  "plaintext-ide-framework-lombok",
  "plaintext-ide-framework-spring",
  "plaintext-ide-lang-java",
+ "plaintext-ide-lang-rust",
  "plaintext-ide-plugin-api",
  "serde",
  "serde_json",
@@ -2930,6 +2931,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "plaintext-ide-lang-rust"
+version = "0.1.0"
+dependencies = [
+ "plaintext-ide-plugin-api",
+ "tracing",
+ "tree-sitter",
+ "tree-sitter-rust",
+]
+
+[[package]]
 name = "plaintext-ide-mcp"
 version = "0.1.0"
 dependencies = [
@@ -2939,6 +2950,7 @@ dependencies = [
  "plaintext-ide-framework-lombok",
  "plaintext-ide-framework-spring",
  "plaintext-ide-lang-java",
+ "plaintext-ide-lang-rust",
  "plaintext-ide-plugin-api",
  "serde",
  "serde_json",
@@ -4698,6 +4710,16 @@ name = "tree-sitter-java"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33bc21adf831a773c075d9d00107ab43965e6a6ea7607b47fd9ec6f3db4b481b"
+dependencies = [
+ "cc",
+ "tree-sitter",
+]
+
+[[package]]
+name = "tree-sitter-rust"
+version = "0.21.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "277690f420bf90741dea984f3da038ace46c4fe6047cba57a66822226cde1c93"
 dependencies = [
  "cc",
  "tree-sitter",

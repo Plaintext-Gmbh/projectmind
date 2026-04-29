@@ -21,6 +21,7 @@ plaintext-ide-core       = { workspace = true }
 
 # Local plugins linked statically for Phase 1
 plaintext-ide-lang-java         = { path = "../../plugins/lang-java", version = "0.1.0" }
+plaintext-ide-lang-rust         = { path = "../../plugins/lang-rust", version = "0.1.0" }
 plaintext-ide-framework-spring  = { path = "../../plugins/framework-spring", version = "0.1.0" }
 plaintext-ide-framework-lombok  = { path = "../../plugins/framework-lombok", version = "0.1.0" }
 
