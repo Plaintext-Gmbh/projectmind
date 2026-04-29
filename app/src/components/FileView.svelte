@@ -6,6 +6,7 @@
   import { fileAssetUrl, readFileText, listMarkdownFiles } from '../lib/api';
   import type { MarkdownFile } from '../lib/api';
   import { repo, fileView } from '../lib/store';
+  import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
 
   export let path: string;
   /// Optional heading slug to scroll to after rendering. If a slug doesn't
@@ -32,11 +33,14 @@
   let toc: TocEntry[] = [];
   let activeHeadingId: string | null = null;
 
-  /// Zoom factor for content text. Persisted via localStorage so reopens keep it.
-  let zoom = readZoom();
-  const ZOOM_MIN = 0.6;
-  const ZOOM_MAX = 2.0;
+  /// Zoom factor for content text. Wheel zoom (Shift+wheel) is bound on the
+  /// scroller via `use:zoomAction`; keyboard zoom (Cmd/Ctrl + + / − / 0) is
+  /// wired to the store further down. Persistence + clamping live in
+  /// shiftWheelZoom.ts.
   const ZOOM_STEP = 0.1;
+  const { zoom, action: zoomAction } = createShiftWheelZoom('projectmind.fileview.zoom', {
+    step: ZOOM_STEP,
+  });
 
   // ----- Markdown picker (project-wide .md files) ---------------------------
   let mdFiles: MarkdownFile[] = [];
@@ -354,56 +358,18 @@
   }
 
   // ----- Zoom ---------------------------------------------------------------
-
-  function clampZoom(z: number): number {
-    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
-  }
-
-  function readZoom(): number {
-    try {
-      const v = parseFloat(localStorage.getItem('projectmind.fileview.zoom') ?? '');
-      if (Number.isFinite(v) && v > 0) return clampZoom(v);
-    } catch {
-      // localStorage unavailable — fine.
-    }
-    return 1.0;
-  }
-
-  function persistZoom(z: number) {
-    try {
-      localStorage.setItem('projectmind.fileview.zoom', String(z));
-    } catch {
-      // ignore
-    }
-  }
-
-  function setZoom(z: number) {
-    zoom = clampZoom(z);
-    persistZoom(zoom);
-  }
+  // Wheel zoom is handled by `zoomAction` (attached to `scroller`).
+  // Keyboard zoom + the header zoom buttons go through these helpers — they
+  // hand the value back through the store, which clamps + persists.
 
   function zoomIn() {
-    setZoom(zoom + ZOOM_STEP);
+    zoom.update((z) => z + ZOOM_STEP);
   }
   function zoomOut() {
-    setZoom(zoom - ZOOM_STEP);
+    zoom.update((z) => z - ZOOM_STEP);
   }
   function zoomReset() {
-    setZoom(1.0);
-  }
-
-  function onWheel(ev: WheelEvent) {
-    if (!ev.shiftKey) return;
-    if (!scroller || !scroller.isConnected) return;
-    // Only intercept wheel events that originated inside our scroller — the
-    // viewer pane shares the window with the sidebar, and we don't want
-    // shift-scrolling on the file list to zoom the doc.
-    if (!(ev.target instanceof Node) || !scroller.contains(ev.target)) return;
-    const delta = Math.abs(ev.deltaY) >= Math.abs(ev.deltaX) ? ev.deltaY : ev.deltaX;
-    if (delta === 0) return;
-    ev.preventDefault();
-    if (delta < 0) zoomIn();
-    else zoomOut();
+    zoom.set(1.0);
   }
 
   function onKey(ev: KeyboardEvent) {
@@ -464,7 +430,6 @@
   onMount(() => {
     if (path) void load(path);
     window.addEventListener('keydown', onKey);
-    window.addEventListener('wheel', onWheel, { passive: false });
     document.addEventListener('mousedown', onDocClick);
     void ensureMdFilesLoaded();
   });
@@ -472,7 +437,6 @@
   onDestroy(() => {
     releaseMediaUrl();
     window.removeEventListener('keydown', onKey);
-    window.removeEventListener('wheel', onWheel);
     document.removeEventListener('mousedown', onDocClick);
   });
 </script>
@@ -540,7 +504,7 @@
     <div class="zoom" title="Zoom: Cmd/Ctrl + / − / 0">
       <button class="zoom-btn" on:click={zoomOut} aria-label="Zoom out">−</button>
       <button class="zoom-pct" on:click={zoomReset} aria-label="Reset zoom"
-        >{Math.round(zoom * 100)}%</button
+        >{Math.round($zoom * 100)}%</button
       >
       <button class="zoom-btn" on:click={zoomIn} aria-label="Zoom in">+</button>
     </div>
@@ -568,17 +532,18 @@
       <div
         class="scroller"
         bind:this={scroller}
+        use:zoomAction
         on:scroll={onScroll}
       >
         {#if mediaUrl}
-          <div class="media-view" style="font-size: {zoom}em;">
+          <div class="media-view" style="font-size: {$zoom}em;">
             <img src={mediaUrl} alt={path} />
           </div>
         {:else}
           <div
             class="content"
             bind:this={host}
-            style="font-size: {zoom}em;"
+            style="font-size: {$zoom}em;"
           >
             {@html html}
           </div>

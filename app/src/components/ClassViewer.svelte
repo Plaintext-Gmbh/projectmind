@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
   import type { ClassEntry } from '../lib/api';
+  import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
 
   export let klass: ClassEntry;
   export let source: string;
@@ -18,54 +18,11 @@
     return highlightRanges.some((r) => line >= r.from && line <= r.to);
   }
 
-  // ----- Zoom (Shift + wheel) ----------------------------------------------
-  const ZOOM_KEY = 'projectmind.classviewer.zoom';
-  const ZOOM_MIN = 0.6;
-  const ZOOM_MAX = 2.0;
-  const ZOOM_STEP = 0.1;
-  let zoom = readZoom();
-  let rootEl: HTMLDivElement;
-
-  function readZoom(): number {
-    try {
-      const v = parseFloat(localStorage.getItem(ZOOM_KEY) ?? '');
-      if (Number.isFinite(v) && v > 0) return clamp(v);
-    } catch {
-      // ignore
-    }
-    return 1.0;
-  }
-  function clamp(z: number): number {
-    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
-  }
-  function setZoom(z: number) {
-    zoom = clamp(z);
-    try {
-      localStorage.setItem(ZOOM_KEY, String(zoom));
-    } catch {
-      // ignore
-    }
-  }
-  function onWheel(ev: WheelEvent) {
-    if (!ev.shiftKey) return;
-    if (!rootEl || !rootEl.isConnected) return;
-    if (!(ev.target instanceof Node) || !rootEl.contains(ev.target)) return;
-    const delta = Math.abs(ev.deltaY) >= Math.abs(ev.deltaX) ? ev.deltaY : ev.deltaX;
-    if (delta === 0) return;
-    ev.preventDefault();
-    if (delta < 0) setZoom(zoom + ZOOM_STEP);
-    else setZoom(zoom - ZOOM_STEP);
-  }
-
-  onMount(() => {
-    window.addEventListener('wheel', onWheel, { passive: false });
-  });
-  onDestroy(() => {
-    window.removeEventListener('wheel', onWheel);
-  });
+  // Shift + wheel zoom, persisted under the per-component key.
+  const { zoom, action: zoomAction } = createShiftWheelZoom('projectmind.classviewer.zoom');
 </script>
 
-<div class="root" bind:this={rootEl} style="font-size: {zoom}em;">
+<div class="root" use:zoomAction style="font-size: {$zoom}em;">
   <div class="header">
     <div>
       <h2>{klass.name}</h2>

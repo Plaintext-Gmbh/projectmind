@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
   import {
     listHtmlFiles,
     findHtmlSnippets,
@@ -9,6 +8,12 @@
   import { repo } from '../lib/store';
   import { t } from '../lib/i18n';
   import { resizable } from '../lib/resizable';
+  import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
+
+  // Shift + wheel zoom for the rendered iframe / source pre. Scoped to the
+  // viewer column via `use:zoomAction` so shift-scrolling the sidebar doesn't
+  // resize the doc.
+  const { zoom, action: zoomAction } = createShiftWheelZoom('projectmind.htmlindex.zoom');
 
   type Tab = 'files' | 'snippets';
   type RenderMode = 'rendered' | 'source';
@@ -205,52 +210,6 @@
     return compact.length > 80 ? compact.slice(0, 77) + '…' : compact;
   }
 
-  // ----- Zoom (Shift + wheel) ----------------------------------------------
-  const ZOOM_KEY = 'projectmind.htmlindex.zoom';
-  const ZOOM_MIN = 0.6;
-  const ZOOM_MAX = 2.0;
-  const ZOOM_STEP = 0.1;
-  let zoom = readZoom();
-  let viewerEl: HTMLElement;
-
-  function readZoom(): number {
-    try {
-      const v = parseFloat(localStorage.getItem(ZOOM_KEY) ?? '');
-      if (Number.isFinite(v) && v > 0) return clampZoom(v);
-    } catch {
-      // ignore
-    }
-    return 1.0;
-  }
-  function clampZoom(z: number): number {
-    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
-  }
-  function setZoom(z: number) {
-    zoom = clampZoom(z);
-    try {
-      localStorage.setItem(ZOOM_KEY, String(zoom));
-    } catch {
-      // ignore
-    }
-  }
-  function onWheel(ev: WheelEvent) {
-    if (!ev.shiftKey) return;
-    if (!viewerEl || !viewerEl.isConnected) return;
-    if (!(ev.target instanceof Node) || !viewerEl.contains(ev.target)) return;
-    const delta = Math.abs(ev.deltaY) >= Math.abs(ev.deltaX) ? ev.deltaY : ev.deltaX;
-    if (delta === 0) return;
-    ev.preventDefault();
-    if (delta < 0) setZoom(zoom + ZOOM_STEP);
-    else setZoom(zoom - ZOOM_STEP);
-  }
-
-  onMount(() => {
-    void load($repo?.root ?? null);
-    window.addEventListener('wheel', onWheel, { passive: false });
-  });
-  onDestroy(() => {
-    window.removeEventListener('wheel', onWheel);
-  });
 </script>
 
 <section class="root">
@@ -363,7 +322,7 @@
       title={$t('app.resizeTitle')}
     ></div>
 
-    <main class="viewer" bind:this={viewerEl}>
+    <main class="viewer" use:zoomAction>
       {#if !selectedFile && !selectedSnippet}
         <div class="placeholder">{$t('html.select')}</div>
       {:else}
@@ -405,10 +364,10 @@
               title={$t('html.previewTitle')}
               sandbox=""
               src={iframeSrc}
-              style="zoom: {zoom};"
+              style="zoom: {$zoom};"
             ></iframe>
           {:else}
-            <pre class="source" style="font-size: {12.5 * zoom}px;"><code
+            <pre class="source" style="font-size: {12.5 * $zoom}px;"><code
               >{selectedSource}</code
             ></pre>
           {/if}

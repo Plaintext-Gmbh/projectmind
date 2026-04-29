@@ -23,6 +23,7 @@
   import ClassViewer from './ClassViewer.svelte';
   import FileView from './FileView.svelte';
   import DiffView from './DiffView.svelte';
+  import { readZoom, writeZoom, clampZoom, wheelDelta } from '../lib/shiftWheelZoom';
 
   export let cursorId: string;
   export let cursorStep: number;
@@ -45,12 +46,15 @@
   let targetError: string | null = null;
 
   // Zoom for walk-through-owned detail text. Embedded ClassViewer, FileView
-  // and DiffView keep their own zoom handling.
+  // and DiffView keep their own zoom handling. We can't use the standard
+  // `createShiftWheelZoom` action because the wheel target is two specific
+  // inner elements (plainEl, narrationEl) — there is no single ancestor
+  // that wouldn't also catch shift-wheel events meant for the embedded
+  // viewers. So we keep a bespoke handler and call into the helper for
+  // parsing / persistence.
   const ZOOM_KEY = 'projectmind.walkthrough.detail.zoom';
-  const ZOOM_MIN = 0.6;
-  const ZOOM_MAX = 2.0;
   const ZOOM_STEP = 0.1;
-  let detailZoom = readZoom();
+  let detailZoom = readZoom(ZOOM_KEY);
   let plainEl: HTMLPreElement | null = null;
   let narrationEl: HTMLElement | null = null;
 
@@ -305,27 +309,9 @@
     }
   }
 
-  function readZoom(): number {
-    try {
-      const v = parseFloat(localStorage.getItem(ZOOM_KEY) ?? '');
-      if (Number.isFinite(v) && v > 0) return clampZoom(v);
-    } catch {
-      // ignore
-    }
-    return 1.0;
-  }
-
-  function clampZoom(z: number): number {
-    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
-  }
-
   function setDetailZoom(z: number) {
     detailZoom = clampZoom(z);
-    try {
-      localStorage.setItem(ZOOM_KEY, String(detailZoom));
-    } catch {
-      // ignore
-    }
+    writeZoom(ZOOM_KEY, detailZoom);
   }
 
   function onWheel(ev: WheelEvent) {
@@ -334,7 +320,7 @@
     const inPlain = plainEl?.contains(ev.target) ?? false;
     const inNarration = narrationEl?.contains(ev.target) ?? false;
     if (!inPlain && !inNarration) return;
-    const delta = Math.abs(ev.deltaY) >= Math.abs(ev.deltaX) ? ev.deltaY : ev.deltaX;
+    const delta = wheelDelta(ev);
     if (delta === 0) return;
     ev.preventDefault();
     if (delta < 0) setDetailZoom(detailZoom + ZOOM_STEP);
