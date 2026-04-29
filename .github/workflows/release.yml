@@ -38,15 +38,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build release MCP binary
-        run: cargo build --release --bin plaintext-ide-mcp --target ${{ matrix.target }}
+        run: ./scripts/ci.sh release-build ${{ matrix.target }}
 
       - name: Package
-        run: |
-          set -euo pipefail
-          BIN_PATH="target/${{ matrix.target }}/release/${{ matrix.artifact_name }}"
-          ARCHIVE="${{ matrix.artifact_name }}-${{ matrix.asset_suffix }}.tar.gz"
-          tar czf "$ARCHIVE" -C "$(dirname "$BIN_PATH")" "$(basename "$BIN_PATH")" -C "$GITHUB_WORKSPACE" LICENSE README.md
-          shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
+        run: ./scripts/ci.sh release-package ${{ matrix.target }} ${{ matrix.asset_suffix }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
