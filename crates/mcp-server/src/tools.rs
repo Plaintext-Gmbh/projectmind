@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use projectmind_browser_host::{self as browser_host, BrowserHostConfig};
 use projectmind_core::state::{self, UiState, ViewIntent};
 use projectmind_core::walkthrough::{self as wt, Walkthrough, WalkthroughStep};
+use projectmind_core::files;
 use projectmind_core::{diagram, git, html};
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_plugin_api::FrameworkPlugin;
@@ -203,6 +204,16 @@ fn file_schema() -> Value {
     })
 }
 
+fn list_module_files_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "module": { "type": "string", "description": "Module id (as returned by module_summary)" }
+        },
+        "required": ["module"]
+    })
+}
+
 fn open_browser_repo_schema() -> Value {
     json!({
         "type": "object",
@@ -268,6 +279,11 @@ pub(crate) fn list() -> Value {
                 "name": "module_summary",
                 "description": "Per-module summary (classes, stereotype counts).",
                 "inputSchema": no_args_schema()
+            },
+            {
+                "name": "list_module_files",
+                "description": "List PDFs and images (.pdf .png .jpg .jpeg .webp .gif) inside a module's root. Source files (.java .rs) are excluded — those are surfaced by list_classes.",
+                "inputSchema": list_module_files_schema()
             },
             {
                 "name": "relations",
@@ -368,6 +384,7 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "find_class" => find_class(state, parsed.arguments).await,
         "class_outline" => class_outline(state, parsed.arguments).await,
         "module_summary" => module_summary(state).await,
+        "list_module_files" => list_module_files(state, parsed.arguments).await,
         "relations" => relations(state).await,
         "plugin_info" => plugin_info(state).await,
         "list_html" => list_html(state).await,
@@ -677,6 +694,27 @@ async fn module_summary(state: &Mutex<ServerState>) -> DispatchResult {
         }
         Ok(text_result(
             serde_json::to_string_pretty(&modules).unwrap_or_default(),
+        ))
+    })
+}
+
+#[derive(Deserialize)]
+struct ListModuleFilesArgs {
+    module: String,
+}
+
+async fn list_module_files(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
+    let args: ListModuleFilesArgs = serde_json::from_value(args)
+        .map_err(|e| DispatchError::invalid_params(format!("list_module_files: {e}")))?;
+    let state = state.lock().await;
+    with_repo(&state, |repo| {
+        let module = repo.modules.get(&args.module).ok_or_else(|| {
+            DispatchError::invalid_params(format!("module not found: {}", args.module))
+        })?;
+        let entries =
+            files::list_module_files(&module.root, &["pdf", "png", "jpg", "jpeg", "webp", "gif"]);
+        Ok(text_result(
+            serde_json::to_string_pretty(&entries).unwrap_or_else(|_| "[]".into()),
         ))
     })
 }

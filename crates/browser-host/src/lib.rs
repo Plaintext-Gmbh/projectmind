@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
-use projectmind_core::files::{self, MarkdownFile, MarkdownHit};
+use projectmind_core::files::{self, MarkdownFile, MarkdownHit, ModuleFile};
 use projectmind_core::git::{self, ChangedFile};
 use projectmind_core::html::{self, HtmlFile, HtmlSnippet};
 use projectmind_core::state::{self, UiState, ViewIntent};
@@ -464,6 +464,22 @@ fn route_api(
                 root,
             )))?)
         }
+        ("GET", "/api/list_module_files") => {
+            let module_id = required(query, "module")?;
+            let repo = repo(&guard)?;
+            let module = repo
+                .modules
+                .get(module_id)
+                .ok_or_else(|| anyhow::anyhow!("module not found: {module_id}"))?;
+            // Defensive: even though the module root came from the parsed repo,
+            // the `ensure_under_repo` check guarantees we never walk somewhere
+            // unexpected if the parser ever ends up with a stray absolute path.
+            ensure_under_repo(&guard, &module.root)?;
+            Ok(serde_json::to_value(files::list_module_files(
+                &module.root,
+                &["pdf", "png", "jpg", "jpeg", "webp", "gif"],
+            ))?)
+        }
         ("GET", "/api/current_walkthrough") => Ok(serde_json::to_value(wt::read_body()?)?),
         ("GET", "/api/current_walkthrough_feedback") => Ok(serde_json::to_value(
             wt::read_feedback().unwrap_or_default(),
@@ -901,10 +917,11 @@ fn now_secs() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, clippy::too_many_arguments)]
 fn _type_check_public_payloads(
     _: MarkdownFile,
     _: MarkdownHit,
+    _: ModuleFile,
     _: HtmlFile,
     _: HtmlSnippet,
     _: ChangedFile,

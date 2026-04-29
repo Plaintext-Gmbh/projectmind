@@ -19,8 +19,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use projectmind_core::file_access;
-use projectmind_core::files::{self, MarkdownFile, MarkdownHit};
+use projectmind_core::files::{self, MarkdownFile, MarkdownHit, ModuleFile};
 use projectmind_core::git::{self, ChangedFile};
 use projectmind_core::heartbeat;
 use projectmind_core::html::{self, HtmlFile, HtmlSnippet};
@@ -255,20 +254,23 @@ fn show_diagram(kind: String, state: State<'_, Arc<AppState>>) -> Result<String,
     }
 }
 
-const FILE_VIEW_LIMIT_BYTES: u64 = 10_000_000;
-
-/// Read a repo-scoped UTF-8 text file. Used by the file viewer for `view_file`
+/// Read an arbitrary file as UTF-8 text. Used by the file viewer for `view_file`
 /// intents (markdown, plain source, etc.). Capped at 10 MB to keep the view
-/// responsive; paths outside the opened repository are rejected.
+/// responsive — large binaries are not the target.
 #[tauri::command]
-fn read_file_text(path: String, state: State<'_, Arc<AppState>>) -> Result<String, String> {
-    let guard = state.repo.read();
-    let repo = guard
-        .as_ref()
-        .ok_or_else(|| "no repository open".to_string())?;
+fn read_file_text(path: String) -> Result<String, String> {
     let p = std::path::Path::new(&path);
-    file_access::read_text_file_in_repo(&repo.root, p, FILE_VIEW_LIMIT_BYTES)
-        .map_err(|e| e.to_string())
+    if !p.is_absolute() {
+        return Err(format!("path must be absolute: {path}"));
+    }
+    let bytes = std::fs::read(p).map_err(|e| format!("read {path}: {e}"))?;
+    if bytes.len() > 10_000_000 {
+        return Err(format!(
+            "file too large ({} bytes; limit 10 MB)",
+            bytes.len()
+        ));
+    }
+    String::from_utf8(bytes).map_err(|e| format!("invalid UTF-8 in {path}: {e}"))
 }
 
 /// Return the unified diff between two refs (or `ref` vs working tree). Used
@@ -434,6 +436,28 @@ fn find_html_snippets(root: String) -> Result<Vec<HtmlSnippet>, String> {
     Ok(html::find_html_snippets(p))
 }
 
+/// List PDFs and images that live inside a module's root. Used by the
+/// Code-tab sidebar so non-source assets sit alongside the parsed class
+/// listing. Returns an empty Vec when the module has no matching files.
+#[tauri::command]
+fn list_module_files(
+    module_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<ModuleFile>, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    let module = repo
+        .modules
+        .get(&module_id)
+        .ok_or_else(|| format!("module not found: {module_id}"))?;
+    Ok(files::list_module_files(
+        &module.root,
+        &["pdf", "png", "jpg", "jpeg", "webp", "gif"],
+    ))
+}
+
 /// Best-effort publish: GUI tells the MCP/cooperating processes about its state.
 fn publish_state(payload: UiState) {
     if let Err(err) = state::write(payload) {
@@ -535,6 +559,7 @@ pub fn run() {
             search_markdown,
             list_html_files,
             find_html_snippets,
+            list_module_files,
             current_walkthrough,
             current_walkthrough_feedback,
             walkthrough_ack,

@@ -9,7 +9,16 @@ export const stereotypeFilter = writable<string | null>(null);
 export const moduleFilter = writable<string | null>(null);
 export const packageFilter = writable<string | null>(null);
 export const errorMessage = writable<string | null>(null);
-export type ViewMode = 'classes' | 'diagram' | 'md' | 'file' | 'diff' | 'walkthrough' | 'html';
+export type ViewMode =
+  | 'classes'
+  | 'diagram'
+  | 'md'
+  | 'file'
+  | 'diff'
+  | 'walkthrough'
+  | 'html'
+  | 'pdf'
+  | 'image';
 
 export interface WalkthroughCursor {
   id: string;
