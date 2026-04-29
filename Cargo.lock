@@ -3075,6 +3075,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "dirs 5.0.1",
  "plaintext-ide-core",
  "plaintext-ide-framework-lombok",
  "plaintext-ide-framework-spring",
@@ -3083,6 +3084,7 @@ dependencies = [
  "plaintext-ide-plugin-api",
  "serde",
  "serde_json",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
  "tracing-subscriber",

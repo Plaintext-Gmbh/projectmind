@@ -17,6 +17,7 @@ pub mod diagram;
 pub mod engine;
 pub mod files;
 pub mod git;
+pub mod heartbeat;
 pub mod maven;
 pub mod repository;
 pub mod state;

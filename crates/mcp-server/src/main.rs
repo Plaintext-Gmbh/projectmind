@@ -10,6 +10,7 @@
 #![warn(clippy::pedantic)]
 
 mod handler;
+mod launch;
 mod tools;
 
 use std::io::{self, BufRead, Write};

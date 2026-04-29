@@ -21,6 +21,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use plaintext_ide_core::files::{self, MarkdownFile};
 use plaintext_ide_core::git::{self, ChangedFile};
+use plaintext_ide_core::heartbeat;
 use plaintext_ide_core::state::{self, UiState, ViewIntent};
 use plaintext_ide_core::{diagram, Engine, Repository};
 use plaintext_ide_framework_lombok::LombokPlugin;
@@ -290,6 +291,20 @@ fn publish_state(payload: UiState) {
     }
 }
 
+/// Liveness signal for the MCP server. Tauri shell writes a heartbeat every
+/// few seconds so the MCP side can decide whether it needs to (re)launch the
+/// GUI when the LLM issues a `view_*` intent.
+fn spawn_heartbeat() {
+    use std::thread;
+    use std::time::Duration;
+    thread::spawn(|| loop {
+        if let Err(err) = heartbeat::write() {
+            tracing::debug!(error = %err, "heartbeat write failed");
+        }
+        thread::sleep(Duration::from_secs(2));
+    });
+}
+
 /// Watch the statefile for external changes (i.e. an MCP write) and forward
 /// each new state to the frontend via Tauri events. Best-effort: a failure to
 /// set up the watcher is logged but does not block app startup.
@@ -370,6 +385,7 @@ pub fn run() {
         ])
         .setup(|app| {
             spawn_state_watcher(app.handle().clone());
+            spawn_heartbeat();
             Ok(())
         })
         .run(tauri::generate_context!())

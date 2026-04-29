@@ -15,6 +15,7 @@ use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
 use crate::handler::{with_repo, DispatchError, DispatchResult, ServerState, ToolCallParams};
+use crate::launch;
 
 /// JSON Schema for the `open_repo` tool.
 fn open_repo_schema() -> Value {
@@ -687,7 +688,13 @@ fn view_diagram(args: Value) -> DispatchResult {
 
 /// Best-effort statefile write. Failures are logged but never bubble up: the
 /// MCP server stays usable when there's no GUI / no writable cache directory.
+///
+/// We also nudge the GUI awake here: if no fresh heartbeat is seen we try to
+/// launch the Tauri shell so the user can actually see the LLM's intent.
+/// Throttled inside `launch::ensure_gui_running` so a chain of `view_*` calls
+/// doesn't double-spawn.
 fn publish_state(state: UiState) {
+    launch::ensure_gui_running();
     if let Err(err) = plaintext_ide_core::state::write(state) {
         tracing::warn!(error = %err, "failed to publish UI state");
     }

@@ -9,7 +9,7 @@ export const stereotypeFilter = writable<string | null>(null);
 export const moduleFilter = writable<string | null>(null);
 export const packageFilter = writable<string | null>(null);
 export const errorMessage = writable<string | null>(null);
-export type ViewMode = 'classes' | 'diagram' | 'file' | 'diff';
+export type ViewMode = 'classes' | 'diagram' | 'md' | 'file' | 'diff';
 export const viewMode = writable<ViewMode>('classes');
 
 export interface FileView {

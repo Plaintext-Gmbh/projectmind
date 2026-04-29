@@ -31,6 +31,7 @@
   import DiagramView from './components/DiagramView.svelte';
   import DiffView from './components/DiffView.svelte';
   import FileView from './components/FileView.svelte';
+  import MarkdownIndex from './components/MarkdownIndex.svelte';
   import ModuleSidebar from './components/ModuleSidebar.svelte';
 
   type Theme = 'dark' | 'light';
@@ -105,7 +106,7 @@
     await load(picked);
   }
 
-  async function load(path: string) {
+  async function load(path: string, opts: { silent?: boolean } = {}) {
     loading = true;
     errorMessage.set(null);
     try {
@@ -120,6 +121,10 @@
       packageFilter.set(null);
       classSource = '';
     } catch (err) {
+      if (opts.silent) {
+        // Re-throw so caller can decide whether to show or swallow.
+        throw err;
+      }
       errorMessage.set(String(err));
     } finally {
       loading = false;
@@ -139,14 +144,22 @@
   async function applyState(s: UiState) {
     if (s.seq <= lastSeq) return;
     lastSeq = s.seq;
-    followingMcp.set(true);
     applyingExternal = true;
     try {
-      // Switch repos if needed.
+      // Switch repos if needed. Swallow open errors silently — a stale
+      // statefile (e.g. a test run that left behind a tmp path) shouldn't
+      // pop up as a blocking error; the user can just open a fresh repo.
       const currentRoot = get(repo)?.root;
       if (s.repo_root && s.repo_root !== currentRoot) {
-        await load(s.repo_root);
+        try {
+          await load(s.repo_root, { silent: true });
+        } catch {
+          // Stale or vanished path. Silently abandon — keep the GUI on
+          // whatever state it's in (probably "no repo").
+          return;
+        }
       }
+      followingMcp.set(true);
       // Apply view intent.
       const v = s.view;
       switch (v.kind) {
@@ -238,9 +251,16 @@
       >
         Diagrams
       </button>
-      {#if $viewMode === 'file'}
-        <button class="active">File</button>
-      {/if}
+      <button
+        class:active={$viewMode === 'md' || $viewMode === 'file'}
+        on:click={() => {
+          followingMcp.set(false);
+          viewMode.set('md');
+        }}
+        title="Browse markdown files in this repository"
+      >
+        MD
+      </button>
       {#if $viewMode === 'diff'}
         <button class="active">Diff</button>
       {/if}
@@ -275,7 +295,7 @@
         <p>A read-only architecture browser.</p>
         <button on:click={pickAndOpen}>Open a repository to begin</button>
         <p class="hint">
-          Or use the <code>plaintext-ide-mcp</code> server with Claude Code — see the README.
+          Or use the <code>plaintext-ide-mcp</code> server with your favourite LLM CLI — see the README.
         </p>
       </div>
     </section>
@@ -350,6 +370,8 @@
       </div>
       <DiagramView kind={diagramKind} />
     </section>
+  {:else if $viewMode === 'md'}
+    <MarkdownIndex />
   {:else if $viewMode === 'file' && $fileView}
     <FileView
       path={$fileView.path}
