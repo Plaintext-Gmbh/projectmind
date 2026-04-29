@@ -23,22 +23,15 @@ Both Code and HTML layouts have drag handles (Pointer Events, persisted in
 `localStorage`, double-click resets to default). Reusable Svelte action
 lives in `app/src/lib/resizable.ts`.
 
-### Indexed / fuzzy markdown search
-**Effort:** M
-
-The MD-tab search currently filters by exact substring on title and path.
-Switch to a fuzzy matcher so typos and partial words still hit:
-
-- Use [`nucleo-matcher`](https://docs.rs/nucleo-matcher) (the matcher behind
-  Helix) on the Rust side. Build the index once when `list_markdown_files`
-  runs and cache it keyed by `repo.root`.
-- Optional: index a snippet of the *content* (first 4 KB) so the user can
-  search by phrases that appear inside the document, not just titles.
-- Frontend keeps the same UI; the Tauri command is upgraded to take a
-  `query` param and return scored hits.
+### ~~Indexed / fuzzy markdown search~~ ✅ done
+Backend `search_markdown(root, query, limit)` powered by `nucleo-matcher`,
+scoring against title, path, and the first ~4 KB of content. The frontend
+debounces the query (80 ms) and shows a flat scored list with match-kind
+badges + content snippets when the hit comes from the body. Empty query
+falls through to the grouped browse view.
 
 Same treatment is a natural fit later for **HTML snippets** and the **class
-list** in the Code tab.
+list** in the Code tab — the Rust function is generic enough to crib.
 
 ## Medium features (half a day each)
 

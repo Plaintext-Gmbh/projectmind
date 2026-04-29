@@ -77,6 +77,23 @@ export async function listMarkdownFiles(root: string): Promise<MarkdownFile[]> {
   return invoke<MarkdownFile[]>('list_markdown_files', { root });
 }
 
+export type MatchKind = 'title' | 'path' | 'content';
+
+export interface MarkdownHit {
+  file: MarkdownFile;
+  score: number;
+  matched_in: MatchKind;
+  snippet: string | null;
+}
+
+export async function searchMarkdown(
+  root: string,
+  query: string,
+  limit = 200,
+): Promise<MarkdownHit[]> {
+  return invoke<MarkdownHit[]>('search_markdown', { root, query, limit });
+}
+
 export type HtmlKind = 'html' | 'xhtml' | 'jsp' | 'velocity' | 'freemarker';
 
 export interface HtmlFile {

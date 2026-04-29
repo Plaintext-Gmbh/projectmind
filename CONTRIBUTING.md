@@ -8,8 +8,8 @@ Thanks for your interest! `projectmind` is an **early MVP** — the MCP server a
 
 The current design notes live under [`docs/plan/`](docs/plan/). If something is unclear, missing, or could be improved:
 
-- Open a [Discussion](https://github.com/daniel-marthaler/projectmind/discussions) for open-ended topics
-- Open an [Issue](https://github.com/daniel-marthaler/projectmind/issues) for concrete proposals or problems
+- Open a [Discussion](https://github.com/Plaintext-Gmbh/projectmind/discussions) for open-ended topics
+- Open an [Issue](https://github.com/Plaintext-Gmbh/projectmind/issues) for concrete proposals or problems
 
 ### Reporting Bugs
 

@@ -229,11 +229,8 @@ struct TempRepo {
 
 impl TempRepo {
     fn create_with_java_class() -> Self {
-        let root = std::env::temp_dir().join(format!(
-            "projectmind-it-{}-{}",
-            std::process::id(),
-            uniq()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("projectmind-it-{}-{}", std::process::id(), uniq()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(
             root.join("Hello.java"),
@@ -244,11 +241,8 @@ impl TempRepo {
     }
 
     fn create_with_spring_service() -> Self {
-        let root = std::env::temp_dir().join(format!(
-            "projectmind-it-{}-{}",
-            std::process::id(),
-            uniq()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("projectmind-it-{}-{}", std::process::id(), uniq()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(
             root.join("UserService.java"),
@@ -264,11 +258,8 @@ impl TempRepo {
     }
 
     fn create_with_class_outline() -> Self {
-        let root = std::env::temp_dir().join(format!(
-            "projectmind-it-{}-{}",
-            std::process::id(),
-            uniq()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("projectmind-it-{}-{}", std::process::id(), uniq()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(
             root.join("Sample.java"),

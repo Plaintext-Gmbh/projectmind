@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use projectmind_core::files::{self, MarkdownFile};
+use projectmind_core::files::{self, MarkdownFile, MarkdownHit};
 use projectmind_core::git::{self, ChangedFile};
 use projectmind_core::heartbeat;
 use projectmind_core::html::{self, HtmlFile, HtmlSnippet};
@@ -392,6 +392,22 @@ fn list_markdown_files(root: String) -> Result<Vec<MarkdownFile>, String> {
     Ok(files::list_markdown_files(p))
 }
 
+/// Fuzzy-search markdown files. Returns scored hits across title, path,
+/// and content snippets. With an empty query it falls through to the plain
+/// listing — same as `list_markdown_files`.
+#[tauri::command]
+fn search_markdown(root: String, query: String, limit: usize) -> Result<Vec<MarkdownHit>, String> {
+    let p = std::path::Path::new(&root);
+    if !p.is_absolute() {
+        return Err(format!("root must be absolute: {root}"));
+    }
+    if !p.is_dir() {
+        return Err(format!("root is not a directory: {root}"));
+    }
+    let cap = if limit == 0 { 200 } else { limit };
+    Ok(files::search_markdown(p, &query, cap))
+}
+
 /// List every HTML/XHTML/JSP/template file under `root`. Used by the HTML
 /// browser's file panel.
 #[tauri::command]
@@ -517,6 +533,7 @@ pub fn run() {
             read_file_text,
             current_state,
             list_markdown_files,
+            search_markdown,
             list_html_files,
             find_html_snippets,
             current_walkthrough,

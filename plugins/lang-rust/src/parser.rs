@@ -560,10 +560,8 @@ mod tests {
     #[test]
     fn namespace_is_crate_plus_file_stem() {
         // Pretend there's a Cargo.toml at /repo/Cargo.toml with name = "myapp".
-        let dir = std::env::temp_dir().join(format!(
-            "projectmind-lang-rust-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("projectmind-lang-rust-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("src")).unwrap();
         std::fs::write(

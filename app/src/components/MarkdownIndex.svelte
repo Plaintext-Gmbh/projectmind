@@ -1,31 +1,26 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { listMarkdownFiles } from '../lib/api';
-  import type { MarkdownFile } from '../lib/api';
+  import { searchMarkdown } from '../lib/api';
+  import type { MarkdownFile, MarkdownHit } from '../lib/api';
   import { repo, fileView, viewMode } from '../lib/store';
 
-  let files: MarkdownFile[] = [];
+  let hits: MarkdownHit[] = [];
   let loadedFor: string | null = null;
   let loading = false;
+  let searching = false;
   let error: string | null = null;
   let query = '';
+  let searchSeq = 0;
+  let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
-  $: filtered = filterFiles(files, query);
+  /// Reload (empty query) whenever the repo root changes.
   $: void load($repo?.root ?? null);
-
-  function filterFiles(list: MarkdownFile[], q: string): MarkdownFile[] {
-    if (!q.trim()) return list;
-    const needle = q.toLowerCase();
-    return list.filter(
-      (f) =>
-        f.rel.toLowerCase().includes(needle) ||
-        f.title.toLowerCase().includes(needle),
-    );
-  }
+  /// Re-run the fuzzy search whenever the query changes.
+  $: scheduleSearch(query, $repo?.root ?? null);
 
   async function load(root: string | null) {
     if (!root) {
-      files = [];
+      hits = [];
       loadedFor = null;
       return;
     }
@@ -33,14 +28,34 @@
     loading = true;
     error = null;
     try {
-      files = await listMarkdownFiles(root);
+      hits = await searchMarkdown(root, '', 500);
       loadedFor = root;
     } catch (err) {
       error = String(err);
-      files = [];
+      hits = [];
     } finally {
       loading = false;
     }
+  }
+
+  function scheduleSearch(q: string, root: string | null) {
+    if (!root || loadedFor !== root) return;
+    if (searchTimer) clearTimeout(searchTimer);
+    const seq = ++searchSeq;
+    searchTimer = setTimeout(async () => {
+      searching = true;
+      try {
+        const result = await searchMarkdown(root, q, q.trim() ? 200 : 500);
+        if (seq !== searchSeq) return;
+        hits = result;
+        error = null;
+      } catch (err) {
+        if (seq !== searchSeq) return;
+        error = String(err);
+      } finally {
+        if (seq === searchSeq) searching = false;
+      }
+    }, 80);
   }
 
   function open(f: MarkdownFile) {
@@ -63,19 +78,19 @@
     return idx === -1 ? '·' : rel.slice(0, idx);
   }
 
-  // Group entries by their top-level directory for a tidier overview.
-  $: grouped = groupByDir(filtered);
+  /// Group hits when no query is active (browsing mode); flat scored list when
+  /// a query is in flight (relevance order matters more than directory).
+  $: grouped = query.trim() ? null : groupByDir(hits);
 
-  function groupByDir(list: MarkdownFile[]): Array<[string, MarkdownFile[]]> {
-    const map = new Map<string, MarkdownFile[]>();
-    for (const f of list) {
-      const key = topDir(f.rel);
+  function groupByDir(list: MarkdownHit[]): Array<[string, MarkdownHit[]]> {
+    const map = new Map<string, MarkdownHit[]>();
+    for (const h of list) {
+      const key = topDir(h.file.rel);
       const arr = map.get(key) ?? [];
-      arr.push(f);
+      arr.push(h);
       map.set(key, arr);
     }
     return Array.from(map.entries()).sort((a, b) => {
-      // Root-level files (·) bubble up first, then alphabetical.
       if (a[0] === '·' && b[0] !== '·') return -1;
       if (b[0] === '·' && a[0] !== '·') return 1;
       return a[0].localeCompare(b[0]);
@@ -92,7 +107,13 @@
     <div class="title-block">
       <h2>Markdown</h2>
       {#if $repo}
-        <span class="subtitle">{files.length} files in {$repo.root}</span>
+        <span class="subtitle">
+          {#if query.trim()}
+            {hits.length} hits in {$repo.root}
+          {:else}
+            {hits.length} files in {$repo.root}
+          {/if}
+        </span>
       {:else}
         <span class="subtitle">no repository open</span>
       {/if}
@@ -101,11 +122,14 @@
       type="text"
       class="search"
       bind:value={query}
-      placeholder="Search title or path…"
+      placeholder="Fuzzy-search title, path or content…"
       autocomplete="off"
       spellcheck="false"
-      disabled={!$repo || files.length === 0}
+      disabled={!$repo || (loadedFor !== null && hits.length === 0 && !query.trim())}
     />
+    {#if searching}
+      <span class="searching" aria-live="polite">searching…</span>
+    {/if}
   </header>
 
   <div class="body">
@@ -115,27 +139,42 @@
       <div class="empty">Scanning…</div>
     {:else if error}
       <div class="error">⚠ {error}</div>
-    {:else if files.length === 0}
+    {:else if hits.length === 0 && !query.trim()}
       <div class="empty">No markdown files found in this repository.</div>
-    {:else if filtered.length === 0}
+    {:else if hits.length === 0}
       <div class="empty">No matches for &ldquo;{query}&rdquo;.</div>
-    {:else}
+    {:else if grouped}
       {#each grouped as [dir, entries] (dir)}
         <section class="group">
           <h3 class="group-title">{dir === '·' ? '(root)' : dir}</h3>
           <ul class="list">
-            {#each entries as f (f.abs)}
+            {#each entries as h (h.file.abs)}
               <li>
-                <button type="button" class="item" on:click={() => open(f)}>
-                  <span class="item-title">{f.title}</span>
-                  <span class="item-size">{fmtSize(f.size)}</span>
-                  <span class="item-path">{f.rel}</span>
+                <button type="button" class="item" on:click={() => open(h.file)}>
+                  <span class="item-title">{h.file.title}</span>
+                  <span class="item-size">{fmtSize(h.file.size)}</span>
+                  <span class="item-path">{h.file.rel}</span>
                 </button>
               </li>
             {/each}
           </ul>
         </section>
       {/each}
+    {:else}
+      <ul class="list flat">
+        {#each hits as h (h.file.abs)}
+          <li>
+            <button type="button" class="item" on:click={() => open(h.file)}>
+              <span class="item-title">{h.file.title}</span>
+              <span class="match-kind {h.matched_in}">{h.matched_in}</span>
+              <span class="item-path">{h.file.rel}</span>
+              {#if h.snippet}
+                <span class="item-snippet">{h.snippet}</span>
+              {/if}
+            </button>
+          </li>
+        {/each}
+      </ul>
     {/if}
   </div>
 </section>
@@ -198,6 +237,12 @@
     opacity: 0.5;
   }
 
+  .searching {
+    font-size: 11px;
+    color: var(--fg-2);
+    font-style: italic;
+  }
+
   .body {
     flex: 1;
     overflow-y: auto;
@@ -236,11 +281,14 @@
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     gap: 8px;
   }
+  .list.flat {
+    grid-template-columns: 1fr;
+  }
 
   .item {
     display: grid;
     grid-template-columns: 1fr auto;
-    grid-template-rows: auto auto;
+    grid-auto-rows: auto;
     gap: 4px 8px;
     width: 100%;
     text-align: left;
@@ -282,5 +330,36 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .item-snippet {
+    grid-column: 1 / -1;
+    font-size: 11.5px;
+    color: var(--fg-1);
+    line-height: 1.45;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .match-kind {
+    align-self: center;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 6px;
+    border-radius: 8px;
+    background: var(--bg-2);
+    color: var(--fg-2);
+    font-family: var(--mono);
+  }
+  .match-kind.title {
+    background: color-mix(in srgb, var(--accent-2) 25%, var(--bg-1));
+    color: var(--accent-2);
+  }
+  .match-kind.content {
+    background: color-mix(in srgb, var(--warn) 22%, var(--bg-1));
+    color: var(--warn);
   }
 </style>

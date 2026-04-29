@@ -24,4 +24,5 @@ walkdir     = { workspace = true }
 git2        = { workspace = true }
 quick-xml   = { workspace = true }
 regex       = { workspace = true }
+nucleo-matcher = { workspace = true }
 dirs        = { workspace = true }

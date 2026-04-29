@@ -31,10 +31,7 @@ const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     init_tracing();
-    info!(
-        version = SERVER_VERSION,
-        "projectmind MCP server starting"
-    );
+    info!(version = SERVER_VERSION, "projectmind MCP server starting");
 
     let state = Mutex::new(ServerState::new());
 

@@ -90,7 +90,7 @@ keeps continuity with the Plaintext family of tools. No refresh planned.
 
 ## Where the name appears
 
-- GitHub repo: `daniel-marthaler/projectmind`
+- GitHub repo: `Plaintext-Gmbh/projectmind`
 - Cargo crates: `projectmind`, `projectmind-core`, `projectmind-mcp`,
   `projectmind-plugin-api`, `projectmind-lang-*`, `projectmind-framework-*`
 - Binary: `projectmind-mcp` (the MCP server) and `projectmind-app` (the

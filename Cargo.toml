@@ -15,7 +15,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
-repository = "https://github.com/daniel-marthaler/projectmind"
+repository = "https://github.com/Plaintext-Gmbh/projectmind"
 authors = ["Daniel Marthaler <daniel@marthaler.io>"]
 rust-version = "1.80"
 
@@ -75,6 +75,9 @@ quick-xml = "0.36"
 
 # Pattern matching (HTML snippet detection)
 regex = "1"
+
+# Fuzzy matching (markdown / class / snippet search)
+nucleo-matcher = "0.3"
 
 # Filesystem
 dirs   = "5"

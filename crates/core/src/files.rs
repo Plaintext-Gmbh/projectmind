@@ -77,6 +77,157 @@ pub fn list_markdown_files(root: &Path) -> Vec<MarkdownFile> {
     out
 }
 
+/// One scored hit returned by [`search_markdown`].
+#[derive(Debug, Clone, Serialize)]
+pub struct MarkdownHit {
+    /// The matched file (same shape as [`MarkdownFile`]).
+    pub file: MarkdownFile,
+    /// Combined fuzzy score across title, path, and content. Higher is
+    /// better; absolute values aren't meaningful — only ordering is.
+    pub score: u32,
+    /// Where the match landed: `title`, `path`, or `content`. The strongest
+    /// of the three wins; we surface it so the UI can show context.
+    pub matched_in: MatchKind,
+    /// Optional snippet of the body around the matched substring. `None`
+    /// when the hit didn't come from content.
+    pub snippet: Option<String>,
+}
+
+/// Which field carried the strongest fuzzy match.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum MatchKind {
+    /// Match was strongest in the document title (first H1 / file stem).
+    Title,
+    /// Match was strongest in the relative path.
+    Path,
+    /// Match was strongest in the content body.
+    Content,
+}
+
+/// Fuzzy-search markdown files under `root`. The query is matched against
+/// each file's title, relative path, and a content snippet (first ~4 KB of
+/// the file). Results are returned sorted by descending score, capped at
+/// `limit`. With an empty query the behaviour is identical to
+/// [`list_markdown_files`] — every file with score 0, in path order — so
+/// the UI can use a single code path.
+#[must_use]
+pub fn search_markdown(root: &Path, query: &str, limit: usize) -> Vec<MarkdownHit> {
+    use nucleo_matcher::{
+        pattern::{CaseMatching, Normalization, Pattern},
+        Config, Matcher, Utf32Str,
+    };
+
+    let files = list_markdown_files(root);
+
+    if query.trim().is_empty() {
+        return files
+            .into_iter()
+            .take(limit)
+            .map(|f| MarkdownHit {
+                file: f,
+                score: 0,
+                matched_in: MatchKind::Path,
+                snippet: None,
+            })
+            .collect();
+    }
+
+    let mut matcher = Matcher::new(Config::DEFAULT);
+    let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
+    let mut buf_a: Vec<char> = Vec::new();
+    let mut buf_b: Vec<char> = Vec::new();
+    let mut buf_c: Vec<char> = Vec::new();
+
+    let mut hits: Vec<MarkdownHit> = Vec::new();
+    for f in files {
+        let body = read_snippet(&f.abs);
+
+        let title_str = Utf32Str::new(&f.title, &mut buf_a);
+        let path_str = Utf32Str::new(&f.rel, &mut buf_b);
+        let body_str = Utf32Str::new(&body, &mut buf_c);
+
+        let title_score = pattern.score(title_str, &mut matcher).unwrap_or(0);
+        let path_score = pattern.score(path_str, &mut matcher).unwrap_or(0);
+        let body_score = pattern.score(body_str, &mut matcher).unwrap_or(0);
+
+        // Bias title and path higher than content so a title-hit beats a
+        // chance content-hit of the same raw score.
+        let weighted_title = title_score.saturating_mul(3);
+        let weighted_path = path_score.saturating_mul(2);
+        let combined = weighted_title.max(weighted_path).max(body_score);
+        if combined == 0 {
+            continue;
+        }
+
+        let matched_in = if weighted_title >= weighted_path && weighted_title >= body_score {
+            MatchKind::Title
+        } else if weighted_path >= body_score {
+            MatchKind::Path
+        } else {
+            MatchKind::Content
+        };
+
+        let snippet = if matched_in == MatchKind::Content {
+            content_snippet(&body, query)
+        } else {
+            None
+        };
+
+        hits.push(MarkdownHit {
+            file: f,
+            score: combined,
+            matched_in,
+            snippet,
+        });
+    }
+
+    hits.sort_by(|a, b| b.score.cmp(&a.score).then(a.file.rel.cmp(&b.file.rel)));
+    hits.truncate(limit);
+    hits
+}
+
+fn read_snippet(path: &Path) -> String {
+    use std::io::Read;
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return String::new();
+    };
+    let mut buf = vec![0u8; 4096];
+    let n = f.read(&mut buf).unwrap_or(0);
+    buf.truncate(n);
+    String::from_utf8(buf).unwrap_or_default()
+}
+
+/// Pick a ~120-char window around the first case-insensitive substring hit.
+/// Falls back to the file head when nothing matches (e.g. fuzzy hit on
+/// non-contiguous letters).
+fn content_snippet(body: &str, query: &str) -> Option<String> {
+    let needle = query.trim();
+    if needle.is_empty() || body.is_empty() {
+        return None;
+    }
+    let haystack_lower = body.to_lowercase();
+    let needle_lower = needle.to_lowercase();
+    let center = haystack_lower.find(&needle_lower);
+    let (start, end) = match center {
+        Some(idx) => {
+            let s = idx.saturating_sub(50);
+            let e = (idx + needle.len() + 70).min(body.len());
+            (s, e)
+        }
+        None => (0, body.len().min(120)),
+    };
+    let mut out = String::new();
+    if start > 0 {
+        out.push('…');
+    }
+    out.push_str(body[start..end].trim());
+    if end < body.len() {
+        out.push('…');
+    }
+    Some(out.replace('\n', " "))
+}
+
 /// Read the first ATX H1 (`# Title`) from a markdown file. Returns `None` if
 /// no H1 is found in the first 200 lines or the file isn't readable.
 fn first_h1(path: &Path) -> Option<String> {

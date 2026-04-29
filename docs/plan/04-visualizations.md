@@ -85,7 +85,7 @@ The plugin API allows **multiple visualizer plugins per data shape** — so a `b
 
 1. Drop a Markdown sketch in `docs/plan/sketches/<your-name>-<topic>.md`
 2. Include: concept, what it answers, candidate library, rough mock (ASCII / image / Mermaid)
-3. Open a [Discussion](https://github.com/daniel-marthaler/projectmind/discussions) linking the sketch
+3. Open a [Discussion](https://github.com/Plaintext-Gmbh/projectmind/discussions) linking the sketch
 4. Promising sketches graduate to `docs/plan/04-viz-<short-name>.md` with a more detailed design
 5. Adopted sketches become a `viz-*` plugin in `plugins/`
 

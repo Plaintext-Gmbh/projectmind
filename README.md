@@ -73,7 +73,7 @@ This is the path you want for **using `projectmind` from Claude Code on Ubuntu**
 The repo ships an installer for the impatient:
 
 ```bash
-git clone git@github.com:daniel-marthaler/projectmind.git
+git clone git@github.com:Plaintext-Gmbh/projectmind.git
 cd projectmind
 ./scripts/install-ubuntu.sh             # MCP server only
 # or:
@@ -88,7 +88,7 @@ sudo apt install -y build-essential pkg-config libssl-dev cmake git curl
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
 
-git clone git@github.com:daniel-marthaler/projectmind.git
+git clone git@github.com:Plaintext-Gmbh/projectmind.git
 cd projectmind
 cargo build --release --bin projectmind-mcp
 
@@ -103,7 +103,7 @@ brew install rustup-init || true
 rustup-init -y
 source "$HOME/.cargo/env"
 
-git clone git@github.com:daniel-marthaler/projectmind.git
+git clone git@github.com:Plaintext-Gmbh/projectmind.git
 cd projectmind
 cargo build --release --bin projectmind-mcp
 ```
