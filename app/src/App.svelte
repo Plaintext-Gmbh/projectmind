@@ -76,7 +76,7 @@
   $: codeTabLabel = $repo && $repo.classes === 0 ? 'Files' : 'Code';
 
   let diagramKind: 'bean-graph' | 'package-tree' | 'folder-map' = 'bean-graph';
-  let folderMapLayout: 'hierarchy' | 'solar' = 'solar';
+  let folderMapLayout: 'hierarchy' | 'solar' | 'td' = 'solar';
   let classSource = '';
   let classMeta: { file: string; line_start: number; line_end: number } | null = null;
   let loading = false;
@@ -534,14 +534,6 @@
         <button class:active={diagramKind === 'folder-map'} on:click={() => (diagramKind = 'folder-map')}>
           Folder map
         </button>
-        {#if diagramKind === 'folder-map'}
-          <button class:active={folderMapLayout === 'solar'} on:click={() => (folderMapLayout = 'solar')}>
-            Solar
-          </button>
-          <button class:active={folderMapLayout === 'hierarchy'} on:click={() => (folderMapLayout = 'hierarchy')}>
-            Hierarchy
-          </button>
-        {/if}
         <span class="diagram-hint">Click a node to drill into it</span>
       </div>
       <DiagramView kind={diagramKind} folderLayout={folderMapLayout} />

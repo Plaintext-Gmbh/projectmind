@@ -7,6 +7,7 @@
   import {
     classes,
     selectedClass,
+    fileView,
     moduleFilter,
     packageFilter,
     stereotypeFilter,
@@ -14,7 +15,7 @@
   } from '../lib/store';
 
   export let kind: DiagramKind;
-  export let folderLayout: 'hierarchy' | 'solar' = 'solar';
+  export let folderLayout: 'hierarchy' | 'solar' | 'td' = 'solar';
 
   interface FolderMapNode {
     id: string;
@@ -110,7 +111,17 @@
     ty = 0;
   }
 
-  async function render(k: DiagramKind, layout: 'hierarchy' | 'solar') {
+  function openFolderNode(path: string, nodeKind: string) {
+    if (nodeKind !== 'file') return;
+    fileView.update((cur) => ({
+      path,
+      anchor: null,
+      nonce: (cur?.nonce ?? 0) + 1,
+    }));
+    viewMode.set('file');
+  }
+
+  async function render(k: DiagramKind, layout: 'hierarchy' | 'solar' | 'td') {
     loading = true;
     error = null;
     try {
@@ -154,8 +165,10 @@
     }
   }
 
-  function renderFolderMap(map: FolderMap, layout: 'hierarchy' | 'solar'): string {
-    return layout === 'hierarchy' ? renderFolderHierarchy(map) : renderFolderSolar(map);
+  function renderFolderMap(map: FolderMap, layout: 'hierarchy' | 'solar' | 'td'): string {
+    if (layout === 'solar') return renderFolderSolar(map);
+    if (layout === 'td') return renderFolderTopDown(map);
+    return renderFolderHierarchy(map);
   }
 
   function renderFolderHierarchy(map: FolderMap): string {
@@ -163,19 +176,21 @@
     const byParent = groupByParent(nodes);
     const rows: Array<{ n: FolderMapNode; x: number; y: number }> = [];
     const nextY = { value: 70 };
+    const xGap = 210;
+    const yGap = 58;
     function place(id: string, depth: number) {
       const n = nodes.find((node) => node.id === id);
       if (!n) return;
       const children = byParent.get(id) ?? [];
       if (children.length === 0) {
-        rows.push({ n, x: 80 + depth * 210, y: nextY.value });
-        nextY.value += 58;
+        rows.push({ n, x: 80 + depth * xGap, y: nextY.value });
+        nextY.value += yGap;
         return;
       }
       const before = nextY.value;
       for (const child of children) place(child.id, depth + 1);
-      const after = nextY.value - 58;
-      rows.push({ n, x: 80 + depth * 210, y: (before + after) / 2 });
+      const after = nextY.value - yGap;
+      rows.push({ n, x: 80 + depth * xGap, y: (before + after) / 2 });
     }
     place('.', 0);
     const byId = new Map(rows.map((r) => [r.n.id, r]));
@@ -192,10 +207,60 @@
     const body = rows
       .map(({ n, x, y }) => {
         const radius = nodeRadius(n);
-        return `<g class="node ${n.kind}" transform="translate(${x} ${y})">
+        return `<g class="node ${n.kind}" data-path="${esc(n.path)}" data-kind="${n.kind}" transform="translate(${x} ${y})">
           <circle r="${radius}"/>
           <text x="${radius + 8}" y="-3">${esc(shortLabel(n.label, 22))}</text>
           <text x="${radius + 8}" y="13" class="meta">${n.kind} · ${n.weight}</text>
+        </g>`;
+      })
+      .join('');
+    return folderSvg(width, height, edges + body, map);
+  }
+
+  function renderFolderTopDown(map: FolderMap): string {
+    const nodes = [...map.nodes].sort((a, b) => a.depth - b.depth || a.id.localeCompare(b.id));
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const byParent = groupByParent(nodes);
+    const placed = new Map<string, { n: FolderMapNode; x: number; y: number }>();
+    const leafX = { value: 95 };
+    const xGap = 120;
+    const yGap = 112;
+
+    function place(id: string, depth: number): number {
+      const n = byId.get(id);
+      if (!n) return leafX.value;
+      const children = byParent.get(id) ?? [];
+      let x: number;
+      if (children.length === 0) {
+        x = leafX.value;
+        leafX.value += xGap;
+      } else {
+        const childXs = children.map((child) => place(child.id, depth + 1));
+        x = (childXs[0] + childXs[childXs.length - 1]) / 2;
+      }
+      placed.set(id, { n, x, y: 70 + depth * yGap });
+      return x;
+    }
+
+    place('.', 0);
+    const rows = [...placed.values()];
+    const width = Math.max(900, leafX.value + 95);
+    const height = Math.max(520, Math.max(...rows.map((r) => r.y), 0) + 120);
+    const edges = rows
+      .filter((r) => r.n.parent)
+      .map((r) => {
+        const p = placed.get(r.n.parent ?? '');
+        if (!p) return '';
+        return `<path d="M${p.x} ${p.y + 32} C${p.x} ${p.y + 70}, ${r.x} ${r.y - 70}, ${r.x} ${r.y - 18}" class="edge"/>`;
+      })
+      .join('');
+    const body = rows
+      .map(({ n, x, y }) => {
+        const radius = nodeRadius(n);
+        return `<g class="node ${n.kind}" data-path="${esc(n.path)}" data-kind="${n.kind}" transform="translate(${x} ${y})">
+          <circle r="${radius}"/>
+          <text y="${radius + 17}" text-anchor="middle">${esc(shortLabel(n.label, 14))}</text>
+          <text y="${radius + 31}" class="meta" text-anchor="middle">${n.kind} · ${n.weight}</text>
         </g>`;
       })
       .join('');
@@ -240,7 +305,7 @@
     const body = [...placed.values()]
       .map(({ n, x, y }) => {
         const r = nodeRadius(n);
-        return `<g class="node ${n.kind}" transform="translate(${x} ${y})">
+        return `<g class="node ${n.kind}" data-path="${esc(n.path)}" data-kind="${n.kind}" transform="translate(${x} ${y})">
           <circle r="${r}"/>
           <text y="${r + 16}" text-anchor="middle">${esc(shortLabel(n.label, 18))}</text>
         </g>`;
@@ -281,6 +346,8 @@
         .edge{stroke:#3d4657;stroke-width:1.4;fill:none;opacity:.75}
         .orbit{stroke:#2a3344;stroke-width:1;fill:none;stroke-dasharray:6 10}
         .node circle{stroke-width:2;filter:drop-shadow(0 8px 14px rgba(0,0,0,.28))}
+        .node{cursor:default}
+        .node.file{cursor:pointer}
         .node.root circle{fill:#4f46e5;stroke:#c4b5fd}
         .node.folder circle{fill:#0f766e;stroke:#5eead4}
         .node.file circle{fill:#334155;stroke:#94a3b8}
@@ -306,8 +373,17 @@
         '"': '&quot;',
         "'": '&#39;',
       };
-      return map[ch] ?? ch;
+    return map[ch] ?? ch;
     });
+  }
+
+  function onClick(e: MouseEvent) {
+    if (kind !== 'folder-map') return;
+    const target = e.target as Element | null;
+    const node = target?.closest?.('.node') as SVGGElement | null;
+    const path = node?.dataset.path;
+    const nodeKind = node?.dataset.kind;
+    if (path && nodeKind) openFolderNode(path, nodeKind);
   }
 
   function applyScale(s: number) {
@@ -338,6 +414,7 @@
   }
 
   function onMouseDown(e: MouseEvent) {
+    if ((e.target as Element | null)?.closest?.('.node.file')) return;
     if (e.button !== 0) return;
     dragging = true;
     dragStartX = e.clientX;
@@ -373,6 +450,24 @@
     <button on:click={() => zoomBy(1.25)} title="Zoom in">＋</button>
     <button on:click={() => zoomBy(0.8)} title="Zoom out">－</button>
     <button on:click={resetView} title="Reset view">⌂</button>
+    {#if kind === 'folder-map'}
+      <span class="divider"></span>
+      <button
+        class:active={folderLayout === 'solar'}
+        on:click={() => (folderLayout = 'solar')}
+        title="Solar layout"
+      >☉</button>
+      <button
+        class:active={folderLayout === 'hierarchy'}
+        on:click={() => (folderLayout = 'hierarchy')}
+        title="Hierarchy layout"
+      >H</button>
+      <button
+        class:active={folderLayout === 'td'}
+        on:click={() => (folderLayout = 'td')}
+        title="Top-down layout"
+      >TD</button>
+    {/if}
     <span class="zoom-readout">{Math.round(scale * 100)}%</span>
     <span class="hint">Drag to pan • Shift + wheel to zoom</span>
   </div>
@@ -383,11 +478,13 @@
     <pre>{mermaidSource}</pre>
   {:else}
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div
       class="stage"
       class:dragging
       bind:this={stage}
       on:wheel={onWheel}
+      on:click={onClick}
       on:mousedown={onMouseDown}
       on:mousemove={onMouseMove}
       on:mouseup={endDrag}
@@ -430,6 +527,19 @@
     padding: 0;
     font-size: 14px;
     line-height: 1;
+  }
+
+  .toolbar button.active {
+    color: var(--accent-2);
+    border-color: var(--accent-2);
+    background: color-mix(in srgb, var(--accent-2) 16%, var(--bg-2));
+  }
+
+  .divider {
+    width: 1px;
+    height: 18px;
+    margin: 0 4px;
+    background: var(--bg-3);
   }
 
   .zoom-readout {

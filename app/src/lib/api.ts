@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 
 const TOKEN_KEY = 'projectmind.browser.token';
 
@@ -140,6 +140,26 @@ export async function showDiff(reference: string, to?: string): Promise<string> 
 export async function readFileText(path: string): Promise<string> {
   if (!isTauriRuntime()) return api<string>(`/api/read_file_text${query({ path })}`);
   return invoke<string>('read_file_text', { path });
+}
+
+export async function fileAssetUrl(path: string): Promise<string> {
+  if (isTauriRuntime()) return convertFileSrc(path);
+  const token = browserToken();
+  if (!token) throw new Error('Browser token required');
+  const res = await fetch(`/api/read_file_bytes${query({ path })}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const body = await res.json();
+      if (body?.error) msg = body.error;
+    } catch {
+      // keep HTTP status
+    }
+    throw new Error(msg);
+  }
+  return URL.createObjectURL(await res.blob());
 }
 
 export interface MarkdownFile {

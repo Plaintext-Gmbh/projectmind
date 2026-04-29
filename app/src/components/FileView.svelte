@@ -3,7 +3,7 @@
   import { marked } from 'marked';
   import mermaid from 'mermaid';
   import { convertFileSrc } from '@tauri-apps/api/core';
-  import { readFileText, listMarkdownFiles } from '../lib/api';
+  import { fileAssetUrl, readFileText, listMarkdownFiles } from '../lib/api';
   import type { MarkdownFile } from '../lib/api';
   import { repo, fileView } from '../lib/store';
 
@@ -23,6 +23,8 @@
 
   let content = '';
   let html = '';
+  let mediaUrl = '';
+  let ownedMediaUrl: string | null = null;
   let error: string | null = null;
   let loading = false;
   let host: HTMLDivElement;
@@ -145,10 +147,17 @@
     loading = true;
     error = null;
     html = '';
+    releaseMediaUrl();
+    mediaUrl = '';
     content = '';
     toc = [];
     activeHeadingId = null;
     try {
+      if (isImage(p)) {
+        mediaUrl = await fileAssetUrl(p);
+        if (mediaUrl.startsWith('blob:')) ownedMediaUrl = mediaUrl;
+        return;
+      }
       content = await readFileText(p);
       if (isMarkdown(p)) {
         html = await renderMarkdown(content);
@@ -173,6 +182,21 @@
 
   function isMarkdown(p: string): boolean {
     return /\.(md|markdown|mdx)$/i.test(p);
+  }
+
+  function isImage(p: string): boolean {
+    return /\.(png|jpe?g|gif|webp|svg)$/i.test(p);
+  }
+
+  function fileKind(p: string): string {
+    if (isMarkdown(p)) return 'markdown';
+    if (isImage(p)) return 'image';
+    return 'file';
+  }
+
+  function releaseMediaUrl() {
+    if (ownedMediaUrl) URL.revokeObjectURL(ownedMediaUrl);
+    ownedMediaUrl = null;
   }
 
   async function renderMarkdown(src: string): Promise<string> {
@@ -407,6 +431,7 @@
   });
 
   onDestroy(() => {
+    releaseMediaUrl();
     window.removeEventListener('keydown', onKey);
     window.removeEventListener('wheel', onWheel);
     document.removeEventListener('mousedown', onDocClick);
@@ -415,7 +440,7 @@
 
 <section class="root">
   <header class="bar">
-    <span class="kind">{isMarkdown(path) ? 'markdown' : 'file'}</span>
+    <span class="kind">{fileKind(path)}</span>
     <code class="path" title={path}>{path}</code>
     <div class="spacer"></div>
     {#if mdFiles.length > 0}
@@ -506,13 +531,19 @@
         bind:this={scroller}
         on:scroll={onScroll}
       >
-        <div
-          class="content"
-          bind:this={host}
-          style="font-size: {zoom}em;"
-        >
-          {@html html}
-        </div>
+        {#if mediaUrl}
+          <div class="media-view" style="font-size: {zoom}em;">
+            <img src={mediaUrl} alt={path} />
+          </div>
+        {:else}
+          <div
+            class="content"
+            bind:this={host}
+            style="font-size: {zoom}em;"
+          >
+            {@html html}
+          </div>
+        {/if}
       </div>
     </div>
   {/if}
@@ -821,6 +852,23 @@
     max-width: 920px;
     margin: 0 auto;
     transition: font-size 80ms ease;
+  }
+
+  .media-view {
+    min-height: 100%;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 24px 32px 64px;
+    overflow: auto;
+  }
+
+  .media-view img {
+    max-width: 100%;
+    height: auto;
+    border: 1px solid var(--bg-3);
+    border-radius: var(--radius-sm);
+    background: var(--bg-1);
   }
 
   /* Markdown styling */
