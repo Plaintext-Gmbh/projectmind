@@ -132,7 +132,7 @@
           {/each}
         </div>
         <ul class="class-list" role="listbox" aria-label="Classes">
-          {#each $filteredClasses as c (c.fqn)}
+          {#each $filteredClasses as c (`${c.module}::${c.fqn}`)}
             <li role="option" aria-selected={$selectedClass?.fqn === c.fqn}>
               <button
                 type="button"
