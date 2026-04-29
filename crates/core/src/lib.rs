@@ -12,12 +12,14 @@
 
 #![warn(missing_docs)]
 
+pub mod cargo;
 pub mod diagram;
 pub mod engine;
 pub mod git;
 pub mod maven;
 pub mod repository;
 
+pub use cargo::CargoCrate;
 pub use engine::Engine;
 pub use maven::MavenModule;
 pub use repository::{Repository, RepositoryError};

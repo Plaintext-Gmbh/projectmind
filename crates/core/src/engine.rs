@@ -83,8 +83,11 @@ impl Engine {
     /// Walk a repository, parse files with registered language plugins, then enrich with
     /// framework plugins.
     ///
-    /// If one or more `pom.xml` files are found, the repository is split into Maven modules.
-    /// Otherwise the whole repo is treated as a single module.
+    /// Multi-module detection runs in priority order: Maven first (any `pom.xml`), then
+    /// Cargo (any `Cargo.toml` with a `[package]` section). The two are mutually exclusive
+    /// because a mixed Maven/Cargo monorepo is rare in practice and the natural attribution
+    /// rule — deepest containing manifest wins — would still be unambiguous, but Phase 1
+    /// stays simple. If neither layout is detected, the whole repo is parsed as one module.
     pub fn open_repo(&self, path: &Path) -> Result<Repository, RepositoryError> {
         let path = std::fs::canonicalize(path)
             .map_err(|_| RepositoryError::InvalidPath(path.to_path_buf()))?;
@@ -96,16 +99,27 @@ impl Engine {
         let mut repo = Repository::new(path.clone());
 
         let maven_modules = crate::maven::discover(&path);
-        if maven_modules.is_empty() {
-            let module = self.parse_root(&path)?;
-            repo.insert_module(module);
-        } else {
+        if !maven_modules.is_empty() {
             info!(
                 modules = maven_modules.len(),
                 "Maven multi-module project detected"
             );
             for m in self.parse_maven_modules(&path, &maven_modules)? {
                 repo.insert_module(m);
+            }
+        } else {
+            let cargo_crates = crate::cargo::discover(&path);
+            if !cargo_crates.is_empty() {
+                info!(
+                    crates = cargo_crates.len(),
+                    "Cargo workspace detected"
+                );
+                for m in self.parse_cargo_crates(&path, &cargo_crates)? {
+                    repo.insert_module(m);
+                }
+            } else {
+                let module = self.parse_root(&path)?;
+                repo.insert_module(module);
             }
         }
 
@@ -156,6 +170,64 @@ impl Engine {
             }
         }
         Ok(module)
+    }
+
+    fn parse_cargo_crates(
+        &self,
+        repo_root: &Path,
+        crates: &[crate::cargo::CargoCrate],
+    ) -> Result<Vec<Module>, RepositoryError> {
+        let by_ext = self.index_languages_by_extension();
+        if by_ext.is_empty() {
+            warn!("no language plugins registered, skipping parse");
+            return Ok(Vec::new());
+        }
+
+        let mut out: BTreeMap<String, Module> = BTreeMap::new();
+        for cr in crates {
+            out.insert(
+                cr.coordinate(),
+                Module {
+                    id: cr.coordinate(),
+                    name: cr.name.clone(),
+                    root: cr.root.clone(),
+                    classes: BTreeMap::new(),
+                },
+            );
+        }
+
+        let walker = WalkBuilder::new(repo_root)
+            .standard_filters(true)
+            .hidden(false)
+            .build();
+        for entry in walker.filter_map(Result::ok) {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let Some(ext) = path.extension().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let Some(plugin) = by_ext.get(ext) else {
+                continue;
+            };
+            let Some(cr) = crate::cargo::attribute(crates, path) else {
+                continue;
+            };
+            if let Some(module) = out.get_mut(&cr.coordinate()) {
+                self.parse_file_into(path, *plugin, module);
+            }
+        }
+
+        for module in out.values_mut() {
+            for fw in &self.frameworks {
+                if let Err(err) = fw.enrich(module) {
+                    warn!(plugin = fw.info().id, error = %err, "framework enrich failed");
+                }
+            }
+        }
+
+        Ok(out.into_values().collect())
     }
 
     fn parse_maven_modules(
