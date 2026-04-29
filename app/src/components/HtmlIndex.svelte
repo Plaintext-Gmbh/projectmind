@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import {
     listHtmlFiles,
     findHtmlSnippets,
@@ -203,8 +203,49 @@
     return compact.length > 80 ? compact.slice(0, 77) + '…' : compact;
   }
 
+  // ----- Zoom (Shift + wheel) ----------------------------------------------
+  const ZOOM_KEY = 'plaintext-ide.htmlindex.zoom';
+  const ZOOM_MIN = 0.6;
+  const ZOOM_MAX = 2.0;
+  const ZOOM_STEP = 0.1;
+  let zoom = readZoom();
+  let viewerEl: HTMLElement;
+
+  function readZoom(): number {
+    try {
+      const v = parseFloat(localStorage.getItem(ZOOM_KEY) ?? '');
+      if (Number.isFinite(v) && v > 0) return clampZoom(v);
+    } catch {
+      // ignore
+    }
+    return 1.0;
+  }
+  function clampZoom(z: number): number {
+    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
+  }
+  function setZoom(z: number) {
+    zoom = clampZoom(z);
+    try {
+      localStorage.setItem(ZOOM_KEY, String(zoom));
+    } catch {
+      // ignore
+    }
+  }
+  function onWheel(ev: WheelEvent) {
+    if (!ev.shiftKey) return;
+    if (!viewerEl || !viewerEl.isConnected) return;
+    if (!(ev.target instanceof Node) || !viewerEl.contains(ev.target)) return;
+    ev.preventDefault();
+    if (ev.deltaY < 0) setZoom(zoom + ZOOM_STEP);
+    else if (ev.deltaY > 0) setZoom(zoom - ZOOM_STEP);
+  }
+
   onMount(() => {
     void load($repo?.root ?? null);
+    window.addEventListener('wheel', onWheel, { passive: false });
+  });
+  onDestroy(() => {
+    window.removeEventListener('wheel', onWheel);
   });
 </script>
 
@@ -306,7 +347,7 @@
       {/if}
     </aside>
 
-    <main class="viewer">
+    <main class="viewer" bind:this={viewerEl}>
       {#if !selectedFile && !selectedSnippet}
         <div class="placeholder">Select a file or snippet on the left.</div>
       {:else}
@@ -348,9 +389,12 @@
               title="HTML preview"
               sandbox=""
               src={iframeSrc}
+              style="zoom: {zoom};"
             ></iframe>
           {:else}
-            <pre class="source"><code>{selectedSource}</code></pre>
+            <pre class="source" style="font-size: {12.5 * zoom}px;"><code
+              >{selectedSource}</code
+            ></pre>
           {/if}
         </div>
       {/if}

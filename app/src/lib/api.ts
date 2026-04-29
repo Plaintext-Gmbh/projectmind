@@ -23,6 +23,8 @@ export interface RepoSummary {
   classes: number;
   language_plugins: string[];
   framework_plugins: string[];
+  markdown_count: number;
+  html_count: number;
 }
 
 export interface ChangedFile {

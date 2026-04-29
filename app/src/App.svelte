@@ -65,6 +65,10 @@
     theme = theme === 'dark' ? 'light' : 'dark';
   }
 
+  // The Code tab falls back to "Files" when the repo has no parsed classes
+  // (e.g. a docs-only or office-style folder).
+  $: codeTabLabel = $repo && $repo.classes === 0 ? 'Files' : 'Code';
+
   let diagramKind: 'bean-graph' | 'package-tree' = 'bean-graph';
   let classSource = '';
   let classMeta: { file: string; line_start: number; line_end: number } | null = null;
@@ -252,40 +256,46 @@
           viewMode.set('classes');
         }}
       >
-        Code
+        {codeTabLabel}
       </button>
-      <button
-        class:active={$viewMode === 'diagram'}
-        disabled={!$repo}
-        on:click={() => {
-          followingMcp.set(false);
-          viewMode.set('diagram');
-        }}
-      >
-        Diagrams
-      </button>
-      <button
-        class:active={$viewMode === 'md' || $viewMode === 'file'}
-        disabled={!$repo}
-        on:click={() => {
-          followingMcp.set(false);
-          viewMode.set('md');
-        }}
-        title="Browse markdown files in this repository"
-      >
-        MD
-      </button>
-      <button
-        class:active={$viewMode === 'html'}
-        disabled={!$repo}
-        on:click={() => {
-          followingMcp.set(false);
-          viewMode.set('html');
-        }}
-        title="Browse HTML files and snippets in this repository"
-      >
-        HTML
-      </button>
+      {#if !$repo || ($repo && $repo.classes > 0)}
+        <button
+          class:active={$viewMode === 'diagram'}
+          disabled={!$repo}
+          on:click={() => {
+            followingMcp.set(false);
+            viewMode.set('diagram');
+          }}
+        >
+          Diagrams
+        </button>
+      {/if}
+      {#if !$repo || ($repo && $repo.markdown_count > 0)}
+        <button
+          class:active={$viewMode === 'md' || $viewMode === 'file'}
+          disabled={!$repo}
+          on:click={() => {
+            followingMcp.set(false);
+            viewMode.set('md');
+          }}
+          title="Browse markdown files in this repository"
+        >
+          MD
+        </button>
+      {/if}
+      {#if !$repo || ($repo && $repo.html_count > 0)}
+        <button
+          class:active={$viewMode === 'html'}
+          disabled={!$repo}
+          on:click={() => {
+            followingMcp.set(false);
+            viewMode.set('html');
+          }}
+          title="Browse HTML files and snippets in this repository"
+        >
+          HTML
+        </button>
+      {/if}
       {#if $walkthroughCursor}
         <button
           class:active={$viewMode === 'walkthrough'}

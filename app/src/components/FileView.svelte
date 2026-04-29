@@ -368,6 +368,18 @@
     setZoom(1.0);
   }
 
+  function onWheel(ev: WheelEvent) {
+    if (!ev.shiftKey) return;
+    if (!scroller || !scroller.isConnected) return;
+    // Only intercept wheel events that originated inside our scroller — the
+    // viewer pane shares the window with the sidebar, and we don't want
+    // shift-scrolling on the file list to zoom the doc.
+    if (!(ev.target instanceof Node) || !scroller.contains(ev.target)) return;
+    ev.preventDefault();
+    if (ev.deltaY < 0) zoomIn();
+    else if (ev.deltaY > 0) zoomOut();
+  }
+
   function onKey(ev: KeyboardEvent) {
     // Only intercept when this view is on screen.
     if (!scroller || !scroller.isConnected) return;
@@ -389,12 +401,14 @@
   onMount(() => {
     if (path) void load(path);
     window.addEventListener('keydown', onKey);
+    window.addEventListener('wheel', onWheel, { passive: false });
     document.addEventListener('mousedown', onDocClick);
     void ensureMdFilesLoaded();
   });
 
   onDestroy(() => {
     window.removeEventListener('keydown', onKey);
+    window.removeEventListener('wheel', onWheel);
     document.removeEventListener('mousedown', onDocClick);
   });
 </script>

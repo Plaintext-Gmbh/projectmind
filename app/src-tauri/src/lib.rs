@@ -64,6 +64,12 @@ pub struct RepoSummary {
     pub classes: usize,
     pub language_plugins: Vec<&'static str>,
     pub framework_plugins: Vec<&'static str>,
+    /// Number of markdown files. Used by the GUI to hide the MD tab when there's
+    /// nothing to show.
+    pub markdown_count: usize,
+    /// Total HTML/XHTML/JSP/template files plus extracted snippets. The GUI
+    /// hides the HTML tab when this is zero.
+    pub html_count: usize,
 }
 
 /// One class entry exposed to the UI.
@@ -104,12 +110,17 @@ fn open_repo(path: String, state: State<'_, Arc<AppState>>) -> Result<RepoSummar
         .engine
         .open_repo(std::path::Path::new(&path))
         .map_err(|e| e.to_string())?;
+    let markdown_count = files::list_markdown_files(&repo.root).len();
+    let html_count =
+        html::list_html_files(&repo.root).len() + html::find_html_snippets(&repo.root).len();
     let summary = RepoSummary {
         root: repo.root.clone(),
         modules: repo.modules.len(),
         classes: repo.class_count(),
         language_plugins: state.engine.language_ids(),
         framework_plugins: state.engine.framework_ids(),
+        markdown_count,
+        html_count,
     };
     let root = repo.root.clone();
     *state.repo.write() = Some(repo);

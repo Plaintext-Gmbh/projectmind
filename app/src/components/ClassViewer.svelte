@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount, onDestroy } from 'svelte';
   import type { ClassEntry } from '../lib/api';
 
   export let klass: ClassEntry;
@@ -16,9 +17,53 @@
   function inWalkthroughRange(line: number): boolean {
     return highlightRanges.some((r) => line >= r.from && line <= r.to);
   }
+
+  // ----- Zoom (Shift + wheel) ----------------------------------------------
+  const ZOOM_KEY = 'plaintext-ide.classviewer.zoom';
+  const ZOOM_MIN = 0.6;
+  const ZOOM_MAX = 2.0;
+  const ZOOM_STEP = 0.1;
+  let zoom = readZoom();
+  let rootEl: HTMLDivElement;
+
+  function readZoom(): number {
+    try {
+      const v = parseFloat(localStorage.getItem(ZOOM_KEY) ?? '');
+      if (Number.isFinite(v) && v > 0) return clamp(v);
+    } catch {
+      // ignore
+    }
+    return 1.0;
+  }
+  function clamp(z: number): number {
+    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
+  }
+  function setZoom(z: number) {
+    zoom = clamp(z);
+    try {
+      localStorage.setItem(ZOOM_KEY, String(zoom));
+    } catch {
+      // ignore
+    }
+  }
+  function onWheel(ev: WheelEvent) {
+    if (!ev.shiftKey) return;
+    if (!rootEl || !rootEl.isConnected) return;
+    if (!(ev.target instanceof Node) || !rootEl.contains(ev.target)) return;
+    ev.preventDefault();
+    if (ev.deltaY < 0) setZoom(zoom + ZOOM_STEP);
+    else if (ev.deltaY > 0) setZoom(zoom - ZOOM_STEP);
+  }
+
+  onMount(() => {
+    window.addEventListener('wheel', onWheel, { passive: false });
+  });
+  onDestroy(() => {
+    window.removeEventListener('wheel', onWheel);
+  });
 </script>
 
-<div class="root">
+<div class="root" bind:this={rootEl} style="font-size: {zoom}em;">
   <div class="header">
     <div>
       <h2>{klass.name}</h2>

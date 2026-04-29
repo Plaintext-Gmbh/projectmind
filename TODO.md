@@ -6,34 +6,15 @@ off as time allows.
 
 ## Quick wins (≤ 1 hour each)
 
-### Hide nav buttons that have no content
-**Effort:** S
+### ~~Hide nav buttons that have no content~~ ✅ done
+Tabs hide based on `RepoSummary.{classes, markdown_count, html_count}`. The
+Code tab renames to **Files** when the repo has zero parsed classes. Diagrams
+still uses the legacy bean-graph/package-tree pair — per-plugin diagram
+contributions land in the Larger features section below.
 
-The nav buttons should disappear (not just be `disabled`) when the open
-repository has nothing to show under them:
-
-- **MD** → hide if `list_markdown_files(root)` is empty.
-- **HTML** → hide if `list_html_files(root)` and `find_html_snippets(root)` are both empty.
-- **Code** → keep visible always (it's the main view), but rename to **Files** if
-  the repo has zero parsed classes (e.g. an "office" repo of pure folders +
-  documents). Trigger: `repo.classes === 0`.
-- **Diagrams** → hide if there are no diagrams to render — i.e. when no
-  diagram-producing plugin is active for the open repo.
-
-Implementation sketch: extend `RepoSummary` with `markdown_count`,
-`html_count`, `available_diagrams: string[]`, populated by `open_repo`. The
-frontend checks those fields when deciding whether to render each tab.
-
-### Shift + wheel zoom in detail views
-**Effort:** S
-
-`FileView.svelte` already has a `zoom` factor with `+`/`−` buttons. Add a
-`wheel` listener that, when `shiftKey` is true, multiplies/divides by
-`ZOOM_STEP`. Same treatment for `ClassViewer.svelte` (currently no zoom)
-and the `HtmlIndex` source/rendered panes.
-
-Persist per-component in `localStorage` (`plaintext-ide.zoom.<view>`) so it
-survives reopens.
+### ~~Shift + wheel zoom in detail views~~ ✅ done
+Wired into `FileView`, `ClassViewer`, and `HtmlIndex` (source pane + rendered
+iframe via CSS `zoom`). Persisted per-view in `localStorage`.
 
 ## Small features (1–3 hours)
 
