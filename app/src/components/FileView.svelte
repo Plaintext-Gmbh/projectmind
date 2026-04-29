@@ -3,10 +3,9 @@
   import { marked } from 'marked';
   import mermaid from 'mermaid';
   import { convertFileSrc } from '@tauri-apps/api/core';
-  import { readFileText, listMarkdownFiles } from '../lib/api';
+  import { fileAssetUrl, readFileText, listMarkdownFiles } from '../lib/api';
   import type { MarkdownFile } from '../lib/api';
   import { repo, fileView } from '../lib/store';
-  import { t } from '../lib/i18n';
 
   export let path: string;
   /// Optional heading slug to scroll to after rendering. If a slug doesn't
@@ -24,6 +23,8 @@
 
   let content = '';
   let html = '';
+  let mediaUrl = '';
+  let ownedMediaUrl: string | null = null;
   let error: string | null = null;
   let loading = false;
   let host: HTMLDivElement;
@@ -146,10 +147,17 @@
     loading = true;
     error = null;
     html = '';
+    releaseMediaUrl();
+    mediaUrl = '';
     content = '';
     toc = [];
     activeHeadingId = null;
     try {
+      if (isImage(p)) {
+        mediaUrl = await fileAssetUrl(p);
+        if (mediaUrl.startsWith('blob:')) ownedMediaUrl = mediaUrl;
+        return;
+      }
       content = await readFileText(p);
       if (isMarkdown(p)) {
         html = await renderMarkdown(content);
@@ -174,6 +182,21 @@
 
   function isMarkdown(p: string): boolean {
     return /\.(md|markdown|mdx)$/i.test(p);
+  }
+
+  function isImage(p: string): boolean {
+    return /\.(png|jpe?g|gif|webp|svg)$/i.test(p);
+  }
+
+  function fileKind(p: string): string {
+    if (isMarkdown(p)) return 'markdown';
+    if (isImage(p)) return 'image';
+    return 'file';
+  }
+
+  function releaseMediaUrl() {
+    if (ownedMediaUrl) URL.revokeObjectURL(ownedMediaUrl);
+    ownedMediaUrl = null;
   }
 
   async function renderMarkdown(src: string): Promise<string> {
@@ -408,6 +431,7 @@
   });
 
   onDestroy(() => {
+    releaseMediaUrl();
     window.removeEventListener('keydown', onKey);
     window.removeEventListener('wheel', onWheel);
     document.removeEventListener('mousedown', onDocClick);
@@ -416,7 +440,7 @@
 
 <section class="root">
   <header class="bar">
-    <span class="kind">{isMarkdown(path) ? $t('file.markdown') : $t('file.file')}</span>
+    <span class="kind">{fileKind(path)}</span>
     <code class="path" title={path}>{path}</code>
     <div class="spacer"></div>
     {#if mdFiles.length > 0}
@@ -426,10 +450,10 @@
           class="picker-trigger"
           class:active={pickerOpen}
           on:click={togglePicker}
-          title={$t('file.openAnother')}
+          title="Open another markdown file in this project"
         >
           <span class="picker-icon">📄</span>
-          {$t('file.files')}
+          Files
           <span class="picker-count">{mdFiles.length}</span>
           <span class="picker-caret">▾</span>
         </button>
@@ -441,12 +465,12 @@
               on:keydown={onPickerKeydown}
               type="text"
               class="picker-search"
-              placeholder={$t('file.searchMarkdown')}
+              placeholder="Search markdown files…"
               autocomplete="off"
               spellcheck="false"
             />
             {#if pickerFiltered.length === 0}
-              <div class="picker-empty">{$t('file.noMatches')}</div>
+              <div class="picker-empty">No matches</div>
             {:else}
               <ul class="picker-list">
                 {#each pickerFiltered as f, i (f.abs)}
@@ -468,29 +492,29 @@
               </ul>
             {/if}
             <div class="picker-foot">
-              {$t('file.pickerFoot', { filtered: pickerFiltered.length, total: mdFiles.length })}
+              {pickerFiltered.length} / {mdFiles.length} • ↑↓ navigate • Enter open • Esc close
             </div>
           </div>
         {/if}
       </div>
     {/if}
-    <div class="zoom" title={$t('file.zoomTitle')}>
-      <button class="zoom-btn" on:click={zoomOut} aria-label={$t('file.zoomOut')}>−</button>
-      <button class="zoom-pct" on:click={zoomReset} aria-label={$t('file.zoomReset')}
+    <div class="zoom" title="Zoom: Cmd/Ctrl + / − / 0">
+      <button class="zoom-btn" on:click={zoomOut} aria-label="Zoom out">−</button>
+      <button class="zoom-pct" on:click={zoomReset} aria-label="Reset zoom"
         >{Math.round(zoom * 100)}%</button
       >
-      <button class="zoom-btn" on:click={zoomIn} aria-label={$t('file.zoomIn')}>+</button>
+      <button class="zoom-btn" on:click={zoomIn} aria-label="Zoom in">+</button>
     </div>
   </header>
   {#if loading}
-    <div class="status">{$t('html.loading')}</div>
+    <div class="status">Loading…</div>
   {:else if error}
     <div class="error">⚠ {error}</div>
   {:else}
     <div class="layout" class:has-toc={toc.length > 0}>
       {#if toc.length > 0}
-        <aside class="toc" aria-label={$t('file.tocLabel')}>
-          <div class="toc-title">{$t('file.tocTitle')}</div>
+        <aside class="toc" aria-label="Table of contents">
+          <div class="toc-title">On this page</div>
           <ul>
             {#each toc as t (t.id)}
               <li class="lvl-{t.level}" class:active={activeHeadingId === t.id}>
@@ -507,13 +531,19 @@
         bind:this={scroller}
         on:scroll={onScroll}
       >
-        <div
-          class="content"
-          bind:this={host}
-          style="font-size: {zoom}em;"
-        >
-          {@html html}
-        </div>
+        {#if mediaUrl}
+          <div class="media-view" style="font-size: {zoom}em;">
+            <img src={mediaUrl} alt={path} />
+          </div>
+        {:else}
+          <div
+            class="content"
+            bind:this={host}
+            style="font-size: {zoom}em;"
+          >
+            {@html html}
+          </div>
+        {/if}
       </div>
     </div>
   {/if}
@@ -822,6 +852,23 @@
     max-width: 920px;
     margin: 0 auto;
     transition: font-size 80ms ease;
+  }
+
+  .media-view {
+    min-height: 100%;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 24px 32px 64px;
+    overflow: auto;
+  }
+
+  .media-view img {
+    max-width: 100%;
+    height: auto;
+    border: 1px solid var(--bg-3);
+    border-radius: var(--radius-sm);
+    background: var(--bg-1);
   }
 
   /* Markdown styling */

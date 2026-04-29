@@ -264,6 +264,13 @@ fn handle(
                 json!({"error": "invalid or missing token"}),
             );
         }
+        if method == "GET" && path == "/api/read_file_bytes" {
+            let result = read_file_bytes_response(&mut stream, &query, shared);
+            if let Err(err) = result {
+                json_response(&mut stream, 400, json!({"error": err.to_string()}))?;
+            }
+            return Ok(());
+        }
         let result = route_api(&method, &path, &query, &body, shared);
         match result {
             Ok(value) => json_response(&mut stream, 200, value),
@@ -613,6 +620,28 @@ fn read_file_text_locked(state: &HostState, path: &Path) -> anyhow::Result<Strin
     Ok(String::from_utf8(bytes)?)
 }
 
+fn read_file_bytes_response(
+    stream: &mut TcpStream,
+    query: &BTreeMap<String, String>,
+    shared: Arc<Mutex<HostState>>,
+) -> anyhow::Result<()> {
+    let path = Path::new(required(query, "path")?);
+    let guard = shared.lock().expect("browser host state poisoned");
+    ensure_under_repo(&guard, path)?;
+    let bytes = std::fs::read(path)?;
+    if bytes.len() > 50_000_000 {
+        anyhow::bail!("file too large ({} bytes; limit 50 MB)", bytes.len());
+    }
+    let ctype = content_type(path);
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-store\r\n\r\n",
+        bytes.len()
+    )?;
+    stream.write_all(&bytes)?;
+    Ok(())
+}
+
 fn ensure_under_repo(state: &HostState, path: &Path) -> anyhow::Result<()> {
     let root = state
         .repo_root
@@ -731,8 +760,12 @@ fn content_type(path: &Path) -> &'static str {
         "css" => "text/css; charset=utf-8",
         "json" => "application/json",
         "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
         "svg" => "image/svg+xml",
         "ico" => "image/x-icon",
+        "pdf" => "application/pdf",
         _ => "application/octet-stream",
     }
 }
