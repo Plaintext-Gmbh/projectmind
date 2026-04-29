@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { get } from 'svelte/store';
   import { marked } from 'marked';
   import {
     currentWalkthrough,
@@ -8,6 +7,7 @@
     readFileText,
     showDiff,
     ackWalkthrough,
+    currentWalkthroughFeedback,
     requestMoreWalkthrough,
     setWalkthroughStep,
     endWalkthrough,
@@ -17,8 +17,9 @@
     WalkthroughStep,
     LineRange,
     ClassEntry,
+    FeedbackEvent,
   } from '../lib/api';
-  import { errorMessage, repo, viewMode, walkthroughCursor } from '../lib/store';
+  import { errorMessage, viewMode, walkthroughCursor } from '../lib/store';
   import ClassViewer from './ClassViewer.svelte';
   import FileView from './FileView.svelte';
   import DiffView from './DiffView.svelte';
@@ -32,9 +33,6 @@
   let bodyLoading = true;
   let lastLoadedId: string | null = null;
   let lastNonce = -1;
-  /// DOM ref to the code/diff/file viewer container — used so links in the
-  /// narration can scroll to specific source lines via [text](#L42) anchors.
-  let targetEl: HTMLDivElement | null = null;
 
   // Per-target loaded data, recomputed when the active step changes.
   let classEntry: ClassEntry | null = null;
@@ -46,15 +44,15 @@
   let targetLoading = false;
   let targetError: string | null = null;
 
-  /// Cross-file override: when the user clicks a narration link of the form
-  /// `[text](path/to/file.ts#L42)`, we load that file into the target pane
-  /// and show a banner so they can return to the step's actual target. The
-  /// override is reset whenever the step changes.
-  let overridePath: string | null = null;
-  let overrideSource = '';
-  let overrideHighlight: LineRange[] = [];
-  let overrideLoading = false;
-  let overrideError: string | null = null;
+  // Zoom for walk-through-owned detail text. Embedded ClassViewer, FileView
+  // and DiffView keep their own zoom handling.
+  const ZOOM_KEY = 'projectmind.walkthrough.detail.zoom';
+  const ZOOM_MIN = 0.6;
+  const ZOOM_MAX = 2.0;
+  const ZOOM_STEP = 0.1;
+  let detailZoom = readZoom();
+  let plainEl: HTMLPreElement | null = null;
+  let narrationEl: HTMLElement | null = null;
 
   // UI flow state.
   let feedbackPrompt = false;
@@ -68,6 +66,9 @@
   /// waiting card can show it back AND include it in the copy-to-CLI hint.
   /// Cleared whenever a new tour starts.
   let lastQuestion = '';
+  let activeFeedbackKey = '';
+  let dismissedFeedbackKey = '';
+  let feedbackPoll: ReturnType<typeof setInterval> | null = null;
   /// Set after the user acks the LAST step — the UI shows a "Tour
   /// abgeschlossen" card with an explicit "Schliessen" button.
   let tourFinished = false;
@@ -93,6 +94,8 @@
       feedbackPrompt = false;
       feedbackText = '';
       lastQuestion = '';
+      activeFeedbackKey = '';
+      dismissedFeedbackKey = '';
       bodyLoading = true;
       try {
         body = await currentWalkthrough();
@@ -115,7 +118,6 @@
     plainHighlight = [];
     diffText = '';
     targetError = null;
-    closeOverride();
 
     const t = step?.target;
     if (!t) return;
@@ -249,6 +251,7 @@
   /// current step. The feedback event is still in the log, so the LLM
   /// can react later.
   function dismissWaiting() {
+    dismissedFeedbackKey = activeFeedbackKey;
     waitingForFollowup = false;
   }
 
@@ -288,89 +291,6 @@
     ? marked.parse(step.narration, { gfm: true, breaks: false })
     : '';
 
-  /// Intercept clicks on links in the narration:
-  ///   `#L42` / `#L42-58`            → scroll the current target to that line
-  ///   `<path>#L42` / `<path>#L42-58` → load that file in the target pane and
-  ///                                    scroll to the line. Path may be repo-
-  ///                                    relative or absolute. `file:` prefix
-  ///                                    is also accepted. http(s):// URLs
-  ///                                    fall through to the browser default.
-  function onNarrationClick(ev: MouseEvent) {
-    const a = (ev.target as HTMLElement | null)?.closest?.('a');
-    if (!a) return;
-    const href = a.getAttribute('href') ?? '';
-
-    const sameFile = /^#L(\d+)(?:[-–](\d+))?$/.exec(href);
-    if (sameFile) {
-      ev.preventDefault();
-      const from = Number(sameFile[1]);
-      const to = sameFile[2] ? Number(sameFile[2]) : from;
-      scrollTargetToLine(from, to);
-      return;
-    }
-
-    // External URLs → browser default.
-    if (/^[a-z]+:\/\//i.test(href)) return;
-
-    const crossFile = /^([^#]+)#L(\d+)(?:[-–](\d+))?$/.exec(href);
-    if (crossFile) {
-      ev.preventDefault();
-      const path = crossFile[1];
-      const from = Number(crossFile[2]);
-      const to = crossFile[3] ? Number(crossFile[3]) : from;
-      void openCrossFile(path, from, to);
-    }
-  }
-
-  function scrollTargetToLine(from: number, to: number) {
-    if (!targetEl) return;
-    const root = targetEl;
-    const first = root.querySelector<HTMLElement>(`[data-line-no="${from}"]`);
-    if (!first) return;
-    first.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    // Pulse the whole requested range so multi-line refs are obvious.
-    for (let n = from; n <= to; n++) {
-      const el = root.querySelector<HTMLElement>(`[data-line-no="${n}"]`);
-      if (!el) continue;
-      el.classList.add('flash');
-      setTimeout(() => el.classList.remove('flash'), 1400);
-    }
-  }
-
-  async function openCrossFile(rawPath: string, from: number, to: number) {
-    let p = rawPath.replace(/^file:/, '').trim();
-    if (!p.startsWith('/')) {
-      const root = get(repo)?.root;
-      if (!root) {
-        errorMessage.set(`Kein Repo offen — kann relativen Pfad nicht aufloesen: ${p}`);
-        return;
-      }
-      p = `${root}/${p}`;
-    }
-    overridePath = p;
-    overrideHighlight = [{ from, to }];
-    overrideError = null;
-    overrideLoading = true;
-    overrideSource = '';
-    try {
-      overrideSource = await readFileText(p);
-      await tick();
-      scrollTargetToLine(from, to);
-    } catch (err) {
-      overrideError = String(err);
-    } finally {
-      overrideLoading = false;
-    }
-  }
-
-  function closeOverride() {
-    overridePath = null;
-    overrideSource = '';
-    overrideHighlight = [];
-    overrideError = null;
-    overrideLoading = false;
-  }
-
   // Keyboard shortcuts: ←/→ to navigate.
   function onKey(ev: KeyboardEvent) {
     if (feedbackPrompt || waitingForFollowup || tourFinished) return;
@@ -385,9 +305,80 @@
     }
   }
 
+  function readZoom(): number {
+    try {
+      const v = parseFloat(localStorage.getItem(ZOOM_KEY) ?? '');
+      if (Number.isFinite(v) && v > 0) return clampZoom(v);
+    } catch {
+      // ignore
+    }
+    return 1.0;
+  }
+
+  function clampZoom(z: number): number {
+    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
+  }
+
+  function setDetailZoom(z: number) {
+    detailZoom = clampZoom(z);
+    try {
+      localStorage.setItem(ZOOM_KEY, String(detailZoom));
+    } catch {
+      // ignore
+    }
+  }
+
+  function onWheel(ev: WheelEvent) {
+    if (!ev.shiftKey) return;
+    if (!(ev.target instanceof Node)) return;
+    const inPlain = plainEl?.contains(ev.target) ?? false;
+    const inNarration = narrationEl?.contains(ev.target) ?? false;
+    if (!inPlain && !inNarration) return;
+    const delta = Math.abs(ev.deltaY) >= Math.abs(ev.deltaX) ? ev.deltaY : ev.deltaX;
+    if (delta === 0) return;
+    ev.preventDefault();
+    if (delta < 0) setDetailZoom(detailZoom + ZOOM_STEP);
+    else setDetailZoom(detailZoom - ZOOM_STEP);
+  }
+
+  function feedbackKey(e: FeedbackEvent): string {
+    return `${e.walkthrough_id}:${e.step}:${e.kind}:${e.ts}`;
+  }
+
+  async function syncFeedbackState() {
+    if (!body || feedbackPrompt) return;
+    try {
+      const log = await currentWalkthroughFeedback();
+      const latest = [...log.events]
+        .reverse()
+        .find((e) => e.walkthrough_id === body?.id && e.step === cursorStep);
+      if (!latest) return;
+      const key = feedbackKey(latest);
+      if (latest.kind === 'more_detail') {
+        if (key === dismissedFeedbackKey || waitingForFollowup) return;
+        activeFeedbackKey = key;
+        lastQuestion = latest.comment ?? '';
+        feedbackText = '';
+        waitingForFollowup = true;
+      } else if (latest.kind === 'understood' && isLastStep) {
+        tourFinished = true;
+      }
+    } catch (err) {
+      errorMessage.set(String(err));
+    }
+  }
+
   onMount(() => {
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('wheel', onWheel, { passive: false });
+    feedbackPoll = setInterval(() => {
+      void syncFeedbackState();
+    }, 1500);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('wheel', onWheel);
+      if (feedbackPoll) clearInterval(feedbackPoll);
+    };
   });
 </script>
 
@@ -514,28 +505,8 @@
           {/if}
         </header>
 
-        <div class="target" bind:this={targetEl}>
-          {#if overridePath}
-            <div class="override-banner">
-              <span class="override-label">📄 Aus der Erkl&auml;rung verlinkt:</span>
-              <code class="override-path" title={overridePath}>{basename(overridePath)}</code>
-              <button class="override-back" on:click={closeOverride}>
-                ← Zur&uuml;ck zur Step-Datei
-              </button>
-            </div>
-            {#if overrideLoading}
-              <div class="loading">Lade Inhalt…</div>
-            {:else if overrideError}
-              <div class="error">⚠ {overrideError}</div>
-            {:else}
-              <pre class="plain"><code>{#each overrideSource.split('\n') as line, i (i)}{@const lineNo = i + 1}<span
-                class="line"
-                data-line-no={lineNo}
-                class:wt-highlight={overrideHighlight.some((r) => lineNo >= r.from && lineNo <= r.to)}
-              ><span class="lineno">{lineNo}</span><span class="content">{line}</span>
-</span>{/each}</code></pre>
-            {/if}
-          {:else if targetLoading}
+        <div class="target">
+          {#if targetLoading}
             <div class="loading">Lade Inhalt…</div>
           {:else if targetError}
             <div class="error">⚠ {targetError}</div>
@@ -549,9 +520,8 @@
           {:else if step.target.kind === 'file' && isMarkdown(step.target.path)}
             <FileView path={step.target.path} anchor={step.target.anchor ?? null} {nonce} />
           {:else if step.target.kind === 'file'}
-            <pre class="plain"><code>{#each plainSource.split('\n') as line, i (i)}{@const lineNo = i + 1}<span
+            <pre class="plain" bind:this={plainEl} style="font-size: {detailZoom}em;"><code>{#each plainSource.split('\n') as line, i (i)}{@const lineNo = i + 1}<span
               class="line"
-              data-line-no={lineNo}
               class:wt-highlight={plainHighlight.some((r) => lineNo >= r.from && lineNo <= r.to)}
             ><span class="lineno">{lineNo}</span><span class="content">{line}</span>
 </span>{/each}</code></pre>
@@ -561,13 +531,12 @@
         </div>
 
         {#if narrationHtml}
-          <article class="narration">
+          <article class="narration" bind:this={narrationEl}>
             <header class="narration-head">
               <span class="narration-icon">📖</span>
               <span class="narration-label">Erklärung der KI</span>
             </header>
-            <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
-            <div class="narration-body" on:click={onNarrationClick}>{@html narrationHtml}</div>
+            <div class="narration-body" style="font-size: {detailZoom}em;">{@html narrationHtml}</div>
           </article>
         {/if}
 
@@ -915,57 +884,12 @@
     overflow: auto;
     flex: 1;
     font-family: var(--mono);
-    font-size: 12.5px;
+    font-size: 0.9em;
     line-height: 1.55;
-    min-height: 0;
-  }
-
-  .override-banner {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 6px 14px;
-    background: color-mix(in srgb, var(--accent-2) 14%, var(--bg-1));
-    border-bottom: 1px solid var(--bg-3);
-    font-size: 12px;
-    flex-shrink: 0;
-  }
-  .override-label {
-    color: var(--fg-1);
-  }
-  .override-path {
-    font-family: var(--mono);
-    background: var(--bg-0);
-    padding: 1px 6px;
-    border-radius: 3px;
-    color: var(--fg-0);
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .override-back {
-    background: var(--bg-2);
-    color: var(--fg-0);
-    border: 1px solid var(--bg-3);
-    border-radius: 4px;
-    padding: 4px 10px;
-    font: inherit;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  .override-back:hover {
-    background: var(--bg-3);
-    border-color: var(--accent-2);
   }
   .target .plain .line {
     display: block;
     padding: 0 12px;
-    scroll-margin-top: 12px;
-  }
-  .target :global(.line.flash) {
-    background: color-mix(in srgb, var(--accent-2) 35%, transparent);
-    transition: background 1s ease;
   }
   .target .plain .lineno {
     display: inline-block;
@@ -1009,7 +933,7 @@
     font-weight: 600;
   }
   .narration-body {
-    font-size: 15px;
+    font-size: 1em;
     line-height: 1.6;
     color: var(--fg-0);
     max-width: 820px;

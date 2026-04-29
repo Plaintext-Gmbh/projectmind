@@ -12,7 +12,6 @@
     stereotypeFilter,
     viewMode,
   } from '../lib/store';
-  import { t } from '../lib/i18n';
 
   export let kind: 'bean-graph' | 'package-tree';
 
@@ -143,11 +142,14 @@
   }
 
   function onWheel(e: WheelEvent) {
+    if (!e.shiftKey) return;
     e.preventDefault();
+    const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+    if (delta === 0) return;
     const rect = stage.getBoundingClientRect();
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;
-    const factor = Math.exp(-e.deltaY * 0.0015);
+    const factor = Math.exp(-delta * 0.0015);
     const nextScale = Math.min(8, Math.max(0.2, scale * factor));
     // Zoom toward cursor: keep the world-point under the cursor stable.
     tx = cx - (cx - tx) * (nextScale / scale);
@@ -188,14 +190,14 @@
 
 <div class="root">
   <div class="toolbar">
-    <button on:click={() => zoomBy(1.25)} title={$t('diagram.zoomIn')}>＋</button>
-    <button on:click={() => zoomBy(0.8)} title={$t('diagram.zoomOut')}>－</button>
-    <button on:click={resetView} title={$t('diagram.resetView')}>⌂</button>
+    <button on:click={() => zoomBy(1.25)} title="Zoom in">＋</button>
+    <button on:click={() => zoomBy(0.8)} title="Zoom out">－</button>
+    <button on:click={resetView} title="Reset view">⌂</button>
     <span class="zoom-readout">{Math.round(scale * 100)}%</span>
-    <span class="hint">{$t('diagram.panZoomHint')}</span>
+    <span class="hint">Drag to pan • Shift + wheel to zoom</span>
   </div>
   {#if loading}
-    <div class="placeholder">{$t('diagram.rendering')}</div>
+    <div class="placeholder">Rendering diagram…</div>
   {:else if error}
     <div class="error">⚠ {error}</div>
     <pre>{mermaidSource}</pre>
@@ -205,13 +207,13 @@
       class="stage"
       class:dragging
       bind:this={stage}
-      on:wheel|preventDefault={onWheel}
+      on:wheel={onWheel}
       on:mousedown={onMouseDown}
       on:mousemove={onMouseMove}
       on:mouseup={endDrag}
       on:mouseleave={endDrag}
       role="img"
-      aria-label={$t('diagram.canvasLabel')}
+      aria-label="Diagram canvas (drag to pan, Shift plus wheel to zoom)"
     >
       <div
         class="diagram"
