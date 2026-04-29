@@ -55,3 +55,28 @@ export async function listChangesSince(reference: string, to?: string): Promise<
 export async function showDiagram(kind: 'bean-graph' | 'package-tree'): Promise<string> {
   return invoke<string>('show_diagram', { kind });
 }
+
+export async function showDiff(reference: string, to?: string): Promise<string> {
+  return invoke<string>('show_diff', { reference, to });
+}
+
+export async function readFileText(path: string): Promise<string> {
+  return invoke<string>('read_file_text', { path });
+}
+
+export interface UiState {
+  version: number;
+  repo_root: string | null;
+  view: ViewIntent;
+  seq: number;
+}
+
+export type ViewIntent =
+  | { kind: 'classes'; selected_fqn?: string | null }
+  | { kind: 'diagram'; diagram_kind: string }
+  | { kind: 'diff'; reference: string; to?: string | null }
+  | { kind: 'file'; path: string };
+
+export async function currentState(): Promise<UiState | null> {
+  return invoke<UiState | null>('current_state');
+}

@@ -26,12 +26,13 @@ plaintext-ide-lang-rust  = { path = "../../plugins/lang-rust", version = "0.1.0"
 plaintext-ide-framework-spring = { path = "../../plugins/framework-spring", version = "0.1.0" }
 plaintext-ide-framework-lombok = { path = "../../plugins/framework-lombok", version = "0.1.0" }
 
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 serde       = { workspace = true }
 serde_json  = { workspace = true }
 parking_lot = "0.12"
+notify      = { workspace = true }
 tracing     = { workspace = true }
 tracing-subscriber = { workspace = true }
 

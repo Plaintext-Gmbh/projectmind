@@ -20,13 +20,14 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use plaintext_ide_core::git::{self, ChangedFile};
+use plaintext_ide_core::state::{self, UiState, ViewIntent};
 use plaintext_ide_core::{diagram, Engine, Repository};
 use plaintext_ide_framework_lombok::LombokPlugin;
 use plaintext_ide_framework_spring::SpringPlugin;
 use plaintext_ide_lang_java::JavaPlugin;
 use plaintext_ide_lang_rust::RustPlugin;
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 /// Application state shared across Tauri command handlers.
 #[derive(Debug)]
@@ -104,7 +105,14 @@ fn open_repo(path: String, state: State<'_, Arc<AppState>>) -> Result<RepoSummar
         language_plugins: state.engine.language_ids(),
         framework_plugins: state.engine.framework_ids(),
     };
+    let root = repo.root.clone();
     *state.repo.write() = Some(repo);
+    // Publish so the MCP server (and any other consumer) sees what we just opened.
+    publish_state(UiState {
+        repo_root: Some(root),
+        view: ViewIntent::default(),
+        ..UiState::default()
+    });
     Ok(summary)
 }
 
@@ -218,6 +226,111 @@ fn show_diagram(kind: String, state: State<'_, Arc<AppState>>) -> Result<String,
     }
 }
 
+/// Read an arbitrary file as UTF-8 text. Used by the file viewer for `view_file`
+/// intents (markdown, plain source, etc.). Capped at 10 MB to keep the view
+/// responsive — large binaries are not the target.
+#[tauri::command]
+fn read_file_text(path: String) -> Result<String, String> {
+    let p = std::path::Path::new(&path);
+    if !p.is_absolute() {
+        return Err(format!("path must be absolute: {path}"));
+    }
+    let bytes = std::fs::read(p).map_err(|e| format!("read {path}: {e}"))?;
+    if bytes.len() > 10_000_000 {
+        return Err(format!(
+            "file too large ({} bytes; limit 10 MB)",
+            bytes.len()
+        ));
+    }
+    String::from_utf8(bytes).map_err(|e| format!("invalid UTF-8 in {path}: {e}"))
+}
+
+/// Return the unified diff between two refs (or `ref` vs working tree). Used
+/// by the diff viewer.
+#[tauri::command]
+fn show_diff(
+    reference: String,
+    to: Option<String>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<String, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    git::unified_diff(&repo.root, &reference, to.as_deref()).map_err(|e| e.to_string())
+}
+
+/// Initial state on app startup. The frontend calls this once to pick up
+/// whatever the MCP server may have left behind from a previous session.
+#[tauri::command]
+fn current_state() -> Option<UiState> {
+    state::read().ok().flatten()
+}
+
+/// Best-effort publish: GUI tells the MCP/cooperating processes about its state.
+fn publish_state(payload: UiState) {
+    if let Err(err) = state::write(payload) {
+        tracing::warn!(error = %err, "failed to publish UI state from GUI");
+    }
+}
+
+/// Watch the statefile for external changes (i.e. an MCP write) and forward
+/// each new state to the frontend via Tauri events. Best-effort: a failure to
+/// set up the watcher is logged but does not block app startup.
+fn spawn_state_watcher(handle: AppHandle) {
+    use notify::{event::EventKind, Event, RecommendedWatcher, RecursiveMode, Watcher};
+    use std::sync::mpsc;
+    use std::thread;
+
+    thread::spawn(move || {
+        let path = state::statefile_path();
+        let parent = match path.parent() {
+            Some(p) => {
+                let _ = std::fs::create_dir_all(p);
+                p.to_path_buf()
+            }
+            None => return,
+        };
+
+        let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
+        let mut watcher: RecommendedWatcher = match notify::recommended_watcher(tx) {
+            Ok(w) => w,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not create state watcher");
+                return;
+            }
+        };
+        if let Err(err) = watcher.watch(&parent, RecursiveMode::NonRecursive) {
+            tracing::warn!(error = %err, "could not watch {}", parent.display());
+            return;
+        }
+
+        let mut last_seq: u64 = state::read().ok().flatten().map_or(0, |s| s.seq);
+        for ev in rx {
+            let Ok(ev) = ev else { continue };
+            if !matches!(
+                ev.kind,
+                EventKind::Create(_) | EventKind::Modify(_) | EventKind::Any
+            ) {
+                continue;
+            }
+            if !ev.paths.iter().any(|p| p == &path) {
+                continue;
+            }
+            let Ok(Some(new_state)) = state::read() else {
+                continue;
+            };
+            if new_state.seq <= last_seq {
+                continue;
+            }
+            last_seq = new_state.seq;
+            if let Err(err) = handle.emit("state-changed", &new_state) {
+                tracing::warn!(error = %err, "failed to emit state-changed");
+            }
+        }
+    });
+}
+
 /// Tauri entrypoint.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -234,8 +347,14 @@ pub fn run() {
             show_class,
             list_changes_since,
             show_diagram,
+            show_diff,
+            read_file_text,
+            current_state,
         ])
-        .setup(|_app| Ok(()))
+        .setup(|app| {
+            spawn_state_watcher(app.handle().clone());
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

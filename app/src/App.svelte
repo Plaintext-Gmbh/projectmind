@@ -1,6 +1,8 @@
 <script lang="ts">
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
+  import { listen } from '@tauri-apps/api/event';
+  import { get } from 'svelte/store';
   import {
     repo,
     classes,
@@ -13,17 +15,33 @@
     filteredClasses,
     stereotypeCounts,
     viewMode,
+    fileViewPath,
+    diffViewRef,
+    followingMcp,
   } from './lib/store';
-  import { openRepo, listClasses, listModules, showClass } from './lib/api';
-  import type { ClassEntry } from './lib/api';
+  import {
+    openRepo,
+    listClasses,
+    listModules,
+    showClass,
+    currentState,
+  } from './lib/api';
+  import type { ClassEntry, UiState } from './lib/api';
   import ClassViewer from './components/ClassViewer.svelte';
   import DiagramView from './components/DiagramView.svelte';
+  import DiffView from './components/DiffView.svelte';
+  import FileView from './components/FileView.svelte';
   import ModuleSidebar from './components/ModuleSidebar.svelte';
 
   let diagramKind: 'bean-graph' | 'package-tree' = 'bean-graph';
   let classSource = '';
   let classMeta: { file: string; line_start: number; line_end: number } | null = null;
   let loading = false;
+  let unlistenState: (() => void) | null = null;
+  let lastSeq = 0;
+  /// True while we're applying an MCP-driven state change. Prevents the
+  /// resulting load() from re-publishing and triggering an event loop.
+  let applyingExternal = false;
 
   // Whenever selectedClass changes (from sidebar click *or* a diagram drilldown)
   // load the source for the right-hand viewer.
@@ -88,8 +106,63 @@
     stereotypeFilter.update((cur) => (cur === s ? null : s));
   }
 
-  onMount(() => {
-    // No autoload — wait for user to pick.
+  // ----- MCP↔GUI sync: listen for state changes, apply intents -----------
+
+  async function applyState(s: UiState) {
+    if (s.seq <= lastSeq) return;
+    lastSeq = s.seq;
+    followingMcp.set(true);
+    applyingExternal = true;
+    try {
+      // Switch repos if needed.
+      const currentRoot = get(repo)?.root;
+      if (s.repo_root && s.repo_root !== currentRoot) {
+        await load(s.repo_root);
+      }
+      // Apply view intent.
+      const v = s.view;
+      switch (v.kind) {
+        case 'classes':
+          viewMode.set('classes');
+          if (v.selected_fqn) {
+            const match = get(classes).find((c) => c.fqn === v.selected_fqn);
+            if (match) selectedClass.set(match);
+          }
+          break;
+        case 'diagram':
+          if (v.diagram_kind === 'bean-graph' || v.diagram_kind === 'package-tree') {
+            diagramKind = v.diagram_kind;
+          }
+          viewMode.set('diagram');
+          break;
+        case 'diff':
+          diffViewRef.set({ reference: v.reference, to: v.to ?? null });
+          viewMode.set('diff');
+          break;
+        case 'file':
+          fileViewPath.set(v.path);
+          viewMode.set('file');
+          break;
+      }
+    } catch (err) {
+      errorMessage.set(String(err));
+    } finally {
+      applyingExternal = false;
+    }
+  }
+
+  onMount(async () => {
+    // Pick up wherever we left off (or whatever the MCP server has set since).
+    const initial = await currentState();
+    if (initial) await applyState(initial);
+
+    unlistenState = await listen<UiState>('state-changed', (ev) => {
+      void applyState(ev.payload);
+    });
+  });
+
+  onDestroy(() => {
+    unlistenState?.();
   });
 </script>
 
@@ -115,12 +188,35 @@
       {/if}
     </div>
     <nav>
-      <button class:active={$viewMode === 'classes'} on:click={() => viewMode.set('classes')}>
+      <button
+        class:active={$viewMode === 'classes'}
+        on:click={() => {
+          followingMcp.set(false);
+          viewMode.set('classes');
+        }}
+      >
         Classes
       </button>
-      <button class:active={$viewMode === 'diagram'} on:click={() => viewMode.set('diagram')}>
+      <button
+        class:active={$viewMode === 'diagram'}
+        on:click={() => {
+          followingMcp.set(false);
+          viewMode.set('diagram');
+        }}
+      >
         Diagrams
       </button>
+      {#if $viewMode === 'file'}
+        <button class="active">File</button>
+      {/if}
+      {#if $viewMode === 'diff'}
+        <button class="active">Diff</button>
+      {/if}
+      {#if $followingMcp}
+        <span class="follow" title="GUI is following an MCP-issued view intent. Click any tab to continue manually.">
+          following MCP
+        </span>
+      {/if}
       <button on:click={pickAndOpen} disabled={loading}>
         {loading ? '…' : 'Open repo'}
       </button>
@@ -200,7 +296,7 @@
         {/if}
       </main>
     </section>
-  {:else}
+  {:else if $viewMode === 'diagram'}
     <section class="diagram-view">
       <div class="diagram-tabs">
         <button class:active={diagramKind === 'bean-graph'} on:click={() => (diagramKind = 'bean-graph')}>
@@ -212,6 +308,16 @@
         <span class="diagram-hint">Click a node to drill into it</span>
       </div>
       <DiagramView kind={diagramKind} />
+    </section>
+  {:else if $viewMode === 'file' && $fileViewPath}
+    <FileView path={$fileViewPath} />
+  {:else if $viewMode === 'diff' && $diffViewRef}
+    <DiffView reference={$diffViewRef.reference} to={$diffViewRef.to} />
+  {:else}
+    <section class="empty">
+      <div class="welcome">
+        <p class="hint">No view selected. Pick Classes or Diagrams above, or send an MCP intent.</p>
+      </div>
     </section>
   {/if}
 </main>
@@ -305,6 +411,17 @@
   nav button.active {
     border-color: var(--accent-2);
     color: var(--accent-2);
+  }
+
+  .follow {
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--accent-2) 25%, var(--bg-1));
+    color: var(--accent-2);
+    border: 1px solid var(--accent-2);
+    font-weight: 500;
+    align-self: center;
   }
 
   .error {

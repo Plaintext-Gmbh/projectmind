@@ -9,7 +9,15 @@ export const stereotypeFilter = writable<string | null>(null);
 export const moduleFilter = writable<string | null>(null);
 export const packageFilter = writable<string | null>(null);
 export const errorMessage = writable<string | null>(null);
-export const viewMode = writable<'classes' | 'diagram'>('classes');
+export type ViewMode = 'classes' | 'diagram' | 'file' | 'diff';
+export const viewMode = writable<ViewMode>('classes');
+
+export const fileViewPath = writable<string | null>(null);
+export const diffViewRef = writable<{ reference: string; to: string | null } | null>(null);
+/// When the GUI is currently following an MCP-driven view intent, this is true.
+/// Used purely for UI affordances (tooltip / banner) — MCP always wins, so the
+/// flag is informational, not a gate.
+export const followingMcp = writable(false);
 
 function packageOf(fqn: string): string {
   const idx = fqn.lastIndexOf('.');
