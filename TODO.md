@@ -18,17 +18,10 @@ iframe via CSS `zoom`). Persisted per-view in `localStorage`.
 
 ## Small features (1–3 hours)
 
-### Resizable sidebar panes
-**Effort:** M
-
-Today the Code tab uses a fixed `grid-template-columns: 220px 360px 1fr`
-in `App.svelte`. Make the two sidebar widths user-adjustable via a vertical
-drag handle between them and between the second sidebar and the viewer.
-
-- Persist widths in `localStorage` (`plaintext-ide.layout.code.{module,class}`).
-- Apply the same pattern to the HTML tab (currently `360px 1fr`).
-- Avoid pulling in a third-party split-pane lib; a 30-line custom handle
-  with `pointermove` + CSS variable update is plenty.
+### ~~Resizable sidebar panes~~ ✅ done
+Both Code and HTML layouts have drag handles (Pointer Events, persisted in
+`localStorage`, double-click resets to default). Reusable Svelte action
+lives in `app/src/lib/resizable.ts`.
 
 ### Indexed / fuzzy markdown search
 **Effort:** M

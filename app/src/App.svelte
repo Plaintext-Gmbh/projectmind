@@ -36,6 +36,7 @@
   import MarkdownIndex from './components/MarkdownIndex.svelte';
   import ModuleSidebar from './components/ModuleSidebar.svelte';
   import WalkthroughView from './components/WalkthroughView.svelte';
+  import { resizable } from './lib/resizable';
 
   type Theme = 'dark' | 'light';
   let theme: Theme = readTheme();
@@ -347,6 +348,17 @@
   {:else if $viewMode === 'classes'}
     <section class="layout">
       <ModuleSidebar />
+      <div
+        class="resizer"
+        use:resizable={{
+          storageKey: 'plaintext-ide.layout.code.col1',
+          cssVar: '--code-col-1',
+          min: 140,
+          max: 480,
+          initial: 220,
+        }}
+        title="Drag to resize · double-click to reset"
+      ></div>
       <aside class="sidebar">
         {#if $packageFilter !== null}
           <div class="path-bar">
@@ -390,6 +402,17 @@
           {/each}
         </ul>
       </aside>
+      <div
+        class="resizer"
+        use:resizable={{
+          storageKey: 'plaintext-ide.layout.code.col2',
+          cssVar: '--code-col-2',
+          min: 220,
+          max: 720,
+          initial: 360,
+        }}
+        title="Drag to resize · double-click to reset"
+      ></div>
       <main class="viewer">
         {#if $selectedClass}
           <ClassViewer
@@ -633,9 +656,28 @@
 
   .layout {
     display: grid;
-    grid-template-columns: 220px 360px 1fr;
+    grid-template-columns:
+      var(--code-col-1, 220px) 6px var(--code-col-2, 360px) 6px 1fr;
     flex: 1;
     overflow: hidden;
+  }
+
+  .resizer {
+    background: transparent;
+    cursor: col-resize;
+    position: relative;
+    z-index: 1;
+    transition: background 80ms ease;
+  }
+  .resizer::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-left: 1px solid var(--bg-3);
+  }
+  .resizer:hover,
+  .resizer:global(.dragging) {
+    background: color-mix(in srgb, var(--accent-2) 25%, transparent);
   }
 
   .sidebar {
