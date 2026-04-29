@@ -109,22 +109,26 @@
   $: void loadModuleFilesFor($moduleFilter);
 
   async function loadModuleFilesFor(moduleId: string | null) {
-    if (!moduleId) {
-      moduleFiles = [];
-      moduleFilesLoadedFor = null;
-      return;
-    }
-    if (moduleFilesLoadedFor === moduleId) return;
-    moduleFilesLoadedFor = moduleId;
+    // Cache key — distinguishes "all modules" (null filter) from a specific id.
+    const token = moduleId ?? '__all__';
+    if (moduleFilesLoadedFor === token) return;
+    moduleFilesLoadedFor = token;
     try {
-      const items = await listModuleFiles(moduleId);
-      // Race guard: ignore the result if the user switched modules while we
-      // were fetching.
-      if (moduleFilesLoadedFor === moduleId) moduleFiles = items;
+      let items: ModuleFile[];
+      if (moduleId) {
+        items = await listModuleFiles(moduleId);
+      } else {
+        // "All modules" filter — fan out across every module and merge.
+        const mods = get(modules);
+        const lists = await Promise.all(mods.map((m) => listModuleFiles(m.id)));
+        items = lists.flat();
+      }
+      // Race guard: ignore the result if the user switched while we were fetching.
+      if (moduleFilesLoadedFor === token) moduleFiles = items;
     } catch (err) {
       // Don't blow up the whole Code tab — non-fatal, just hide the section.
       console.warn('list_module_files failed:', err);
-      if (moduleFilesLoadedFor === moduleId) moduleFiles = [];
+      if (moduleFilesLoadedFor === token) moduleFiles = [];
     }
   }
 
