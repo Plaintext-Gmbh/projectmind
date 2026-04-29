@@ -236,9 +236,11 @@
     if (!ev.shiftKey) return;
     if (!viewerEl || !viewerEl.isConnected) return;
     if (!(ev.target instanceof Node) || !viewerEl.contains(ev.target)) return;
+    const delta = Math.abs(ev.deltaY) >= Math.abs(ev.deltaX) ? ev.deltaY : ev.deltaX;
+    if (delta === 0) return;
     ev.preventDefault();
-    if (ev.deltaY < 0) setZoom(zoom + ZOOM_STEP);
-    else if (ev.deltaY > 0) setZoom(zoom - ZOOM_STEP);
+    if (delta < 0) setZoom(zoom + ZOOM_STEP);
+    else setZoom(zoom - ZOOM_STEP);
   }
 
   onMount(() => {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { searchMarkdown } from '../lib/api';
   import type { MarkdownFile, MarkdownHit } from '../lib/api';
   import { repo, fileView, viewMode } from '../lib/store';
@@ -97,12 +97,57 @@
     });
   }
 
+  // ----- Zoom (Shift + wheel) ----------------------------------------------
+  const ZOOM_KEY = 'projectmind.mdindex.zoom';
+  const ZOOM_MIN = 0.6;
+  const ZOOM_MAX = 2.0;
+  const ZOOM_STEP = 0.1;
+  let zoom = readZoom();
+  let rootEl: HTMLElement;
+
+  function readZoom(): number {
+    try {
+      const v = parseFloat(localStorage.getItem(ZOOM_KEY) ?? '');
+      if (Number.isFinite(v) && v > 0) return clampZoom(v);
+    } catch {
+      // ignore
+    }
+    return 1.0;
+  }
+  function clampZoom(z: number): number {
+    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
+  }
+  function setZoom(z: number) {
+    zoom = clampZoom(z);
+    try {
+      localStorage.setItem(ZOOM_KEY, String(zoom));
+    } catch {
+      // ignore
+    }
+  }
+  function onWheel(ev: WheelEvent) {
+    if (!ev.shiftKey) return;
+    if (!rootEl || !rootEl.isConnected) return;
+    if (!(ev.target instanceof Node) || !rootEl.contains(ev.target)) return;
+    // macOS swaps axes when Shift is held (vertical wheel becomes deltaX);
+    // trackpads do this too. Pick whichever axis carries the motion.
+    const delta = Math.abs(ev.deltaY) >= Math.abs(ev.deltaX) ? ev.deltaY : ev.deltaX;
+    if (delta === 0) return;
+    ev.preventDefault();
+    if (delta < 0) setZoom(zoom + ZOOM_STEP);
+    else setZoom(zoom - ZOOM_STEP);
+  }
+
   onMount(() => {
     void load($repo?.root ?? null);
+    window.addEventListener('wheel', onWheel, { passive: false });
+  });
+  onDestroy(() => {
+    window.removeEventListener('wheel', onWheel);
   });
 </script>
 
-<section class="root">
+<section class="root" bind:this={rootEl} style="font-size: {zoom}em;">
   <header class="bar">
     <div class="title-block">
       <h2>Markdown</h2>
