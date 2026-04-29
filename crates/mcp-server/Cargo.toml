@@ -18,6 +18,7 @@ workspace = true
 [dependencies]
 projectmind-plugin-api = { workspace = true }
 projectmind-core       = { workspace = true }
+projectmind-browser-host = { path = "../browser-host", version = "0.1.0" }
 
 # Local plugins linked statically for Phase 1
 projectmind-lang-java         = { path = "../../plugins/lang-java", version = "0.2.0" }

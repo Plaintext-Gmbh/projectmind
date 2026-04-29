@@ -3011,6 +3011,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "projectmind-browser-host"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "open",
+ "projectmind-core",
+ "projectmind-framework-lombok",
+ "projectmind-framework-spring",
+ "projectmind-lang-java",
+ "projectmind-lang-rust",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "projectmind-core"
 version = "0.2.0"
 dependencies = [
@@ -3072,6 +3089,7 @@ dependencies = [
  "anyhow",
  "clap",
  "dirs",
+ "projectmind-browser-host",
  "projectmind-core",
  "projectmind-framework-lombok",
  "projectmind-framework-spring",

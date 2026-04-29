@@ -1,0 +1,26 @@
+[package]
+name = "projectmind-browser-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Optional LAN browser host for ProjectMind."
+
+[lints]
+workspace = true
+
+[dependencies]
+projectmind-core = { workspace = true }
+projectmind-lang-java = { path = "../../plugins/lang-java", version = "0.1.0" }
+projectmind-lang-rust = { path = "../../plugins/lang-rust", version = "0.1.0" }
+projectmind-framework-spring = { path = "../../plugins/framework-spring", version = "0.1.0" }
+projectmind-framework-lombok = { path = "../../plugins/framework-lombok", version = "0.1.0" }
+
+anyhow = { workspace = true }
+rand = "0.8"
+serde = { workspace = true }
+serde_json = { workspace = true }
+open = "5"
+tracing = { workspace = true }

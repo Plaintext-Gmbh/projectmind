@@ -26,6 +26,10 @@
     listModules,
     showClass,
     currentState,
+    browserToken,
+    clearBrowserToken,
+    isTauriRuntime,
+    setBrowserToken,
   } from './lib/api';
   import type { ClassEntry, UiState } from './lib/api';
   import ClassViewer from './components/ClassViewer.svelte';
@@ -74,7 +78,11 @@
   let classSource = '';
   let classMeta: { file: string; line_start: number; line_end: number } | null = null;
   let loading = false;
+  let browserMode = false;
+  let browserAuthorized = true;
+  let tokenInput = '';
   let unlistenState: (() => void) | null = null;
+  let statePoll: ReturnType<typeof setInterval> | null = null;
   let lastSeq = 0;
   /// True while we're applying an MCP-driven state change. Prevents the
   /// resulting load() from re-publishing and triggering an event loop.
@@ -109,9 +117,36 @@
   }
 
   async function pickAndOpen() {
+    if (browserMode) {
+      const picked = window.prompt('Absolute repository path on the ProjectMind host');
+      if (picked) await load(picked);
+      return;
+    }
     const picked = await openDialog({ directory: true, multiple: false });
     if (!picked || Array.isArray(picked)) return;
     await load(picked);
+  }
+
+  async function useBrowserToken() {
+    const token = tokenInput.trim();
+    if (!token) return;
+    setBrowserToken(token);
+    browserAuthorized = true;
+    errorMessage.set(null);
+    try {
+      const initial = await currentState();
+      if (initial) await applyState(initial);
+    } catch (err) {
+      browserAuthorized = false;
+      errorMessage.set(String(err));
+    }
+  }
+
+  function forgetBrowserToken() {
+    clearBrowserToken();
+    browserAuthorized = false;
+    tokenInput = '';
+    repo.set(null);
   }
 
   async function load(path: string, opts: { silent?: boolean } = {}) {
@@ -213,17 +248,45 @@
   }
 
   onMount(async () => {
+    browserMode = !isTauriRuntime();
+    if (browserMode && !browserToken()) {
+      browserAuthorized = false;
+      return;
+    }
     // Pick up wherever we left off (or whatever the MCP server has set since).
-    const initial = await currentState();
-    if (initial) await applyState(initial);
+    try {
+      const initial = await currentState();
+      if (initial) await applyState(initial);
+    } catch (err) {
+      if (browserMode) {
+        browserAuthorized = false;
+        errorMessage.set(String(err));
+        return;
+      }
+      throw err;
+    }
 
-    unlistenState = await listen<UiState>('state-changed', (ev) => {
-      void applyState(ev.payload);
-    });
+    if (!browserMode) {
+      unlistenState = await listen<UiState>('state-changed', (ev) => {
+        void applyState(ev.payload);
+      });
+    } else {
+      statePoll = setInterval(() => {
+        void currentState()
+          .then((s) => {
+            if (s) return applyState(s);
+            return undefined;
+          })
+          .catch((err) => {
+            errorMessage.set(String(err));
+          });
+      }, 1500);
+    }
   });
 
   onDestroy(() => {
     unlistenState?.();
+    if (statePoll) clearInterval(statePoll);
   });
 </script>
 
@@ -315,6 +378,9 @@
           following MCP
         </span>
       {/if}
+      {#if browserMode}
+        <button on:click={forgetBrowserToken} title="Forget the browser access token">Token</button>
+      {/if}
       <button on:click={pickAndOpen} disabled={loading}>
         {loading ? '…' : 'Open repo'}
       </button>
@@ -333,7 +399,24 @@
     <div class="error">⚠ {$errorMessage}</div>
   {/if}
 
-  {#if !$repo}
+  {#if browserMode && !browserAuthorized}
+    <section class="empty">
+      <form class="token-panel" on:submit|preventDefault={useBrowserToken}>
+        <img class="welcome-logo" src="/logo.png" alt="ProjectMind" />
+        <h1>ProjectMind</h1>
+        <p class="claim">LAN browser access</p>
+        <label for="browser-token">Access token</label>
+        <input
+          id="browser-token"
+          bind:value={tokenInput}
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="Paste the token from the LLM CLI"
+        />
+        <button type="submit">Connect</button>
+      </form>
+    </section>
+  {:else if !$repo}
     <section class="empty">
       <div class="welcome">
         <img class="welcome-logo" src="/logo.png" alt="ProjectMind" />
@@ -342,7 +425,11 @@
         <p class="by">by Plaintext</p>
         <button on:click={pickAndOpen}>Open a repository to begin</button>
         <p class="hint">
-          Or use the <code>projectmind-mcp</code> server with your favourite LLM CLI — see the README.
+          {#if browserMode}
+            Enter an absolute path on the ProjectMind host, or open one from the LLM CLI.
+          {:else}
+            Or use the <code>projectmind-mcp</code> server with your favourite LLM CLI — see the README.
+          {/if}
         </p>
       </div>
     </section>
@@ -506,6 +593,39 @@
     margin-left: auto;
     margin-right: auto;
     box-shadow: 0 8px 32px color-mix(in srgb, #2d2bfe 35%, transparent);
+  }
+
+  .token-panel {
+    display: grid;
+    gap: 12px;
+    width: min(420px, calc(100vw - 40px));
+    padding: 28px;
+    background: var(--bg-1);
+    border: 1px solid var(--bg-3);
+    border-radius: 8px;
+    box-shadow: 0 18px 48px color-mix(in srgb, #000 28%, transparent);
+  }
+
+  .token-panel h1,
+  .token-panel p {
+    margin: 0;
+    text-align: center;
+  }
+
+  .token-panel label {
+    font-size: 12px;
+    color: var(--fg-3);
+  }
+
+  .token-panel input {
+    min-width: 0;
+    padding: 10px 12px;
+    color: var(--fg-1);
+    background: var(--bg-0);
+    border: 1px solid var(--bg-3);
+    border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px;
   }
 
   .title {
