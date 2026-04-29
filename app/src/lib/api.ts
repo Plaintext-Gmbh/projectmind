@@ -75,6 +75,71 @@ export async function listMarkdownFiles(root: string): Promise<MarkdownFile[]> {
   return invoke<MarkdownFile[]>('list_markdown_files', { root });
 }
 
+// ----- Walk-through --------------------------------------------------------
+
+export interface LineRange {
+  from: number;
+  to: number;
+}
+
+export type WalkthroughTarget =
+  | { kind: 'class'; fqn: string; highlight?: LineRange[] }
+  | { kind: 'file'; path: string; anchor?: string | null; highlight?: LineRange[] }
+  | { kind: 'diff'; reference: string; to?: string | null }
+  | { kind: 'note' };
+
+export interface WalkthroughStep {
+  title: string;
+  narration?: string;
+  target: WalkthroughTarget;
+}
+
+export interface Walkthrough {
+  id: string;
+  title: string;
+  summary?: string;
+  steps: WalkthroughStep[];
+  updated_at: number;
+}
+
+export type FeedbackKind = 'understood' | 'more_detail';
+
+export interface FeedbackEvent {
+  walkthrough_id: string;
+  step: number;
+  kind: FeedbackKind;
+  comment?: string | null;
+  ts: number;
+}
+
+export interface FeedbackLog {
+  events: FeedbackEvent[];
+}
+
+export async function currentWalkthrough(): Promise<Walkthrough | null> {
+  return invoke<Walkthrough | null>('current_walkthrough');
+}
+
+export async function currentWalkthroughFeedback(): Promise<FeedbackLog> {
+  return invoke<FeedbackLog>('current_walkthrough_feedback');
+}
+
+export async function ackWalkthrough(walkthroughId: string, step: number): Promise<FeedbackLog> {
+  return invoke<FeedbackLog>('walkthrough_ack', { walkthroughId, step });
+}
+
+export async function requestMoreWalkthrough(
+  walkthroughId: string,
+  step: number,
+  comment: string | null = null,
+): Promise<FeedbackLog> {
+  return invoke<FeedbackLog>('walkthrough_request_more', { walkthroughId, step, comment });
+}
+
+export async function setWalkthroughStep(id: string, step: number): Promise<void> {
+  return invoke<void>('set_walkthrough_step', { id, step });
+}
+
 export interface UiState {
   version: number;
   repo_root: string | null;
@@ -86,7 +151,8 @@ export type ViewIntent =
   | { kind: 'classes'; selected_fqn?: string | null }
   | { kind: 'diagram'; diagram_kind: string }
   | { kind: 'diff'; reference: string; to?: string | null }
-  | { kind: 'file'; path: string; anchor?: string | null };
+  | { kind: 'file'; path: string; anchor?: string | null }
+  | { kind: 'walkthrough'; id: string; step: number };
 
 export async function currentState(): Promise<UiState | null> {
   return invoke<UiState | null>('current_state');

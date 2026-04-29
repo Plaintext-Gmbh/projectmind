@@ -16,6 +16,7 @@
     stereotypeCounts,
     viewMode,
     fileView,
+    walkthroughCursor,
     diffViewRef,
     followingMcp,
   } from './lib/store';
@@ -33,6 +34,7 @@
   import FileView from './components/FileView.svelte';
   import MarkdownIndex from './components/MarkdownIndex.svelte';
   import ModuleSidebar from './components/ModuleSidebar.svelte';
+  import WalkthroughView from './components/WalkthroughView.svelte';
 
   type Theme = 'dark' | 'light';
   let theme: Theme = readTheme();
@@ -188,6 +190,14 @@
           }));
           viewMode.set('file');
           break;
+        case 'walkthrough':
+          walkthroughCursor.update((cur) => ({
+            id: v.id,
+            step: v.step,
+            nonce: (cur?.nonce ?? 0) + 1,
+          }));
+          viewMode.set('walkthrough');
+          break;
       }
     } catch (err) {
       errorMessage.set(String(err));
@@ -261,6 +271,16 @@
       >
         MD
       </button>
+      {#if $walkthroughCursor}
+        <button
+          class:active={$viewMode === 'walkthrough'}
+          class="walkthrough-btn"
+          on:click={() => viewMode.set('walkthrough')}
+          title="Resume the active walk-through"
+        >
+          ▶ Walk-through
+        </button>
+      {/if}
       {#if $viewMode === 'diff'}
         <button class="active">Diff</button>
       {/if}
@@ -370,6 +390,12 @@
       </div>
       <DiagramView kind={diagramKind} />
     </section>
+  {:else if $viewMode === 'walkthrough' && $walkthroughCursor}
+    <WalkthroughView
+      cursorId={$walkthroughCursor.id}
+      cursorStep={$walkthroughCursor.step}
+      nonce={$walkthroughCursor.nonce}
+    />
   {:else if $viewMode === 'md'}
     <MarkdownIndex />
   {:else if $viewMode === 'file' && $fileView}
@@ -500,6 +526,16 @@
     text-align: center;
     font-size: 15px;
     line-height: 1;
+  }
+
+  .walkthrough-btn {
+    background: color-mix(in srgb, var(--accent-2) 18%, var(--bg-1));
+    color: var(--accent-2);
+    border-color: var(--accent-2);
+    font-weight: 500;
+  }
+  .walkthrough-btn:hover {
+    background: color-mix(in srgb, var(--accent-2) 28%, var(--bg-1));
   }
 
   .follow {

@@ -76,6 +76,16 @@ pub enum ViewIntent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         anchor: Option<String>,
     },
+    /// A guided tour authored by an LLM. The body lives in
+    /// [`crate::walkthrough::body_path`]; the GUI is told *which* step
+    /// is current via this intent.
+    Walkthrough {
+        /// Tour handle. Should match `Walkthrough::id` in the body file.
+        id: String,
+        /// 0-based step pointer. Bumped by `walkthrough_set_step` and
+        /// by user clicks on the step sidebar.
+        step: u32,
+    },
 }
 
 fn default_diagram_kind() -> String {

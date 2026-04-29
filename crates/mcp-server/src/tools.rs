@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 
 use plaintext_ide_core::state::{self, UiState, ViewIntent};
+use plaintext_ide_core::walkthrough::{self as wt, Walkthrough, WalkthroughStep};
 use plaintext_ide_core::{diagram, git};
 use plaintext_ide_framework_spring::SpringPlugin;
 use plaintext_ide_plugin_api::FrameworkPlugin;
@@ -108,6 +109,88 @@ fn fqn_schema() -> Value {
     })
 }
 
+fn walkthrough_step_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "title":     { "type": "string", "description": "Short, human-readable step title (sidebar entry)." },
+            "narration": { "type": "string", "description": "Markdown shown alongside the target. Optional but strongly recommended — this is what the user reads." },
+            "target": {
+                "type": "object",
+                "description": "What to render in the main pane. `kind` selects the viewer: class | file | diff | note.",
+                "properties": {
+                    "kind": { "type": "string", "enum": ["class", "file", "diff", "note"] },
+                    "fqn":  { "type": "string", "description": "Class FQN (kind=class)" },
+                    "path": { "type": "string", "description": "Absolute file path (kind=file)" },
+                    "anchor": { "type": "string", "description": "Heading slug (kind=file, markdown only)" },
+                    "ref":  { "type": "string", "description": "Base git ref (kind=diff)" },
+                    "to":   { "type": "string", "description": "Target git ref or omit for working tree (kind=diff)" },
+                    "highlight": {
+                        "type": "array",
+                        "description": "Line ranges to colour (kind=class or kind=file with non-markdown extension). 1-based inclusive.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "from": { "type": "integer", "minimum": 1 },
+                                "to":   { "type": "integer", "minimum": 1 }
+                            },
+                            "required": ["from", "to"]
+                        }
+                    }
+                },
+                "required": ["kind"]
+            }
+        },
+        "required": ["title", "target"]
+    })
+}
+
+fn walkthrough_start_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "id":      { "type": "string", "description": "Optional stable handle. If omitted, derived from `title`." },
+            "title":   { "type": "string", "description": "Tour title (header + sidebar caption)." },
+            "summary": { "type": "string", "description": "Optional 1-paragraph intro shown above step 1." },
+            "steps":   {
+                "type": "array",
+                "description": "Ordered tour. Must contain at least one step.",
+                "items": walkthrough_step_schema()
+            }
+        },
+        "required": ["title", "steps"]
+    })
+}
+
+fn walkthrough_append_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "step": walkthrough_step_schema()
+        },
+        "required": ["step"]
+    })
+}
+
+fn walkthrough_set_step_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "index": { "type": "integer", "minimum": 0, "description": "0-based step index. Clamped to the valid range." }
+        },
+        "required": ["index"]
+    })
+}
+
+fn walkthrough_feedback_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "since_ts": { "type": "integer", "minimum": 0, "description": "Unix-seconds; only events with `ts > since_ts` are returned. Omit for the full log." }
+        }
+    })
+}
+
 fn file_schema() -> Value {
     json!({
         "type": "object",
@@ -202,6 +285,31 @@ pub(crate) fn list() -> Value {
                 "name": "view_diagram",
                 "description": "Tell the GUI to switch to the diagram view (`bean-graph` or `package-tree`).",
                 "inputSchema": diagram_schema()
+            },
+            {
+                "name": "walkthrough_start",
+                "description": "Start a guided tour. The GUI switches to the walk-through view, displaying step 0 with the LLM's narration and the chosen target (class / file / diff / note). Replaces any previous tour.",
+                "inputSchema": walkthrough_start_schema()
+            },
+            {
+                "name": "walkthrough_append",
+                "description": "Append one step to the active tour. Does NOT move the pointer — useful while streaming a tour as it's being authored.",
+                "inputSchema": walkthrough_append_schema()
+            },
+            {
+                "name": "walkthrough_set_step",
+                "description": "Move the active tour's pointer to the given 0-based index. Clamped to the valid range.",
+                "inputSchema": walkthrough_set_step_schema()
+            },
+            {
+                "name": "walkthrough_clear",
+                "description": "End the active tour. Removes the body and feedback log; GUI returns to the previous view.",
+                "inputSchema": no_args_schema()
+            },
+            {
+                "name": "walkthrough_feedback",
+                "description": "Read user feedback events recorded against the active tour. Each event is one click on the GUI's Verstanden / Genauer-buttons. Useful when the LLM wants to react to the user (e.g. expand a step that was flagged with `more_detail`).",
+                "inputSchema": walkthrough_feedback_schema()
             }
         ]
     })
@@ -228,6 +336,11 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "view_diff" => view_diff(parsed.arguments),
         "view_file" => view_file(parsed.arguments),
         "view_diagram" => view_diagram(parsed.arguments),
+        "walkthrough_start" => walkthrough_start(parsed.arguments),
+        "walkthrough_append" => walkthrough_append(parsed.arguments),
+        "walkthrough_set_step" => walkthrough_set_step(parsed.arguments),
+        "walkthrough_clear" => walkthrough_clear_handler(),
+        "walkthrough_feedback" => walkthrough_feedback(parsed.arguments),
         other => Err(DispatchError::invalid_params(format!(
             "unknown tool: {other}"
         ))),
@@ -684,6 +797,163 @@ fn view_diagram(args: Value) -> DispatchResult {
     Ok(text_result(
         json!({"ok": true, "type": args.kind}).to_string(),
     ))
+}
+
+// ----- walkthrough_* tools --------------------------------------------------
+
+#[derive(Deserialize)]
+struct WalkthroughStartArgs {
+    #[serde(default)]
+    id: Option<String>,
+    title: String,
+    #[serde(default)]
+    summary: String,
+    steps: Vec<WalkthroughStep>,
+}
+
+fn walkthrough_start(args: Value) -> DispatchResult {
+    let args: WalkthroughStartArgs = serde_json::from_value(args)
+        .map_err(|e| DispatchError::invalid_params(format!("walkthrough_start: {e}")))?;
+    if args.steps.is_empty() {
+        return Err(DispatchError::invalid_params(
+            "walkthrough_start: steps must not be empty".to_string(),
+        ));
+    }
+    // Reset feedback log for the new tour.
+    if let Err(err) = wt::clear() {
+        tracing::warn!(error = %err, "walkthrough_start: failed to clear previous tour");
+    }
+    let id = args
+        .id
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| wt::slugify_id(&args.title));
+    let body = Walkthrough {
+        id: id.clone(),
+        title: args.title,
+        summary: args.summary,
+        steps: args.steps,
+        updated_at: 0,
+    };
+    let written = wt::write_body(body)
+        .map_err(|e| DispatchError::internal(format!("walkthrough_start: {e}")))?;
+    let prev = state::read().ok().flatten().unwrap_or_default();
+    publish_state(UiState {
+        repo_root: prev.repo_root,
+        view: ViewIntent::Walkthrough {
+            id: id.clone(),
+            step: 0,
+        },
+        ..UiState::default()
+    });
+    Ok(text_result(
+        json!({
+            "ok": true,
+            "id": id,
+            "step": 0,
+            "total": written.steps.len(),
+        })
+        .to_string(),
+    ))
+}
+
+#[derive(Deserialize)]
+struct WalkthroughAppendArgs {
+    step: WalkthroughStep,
+}
+
+fn walkthrough_append(args: Value) -> DispatchResult {
+    let args: WalkthroughAppendArgs = serde_json::from_value(args)
+        .map_err(|e| DispatchError::invalid_params(format!("walkthrough_append: {e}")))?;
+    let mut body = wt::read_body()
+        .map_err(|e| DispatchError::internal(format!("walkthrough_append: read body: {e}")))?
+        .ok_or_else(|| {
+            DispatchError::invalid_params(
+                "walkthrough_append: no active tour — call walkthrough_start first".to_string(),
+            )
+        })?;
+    body.steps.push(args.step);
+    let written = wt::write_body(body)
+        .map_err(|e| DispatchError::internal(format!("walkthrough_append: write: {e}")))?;
+    Ok(text_result(
+        json!({
+            "ok": true,
+            "id": written.id,
+            "total": written.steps.len(),
+        })
+        .to_string(),
+    ))
+}
+
+#[derive(Deserialize)]
+struct WalkthroughSetStepArgs {
+    index: u32,
+}
+
+fn walkthrough_set_step(args: Value) -> DispatchResult {
+    let args: WalkthroughSetStepArgs = serde_json::from_value(args)
+        .map_err(|e| DispatchError::invalid_params(format!("walkthrough_set_step: {e}")))?;
+    let body = wt::read_body()
+        .map_err(|e| DispatchError::internal(format!("walkthrough_set_step: {e}")))?
+        .ok_or_else(|| {
+            DispatchError::invalid_params(
+                "walkthrough_set_step: no active tour".to_string(),
+            )
+        })?;
+    let last = body.steps.len().saturating_sub(1) as u32;
+    let clamped = args.index.min(last);
+    let prev = state::read().ok().flatten().unwrap_or_default();
+    publish_state(UiState {
+        repo_root: prev.repo_root,
+        view: ViewIntent::Walkthrough {
+            id: body.id.clone(),
+            step: clamped,
+        },
+        ..UiState::default()
+    });
+    Ok(text_result(
+        json!({
+            "ok": true,
+            "id": body.id,
+            "step": clamped,
+            "total": body.steps.len(),
+        })
+        .to_string(),
+    ))
+}
+
+fn walkthrough_clear_handler() -> DispatchResult {
+    wt::clear().map_err(|e| DispatchError::internal(format!("walkthrough_clear: {e}")))?;
+    let prev = state::read().ok().flatten().unwrap_or_default();
+    publish_state(UiState {
+        repo_root: prev.repo_root,
+        view: ViewIntent::default(),
+        ..UiState::default()
+    });
+    Ok(text_result(json!({"ok": true}).to_string()))
+}
+
+#[derive(Deserialize)]
+struct WalkthroughFeedbackArgs {
+    #[serde(default)]
+    since_ts: Option<u64>,
+}
+
+fn walkthrough_feedback(args: Value) -> DispatchResult {
+    let args: WalkthroughFeedbackArgs = serde_json::from_value(args)
+        .map_err(|e| DispatchError::invalid_params(format!("walkthrough_feedback: {e}")))?;
+    let log = wt::read_feedback()
+        .map_err(|e| DispatchError::internal(format!("walkthrough_feedback: {e}")))?;
+    let since = args.since_ts.unwrap_or(0);
+    let events: Vec<&_> = log
+        .events
+        .iter()
+        .filter(|e| e.ts > since)
+        .collect();
+    let body = json!({
+        "since_ts": since,
+        "events": events,
+    });
+    Ok(text_result(body.to_string()))
 }
 
 /// Best-effort statefile write. Failures are logged but never bubble up: the

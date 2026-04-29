@@ -81,6 +81,7 @@ fn now_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_lock;
 
     fn override_state_path(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -90,14 +91,13 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("current.json");
-        // Heartbeat path follows the statefile; the env override is the
-        // supported way callers (and these tests) redirect both at once.
         std::env::set_var("PLAINTEXT_IDE_STATE", &p);
         p
     }
 
     #[test]
     fn write_then_read_round_trips() {
+        let _g = test_lock();
         let _state = override_state_path("rt");
         write().unwrap();
         let hb = read().expect("heartbeat present");
@@ -107,6 +107,7 @@ mod tests {
 
     #[test]
     fn missing_file_is_not_alive() {
+        let _g = test_lock();
         let _state = override_state_path("missing");
         let _ = std::fs::remove_file(heartbeat_path());
         assert!(read().is_none());

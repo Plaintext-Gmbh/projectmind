@@ -23,6 +23,9 @@ use plaintext_ide_core::files::{self, MarkdownFile};
 use plaintext_ide_core::git::{self, ChangedFile};
 use plaintext_ide_core::heartbeat;
 use plaintext_ide_core::state::{self, UiState, ViewIntent};
+use plaintext_ide_core::walkthrough::{
+    self as wt, FeedbackEvent, FeedbackKind, FeedbackLog, Walkthrough,
+};
 use plaintext_ide_core::{diagram, Engine, Repository};
 use plaintext_ide_framework_lombok::LombokPlugin;
 use plaintext_ide_framework_spring::SpringPlugin;
@@ -269,6 +272,73 @@ fn current_state() -> Option<UiState> {
     state::read().ok().flatten()
 }
 
+/// Read the active walk-through body, or `None` when no tour is in progress.
+#[tauri::command]
+fn current_walkthrough() -> Option<Walkthrough> {
+    wt::read_body().ok().flatten()
+}
+
+/// Read the feedback log for the active tour. Empty if none.
+#[tauri::command]
+fn current_walkthrough_feedback() -> FeedbackLog {
+    wt::read_feedback().unwrap_or_default()
+}
+
+/// User clicks "Verstanden" — record the ack and (typically) advance the
+/// pointer. Bumping the pointer is done by the frontend through
+/// `set_walkthrough_step`; this command only writes the feedback event.
+#[tauri::command]
+fn walkthrough_ack(walkthrough_id: String, step: u32) -> Result<FeedbackLog, String> {
+    let event = FeedbackEvent {
+        walkthrough_id,
+        step,
+        kind: FeedbackKind::Understood,
+        comment: None,
+        ts: now_secs(),
+    };
+    wt::append_feedback(event).map_err(|e| e.to_string())
+}
+
+/// User clicks "Bitte genauer beschreiben" — record the request with an
+/// optional free-text note. Pointer stays put.
+#[tauri::command]
+fn walkthrough_request_more(
+    walkthrough_id: String,
+    step: u32,
+    comment: Option<String>,
+) -> Result<FeedbackLog, String> {
+    let event = FeedbackEvent {
+        walkthrough_id,
+        step,
+        kind: FeedbackKind::MoreDetail,
+        comment,
+        ts: now_secs(),
+    };
+    wt::append_feedback(event).map_err(|e| e.to_string())
+}
+
+/// Move the active tour's pointer (manual sidebar click). Publishes a
+/// new UiState so the LLM can observe where the user navigated to.
+#[tauri::command]
+fn set_walkthrough_step(id: String, step: u32) -> Result<(), String> {
+    let prev = state::read().ok().flatten().unwrap_or_default();
+    let payload = UiState {
+        repo_root: prev.repo_root,
+        view: ViewIntent::Walkthrough { id, step },
+        ..UiState::default()
+    };
+    state::write(payload).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn now_secs() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 /// List every markdown file under `root` (recursive, gitignore-aware,
 /// build-output dirs filtered). Used by the file viewer's project-wide
 /// markdown picker.
@@ -382,6 +452,11 @@ pub fn run() {
             read_file_text,
             current_state,
             list_markdown_files,
+            current_walkthrough,
+            current_walkthrough_feedback,
+            walkthrough_ack,
+            walkthrough_request_more,
+            set_walkthrough_step,
         ])
         .setup(|app| {
             spawn_state_watcher(app.handle().clone());

@@ -21,8 +21,21 @@ pub mod heartbeat;
 pub mod maven;
 pub mod repository;
 pub mod state;
+pub mod walkthrough;
 
 pub use cargo::CargoCrate;
 pub use engine::Engine;
 pub use maven::MavenModule;
 pub use repository::{Repository, RepositoryError};
+
+/// Process-wide mutex for tests that mutate the `PLAINTEXT_IDE_STATE`
+/// env var. Several modules (heartbeat, walkthrough) share that env var
+/// and would race when cargo runs their tests in parallel.
+#[cfg(test)]
+pub(crate) fn test_lock() -> std::sync::MutexGuard<'static, ()> {
+    use std::sync::{Mutex, OnceLock};
+    static M: OnceLock<Mutex<()>> = OnceLock::new();
+    M.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}

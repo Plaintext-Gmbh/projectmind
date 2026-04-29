@@ -9,7 +9,16 @@ export const stereotypeFilter = writable<string | null>(null);
 export const moduleFilter = writable<string | null>(null);
 export const packageFilter = writable<string | null>(null);
 export const errorMessage = writable<string | null>(null);
-export type ViewMode = 'classes' | 'diagram' | 'md' | 'file' | 'diff';
+export type ViewMode = 'classes' | 'diagram' | 'md' | 'file' | 'diff' | 'walkthrough';
+
+export interface WalkthroughCursor {
+  id: string;
+  step: number;
+  /// Bumped on every applied intent so the view can re-fetch even when
+  /// (id, step) is identical to last time (e.g. LLM rewrote step 0).
+  nonce: number;
+}
+export const walkthroughCursor = writable<WalkthroughCursor | null>(null);
 export const viewMode = writable<ViewMode>('classes');
 
 export interface FileView {

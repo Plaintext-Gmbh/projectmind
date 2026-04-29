@@ -4,10 +4,18 @@
   export let klass: ClassEntry;
   export let source: string;
   export let meta: { file: string; line_start: number; line_end: number } | null;
+  /// Walk-through highlight ranges (1-based, inclusive). When set, these
+  /// take precedence over the default class-bounds highlight and use a
+  /// more vivid colour so the LLM-pointed lines stand out.
+  export let highlightRanges: Array<{ from: number; to: number }> = [];
 
   $: lines = source.split('\n');
-  $: highlightFrom = meta?.line_start ?? 0;
-  $: highlightTo = meta?.line_end ?? 0;
+  $: defaultFrom = meta?.line_start ?? 0;
+  $: defaultTo = meta?.line_end ?? 0;
+
+  function inWalkthroughRange(line: number): boolean {
+    return highlightRanges.some((r) => line >= r.from && line <= r.to);
+  }
 </script>
 
 <div class="root">
@@ -28,7 +36,10 @@
 
   <pre class="source"><code>{#each lines as line, i (i)}{@const lineNo = i + 1}<span
         class="line"
-        class:highlight={lineNo >= highlightFrom && lineNo <= highlightTo}
+        class:highlight={highlightRanges.length === 0 &&
+          lineNo >= defaultFrom &&
+          lineNo <= defaultTo}
+        class:wt-highlight={highlightRanges.length > 0 && inWalkthroughRange(lineNo)}
       ><span class="lineno">{lineNo}</span><span class="content">{line}</span>
 </span>{/each}</code></pre>
 </div>
@@ -93,6 +104,12 @@
   .line.highlight {
     background: color-mix(in srgb, var(--accent-2) 18%, transparent);
     border-left: 3px solid var(--accent-2);
+    padding-left: 9px;
+  }
+
+  .line.wt-highlight {
+    background: color-mix(in srgb, var(--warn) 30%, transparent);
+    border-left: 3px solid var(--warn);
     padding-left: 9px;
   }
 
