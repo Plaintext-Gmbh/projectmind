@@ -34,6 +34,112 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+/// Total cap on request-line + headers combined. Anything above this is rejected as 413.
+const MAX_HEADER_BYTES: usize = 16 * 1024;
+/// Cap on body bytes. API payloads are tiny JSON; 1 MB is generous for a LAN debug surface.
+const MAX_BODY_BYTES: usize = 1024 * 1024;
+
+/// Parsed HTTP request as needed by the router.
+#[derive(Debug)]
+struct Request {
+    method: String,
+    target: String,
+    headers: BTreeMap<String, String>,
+    body: Vec<u8>,
+}
+
+/// Errors returned by [`parse_request`].
+#[derive(Debug)]
+enum ParseError {
+    /// Header bytes exceeded `MAX_HEADER_BYTES` or `Content-Length` exceeded `MAX_BODY_BYTES`.
+    PayloadTooLarge,
+    /// Request line was empty or had fewer than two whitespace-separated parts.
+    Malformed,
+    /// Underlying I/O error while reading from the socket.
+    Io(std::io::Error),
+}
+
+impl From<std::io::Error> for ParseError {
+    fn from(value: std::io::Error) -> Self {
+        ParseError::Io(value)
+    }
+}
+
+/// Read an HTTP/1.x request from `reader` with hard caps on header and body size.
+///
+/// The reader is wrapped in `take((MAX_HEADER_BYTES + MAX_BODY_BYTES) as u64)` so a
+/// malformed unbounded stream cannot exhaust memory even if the size accounting below
+/// has a bug. The header loop additionally tracks total header bytes consumed and
+/// returns [`ParseError::PayloadTooLarge`] if the tally would exceed `MAX_HEADER_BYTES`.
+/// `Content-Length` is parsed and validated against `MAX_BODY_BYTES` BEFORE allocating
+/// the body buffer.
+fn parse_request<R: Read>(reader: R) -> Result<Request, ParseError> {
+    let cap = (MAX_HEADER_BYTES + MAX_BODY_BYTES) as u64;
+    let mut reader = BufReader::new(reader.take(cap));
+
+    let mut header_bytes: usize = 0;
+
+    let mut first = String::new();
+    let n = reader.read_line(&mut first)?;
+    header_bytes = header_bytes.saturating_add(n);
+    if header_bytes > MAX_HEADER_BYTES {
+        return Err(ParseError::PayloadTooLarge);
+    }
+    let parts: Vec<&str> = first.split_whitespace().collect();
+    if parts.len() < 2 {
+        return Err(ParseError::Malformed);
+    }
+    let method = parts[0].to_string();
+    let target = parts[1].to_string();
+
+    let mut headers = BTreeMap::new();
+    let mut content_len: usize = 0;
+    loop {
+        let mut line = String::new();
+        let n = reader.read_line(&mut line)?;
+        header_bytes = header_bytes.saturating_add(n);
+        if header_bytes > MAX_HEADER_BYTES {
+            return Err(ParseError::PayloadTooLarge);
+        }
+        // EOF before reaching the blank line that terminates the header section.
+        if n == 0 {
+            return Err(ParseError::Malformed);
+        }
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = trimmed.split_once(':') {
+            let name = name.trim().to_ascii_lowercase();
+            let value = value.trim().to_string();
+            if name == "content-length" {
+                match value.parse::<usize>() {
+                    Ok(v) => {
+                        if v > MAX_BODY_BYTES {
+                            return Err(ParseError::PayloadTooLarge);
+                        }
+                        content_len = v;
+                    }
+                    Err(_) => content_len = 0,
+                }
+            }
+            headers.insert(name, value);
+        }
+    }
+
+    let mut body = vec![0_u8; content_len];
+    if content_len > 0 {
+        reader.read_exact(&mut body)?;
+    }
+
+    Ok(Request {
+        method,
+        target,
+        headers,
+        body,
+    })
+}
+
 /// Browser host startup configuration.
 #[derive(Debug, Clone)]
 pub struct BrowserHostConfig {
@@ -223,37 +329,22 @@ fn handle(
     asset_dir: &Path,
     token: &str,
 ) -> anyhow::Result<()> {
-    let mut reader = BufReader::new(stream.try_clone()?);
-    let mut first = String::new();
-    reader.read_line(&mut first)?;
-    let parts: Vec<&str> = first.split_whitespace().collect();
-    if parts.len() < 2 {
-        return Ok(());
-    }
-    let method = parts[0].to_string();
-    let target = parts[1].to_string();
-    let mut headers = BTreeMap::new();
-    let mut content_len = 0_usize;
-    loop {
-        let mut line = String::new();
-        reader.read_line(&mut line)?;
-        let trimmed = line.trim_end();
-        if trimmed.is_empty() {
-            break;
+    let request = match parse_request(stream.try_clone()?) {
+        Ok(r) => r,
+        Err(ParseError::PayloadTooLarge) => {
+            return json_response(&mut stream, 413, json!({"error": "request too large"}));
         }
-        if let Some((name, value)) = trimmed.split_once(':') {
-            let name = name.trim().to_ascii_lowercase();
-            let value = value.trim().to_string();
-            if name == "content-length" {
-                content_len = value.parse().unwrap_or(0);
-            }
-            headers.insert(name, value);
+        Err(ParseError::Malformed) => {
+            return json_response(&mut stream, 400, json!({"error": "malformed request"}));
         }
-    }
-    let mut body = vec![0_u8; content_len];
-    if content_len > 0 {
-        reader.read_exact(&mut body)?;
-    }
+        Err(ParseError::Io(err)) => return Err(err.into()),
+    };
+    let Request {
+        method,
+        target,
+        headers,
+        body,
+    } = request;
 
     let (path, query) = split_target(&target);
     if path.starts_with("/api/") {
@@ -698,6 +789,7 @@ fn json_response(stream: &mut TcpStream, status: u16, value: Value) -> anyhow::R
         200 => "OK",
         400 => "Bad Request",
         401 => "Unauthorized",
+        413 => "Payload Too Large",
         _ => "Error",
     };
     write!(
@@ -819,4 +911,269 @@ fn _type_check_public_payloads(
     _: Walkthrough,
     _: FeedbackLog,
 ) {
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        authorized, content_type, parse_request, percent_decode, split_target, ParseError,
+        MAX_BODY_BYTES, MAX_HEADER_BYTES,
+    };
+    use std::collections::BTreeMap;
+    use std::io::Cursor;
+    use std::path::Path;
+
+    // ----- parse_request -----
+
+    #[test]
+    fn parse_request_get_no_body() {
+        let raw = b"GET /api/foo HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        let req = parse_request(Cursor::new(raw)).expect("parse ok");
+        assert_eq!(req.method, "GET");
+        assert_eq!(req.target, "/api/foo");
+        assert_eq!(req.headers.get("host").map(String::as_str), Some("localhost"));
+        assert!(req.body.is_empty());
+    }
+
+    #[test]
+    fn parse_request_post_with_json_body() {
+        let body = br#"{"path":"/tmp/foo"}"#;
+        let raw = format!(
+            "POST /api/open_repo HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        );
+        let mut input = raw.into_bytes();
+        input.extend_from_slice(body);
+        let req = parse_request(Cursor::new(input)).expect("parse ok");
+        assert_eq!(req.method, "POST");
+        assert_eq!(req.target, "/api/open_repo");
+        assert_eq!(req.body, body);
+        assert_eq!(
+            req.headers.get("content-length").map(String::as_str),
+            Some(body.len().to_string().as_str())
+        );
+    }
+
+    #[test]
+    fn parse_request_truncated_request_is_malformed() {
+        // EOF before the blank header-terminator line.
+        let raw = b"GET /api/foo HTTP/1.1\r\nHost: localhost\r\n";
+        let err = parse_request(Cursor::new(raw)).expect_err("must fail");
+        match err {
+            ParseError::Malformed => {}
+            other => panic!("expected Malformed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_request_empty_request_line_is_malformed() {
+        let raw = b"\r\n";
+        let err = parse_request(Cursor::new(raw)).expect_err("must fail");
+        match err {
+            ParseError::Malformed => {}
+            other => panic!("expected Malformed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_request_oversized_content_length_is_too_large() {
+        let too_big = MAX_BODY_BYTES + 1;
+        let raw = format!(
+            "POST /api/foo HTTP/1.1\r\nContent-Length: {too_big}\r\n\r\n"
+        );
+        let err = parse_request(Cursor::new(raw.into_bytes())).expect_err("must fail");
+        match err {
+            ParseError::PayloadTooLarge => {}
+            other => panic!("expected PayloadTooLarge, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_request_attacker_huge_content_length_does_not_allocate() {
+        // Simulates the original DoS: client sends a 10 GB Content-Length but no body.
+        // We must reject before allocating, not OOM.
+        let raw = b"POST /api/foo HTTP/1.1\r\nContent-Length: 9999999999\r\n\r\n";
+        let err = parse_request(Cursor::new(raw)).expect_err("must fail");
+        assert!(matches!(err, ParseError::PayloadTooLarge));
+    }
+
+    #[test]
+    fn parse_request_unparseable_content_length_treated_as_zero() {
+        let raw = b"POST /api/foo HTTP/1.1\r\nContent-Length: not-a-number\r\n\r\n";
+        let req = parse_request(Cursor::new(raw)).expect("parse ok");
+        assert_eq!(req.method, "POST");
+        assert!(req.body.is_empty());
+    }
+
+    #[test]
+    fn parse_request_post_without_content_length_has_zero_body() {
+        let raw = b"POST /api/foo HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        let req = parse_request(Cursor::new(raw)).expect("parse ok");
+        assert_eq!(req.method, "POST");
+        assert!(req.body.is_empty());
+    }
+
+    #[test]
+    fn parse_request_header_bytes_over_cap_is_too_large() {
+        // Build a request whose headers alone exceed MAX_HEADER_BYTES.
+        let big_value = "a".repeat(MAX_HEADER_BYTES + 1);
+        let raw = format!(
+            "GET /api/foo HTTP/1.1\r\nX-Big: {big_value}\r\n\r\n"
+        );
+        let err = parse_request(Cursor::new(raw.into_bytes())).expect_err("must fail");
+        match err {
+            ParseError::PayloadTooLarge => {}
+            other => panic!("expected PayloadTooLarge, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_request_short_body_is_io_error() {
+        // Content-Length says 10 but we only provide 3 bytes.
+        let raw = b"POST /api/foo HTTP/1.1\r\nContent-Length: 10\r\n\r\nabc";
+        let err = parse_request(Cursor::new(raw)).expect_err("must fail");
+        match err {
+            ParseError::Io(_) => {}
+            other => panic!("expected Io, got {other:?}"),
+        }
+    }
+
+    // ----- split_target -----
+
+    #[test]
+    fn split_target_path_only() {
+        let (path, query) = split_target("/api/foo");
+        assert_eq!(path, "/api/foo");
+        assert!(query.is_empty());
+    }
+
+    #[test]
+    fn split_target_path_with_single_query() {
+        let (path, query) = split_target("/api/foo?bar=baz");
+        assert_eq!(path, "/api/foo");
+        assert_eq!(query.get("bar").map(String::as_str), Some("baz"));
+    }
+
+    #[test]
+    fn split_target_path_with_multiple_query_params() {
+        let (path, query) = split_target("/api/x?a=1&b=2&c=3");
+        assert_eq!(path, "/api/x");
+        assert_eq!(query.get("a").map(String::as_str), Some("1"));
+        assert_eq!(query.get("b").map(String::as_str), Some("2"));
+        assert_eq!(query.get("c").map(String::as_str), Some("3"));
+    }
+
+    #[test]
+    fn split_target_decodes_encoded_params() {
+        let (path, query) = split_target("/api/x?path=%2Ftmp%2Ffoo+bar");
+        assert_eq!(path, "/api/x");
+        assert_eq!(
+            query.get("path").map(String::as_str),
+            Some("/tmp/foo bar")
+        );
+    }
+
+    #[test]
+    fn split_target_empty_query_segments_skipped() {
+        let (_path, query) = split_target("/?&a=1&");
+        // Empty pair fragments are filtered; only "a=1" remains.
+        assert_eq!(query.len(), 1);
+        assert_eq!(query.get("a").map(String::as_str), Some("1"));
+    }
+
+    // ----- percent_decode -----
+
+    #[test]
+    fn percent_decode_space_escape() {
+        assert_eq!(percent_decode("hello%20world"), "hello world");
+    }
+
+    #[test]
+    fn percent_decode_plus_to_space() {
+        assert_eq!(percent_decode("hello+world"), "hello world");
+    }
+
+    #[test]
+    fn percent_decode_mixed_encodings() {
+        assert_eq!(percent_decode("a+b%2Fc"), "a b/c");
+    }
+
+    #[test]
+    fn percent_decode_invalid_escape_passes_through() {
+        // "%ZZ" is not a valid hex escape; original bytes are preserved.
+        assert_eq!(percent_decode("a%ZZb"), "a%ZZb");
+    }
+
+    #[test]
+    fn percent_decode_trailing_percent_passes_through() {
+        // A bare trailing '%' has no following hex digits.
+        assert_eq!(percent_decode("foo%"), "foo%");
+    }
+
+    // ----- content_type -----
+
+    #[test]
+    fn content_type_known_extensions() {
+        assert_eq!(content_type(Path::new("a.html")), "text/html; charset=utf-8");
+        assert_eq!(
+            content_type(Path::new("a.js")),
+            "text/javascript; charset=utf-8"
+        );
+        assert_eq!(content_type(Path::new("a.css")), "text/css; charset=utf-8");
+        assert_eq!(content_type(Path::new("a.json")), "application/json");
+        assert_eq!(content_type(Path::new("a.png")), "image/png");
+        assert_eq!(content_type(Path::new("a.svg")), "image/svg+xml");
+        assert_eq!(content_type(Path::new("a.pdf")), "application/pdf");
+    }
+
+    #[test]
+    fn content_type_unknown_extension_is_octet_stream() {
+        assert_eq!(
+            content_type(Path::new("a.xyz")),
+            "application/octet-stream"
+        );
+        assert_eq!(
+            content_type(Path::new("noext")),
+            "application/octet-stream"
+        );
+    }
+
+    // ----- authorized -----
+
+    fn header_map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn authorized_bearer_match() {
+        let h = header_map(&[("authorization", "Bearer secret-token")]);
+        assert!(authorized(&h, "secret-token"));
+    }
+
+    #[test]
+    fn authorized_bearer_mismatch() {
+        let h = header_map(&[("authorization", "Bearer wrong-token")]);
+        assert!(!authorized(&h, "secret-token"));
+    }
+
+    #[test]
+    fn authorized_missing_authorization_header() {
+        let h = header_map(&[("host", "localhost")]);
+        assert!(!authorized(&h, "secret-token"));
+    }
+
+    #[test]
+    fn authorized_non_bearer_scheme() {
+        let h = header_map(&[("authorization", "Basic c2VjcmV0LXRva2Vu")]);
+        assert!(!authorized(&h, "secret-token"));
+    }
+
+    #[test]
+    fn authorized_bearer_prefix_only_no_token() {
+        let h = header_map(&[("authorization", "Bearer ")]);
+        assert!(!authorized(&h, "secret-token"));
+    }
 }
