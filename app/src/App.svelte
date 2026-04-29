@@ -75,7 +75,8 @@
   // (e.g. a docs-only or office-style folder).
   $: codeTabLabel = $repo && $repo.classes === 0 ? 'Files' : 'Code';
 
-  let diagramKind: 'bean-graph' | 'package-tree' = 'bean-graph';
+  let diagramKind: 'bean-graph' | 'package-tree' | 'folder-map' = 'bean-graph';
+  let folderMapLayout: 'hierarchy' | 'solar' = 'solar';
   let classSource = '';
   let classMeta: { file: string; line_start: number; line_end: number } | null = null;
   let loading = false;
@@ -92,6 +93,9 @@
   // Whenever selectedClass changes (from sidebar click *or* a diagram drilldown)
   // load the source for the right-hand viewer.
   let lastLoadedFqn: string | null = null;
+  $: if ($repo?.classes === 0 && (diagramKind === 'bean-graph' || diagramKind === 'package-tree')) {
+    diagramKind = 'folder-map';
+  }
   $: void loadSourceFor($selectedClass);
 
   async function loadSourceFor(c: ClassEntry | null) {
@@ -215,7 +219,11 @@
           }
           break;
         case 'diagram':
-          if (v.diagram_kind === 'bean-graph' || v.diagram_kind === 'package-tree') {
+          if (
+            v.diagram_kind === 'bean-graph' ||
+            v.diagram_kind === 'package-tree' ||
+            v.diagram_kind === 'folder-map'
+          ) {
             diagramKind = v.diagram_kind;
           }
           viewMode.set('diagram');
@@ -323,18 +331,16 @@
       >
         {codeTabLabel}
       </button>
-      {#if !$repo || ($repo && $repo.classes > 0)}
-        <button
-          class:active={$viewMode === 'diagram'}
-          disabled={!$repo}
-          on:click={() => {
-            followingMcp.set(false);
-            viewMode.set('diagram');
-          }}
-        >
-          Diagrams
-        </button>
-      {/if}
+      <button
+        class:active={$viewMode === 'diagram'}
+        disabled={!$repo}
+        on:click={() => {
+          followingMcp.set(false);
+          viewMode.set('diagram');
+        }}
+      >
+        Diagrams
+      </button>
       {#if !$repo || ($repo && $repo.markdown_count > 0)}
         <button
           class:active={$viewMode === 'md' || $viewMode === 'file'}
@@ -517,15 +523,28 @@
   {:else if $viewMode === 'diagram'}
     <section class="diagram-view">
       <div class="diagram-tabs">
-        <button class:active={diagramKind === 'bean-graph'} on:click={() => (diagramKind = 'bean-graph')}>
-          Bean graph
+        {#if $repo.classes > 0}
+          <button class:active={diagramKind === 'bean-graph'} on:click={() => (diagramKind = 'bean-graph')}>
+            Bean graph
+          </button>
+          <button class:active={diagramKind === 'package-tree'} on:click={() => (diagramKind = 'package-tree')}>
+            Package tree
+          </button>
+        {/if}
+        <button class:active={diagramKind === 'folder-map'} on:click={() => (diagramKind = 'folder-map')}>
+          Folder map
         </button>
-        <button class:active={diagramKind === 'package-tree'} on:click={() => (diagramKind = 'package-tree')}>
-          Package tree
-        </button>
+        {#if diagramKind === 'folder-map'}
+          <button class:active={folderMapLayout === 'solar'} on:click={() => (folderMapLayout = 'solar')}>
+            Solar
+          </button>
+          <button class:active={folderMapLayout === 'hierarchy'} on:click={() => (folderMapLayout = 'hierarchy')}>
+            Hierarchy
+          </button>
+        {/if}
         <span class="diagram-hint">Click a node to drill into it</span>
       </div>
-      <DiagramView kind={diagramKind} />
+      <DiagramView kind={diagramKind} folderLayout={folderMapLayout} />
     </section>
   {:else if $viewMode === 'walkthrough' && $walkthroughCursor}
     <WalkthroughView

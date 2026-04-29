@@ -79,7 +79,7 @@ fn diagram_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "type": { "type": "string", "enum": ["bean-graph", "package-tree"] }
+            "type": { "type": "string", "enum": ["bean-graph", "package-tree", "folder-map"] }
         },
         "required": ["type"]
     })
@@ -553,6 +553,7 @@ async fn show_diagram(state: &Mutex<ServerState>, args: Value) -> DispatchResult
     with_repo(&state, |repo| match args.kind.as_str() {
         "bean-graph" => Ok(text_result(diagram::render_bean_graph(repo, &spring))),
         "package-tree" => Ok(text_result(diagram::render_package_tree(repo))),
+        "folder-map" => Ok(text_result(diagram::render_folder_map(repo))),
         other => Err(DispatchError::invalid_params(format!(
             "unknown diagram: {other}"
         ))),
@@ -843,7 +844,7 @@ struct DiagramKindArgs {
 fn view_diagram(args: Value) -> DispatchResult {
     let args: DiagramKindArgs = serde_json::from_value(args)
         .map_err(|e| DispatchError::invalid_params(format!("view_diagram: {e}")))?;
-    if args.kind != "bean-graph" && args.kind != "package-tree" {
+    if args.kind != "bean-graph" && args.kind != "package-tree" && args.kind != "folder-map" {
         return Err(DispatchError::invalid_params(format!(
             "unknown diagram type: {}",
             args.kind

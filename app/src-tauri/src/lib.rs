@@ -250,6 +250,7 @@ fn show_diagram(kind: String, state: State<'_, Arc<AppState>>) -> Result<String,
     match kind.as_str() {
         "bean-graph" => Ok(diagram::render_bean_graph(repo, &spring)),
         "package-tree" => Ok(diagram::render_package_tree(repo)),
+        "folder-map" => Ok(diagram::render_folder_map(repo)),
         other => Err(format!("unknown diagram kind: {other}")),
     }
 }
