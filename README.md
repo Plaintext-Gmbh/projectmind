@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/logo.png" alt="plaintext-ide" width="96" height="96"/>
+</p>
+
 # plaintext-ide
 
 A lightweight, **read-only** architecture browser for source code, designed to work bidirectionally with LLM-driven coding agents (Claude Code, etc.) via the **Model Context Protocol (MCP)**.

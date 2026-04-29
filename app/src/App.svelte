@@ -169,7 +169,7 @@
 <main>
   <header>
     <div class="brand">
-      <span class="logo">◊</span>
+      <img class="logo" src="/logo.png" alt="plaintext-ide" />
       <span class="title">plaintext-ide</span>
       {#if $repo}
         <span class="repo" title={$repo.root}>
@@ -230,6 +230,7 @@
   {#if !$repo}
     <section class="empty">
       <div class="welcome">
+        <img class="welcome-logo" src="/logo.png" alt="plaintext-ide" />
         <h1>plaintext-ide</h1>
         <p>A read-only architecture browser.</p>
         <button on:click={pickAndOpen}>Open a repository to begin</button>
@@ -346,8 +347,22 @@
   }
 
   .logo {
-    font-size: 18px;
-    color: var(--accent);
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: block;
+    flex-shrink: 0;
+  }
+
+  .welcome-logo {
+    width: 96px;
+    height: 96px;
+    border-radius: 50%;
+    margin-bottom: 16px;
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    box-shadow: 0 8px 32px color-mix(in srgb, #2d2bfe 35%, transparent);
   }
 
   .title {
