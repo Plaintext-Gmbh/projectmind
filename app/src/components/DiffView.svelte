@@ -1,13 +1,21 @@
 <script lang="ts">
+  import { onMount, onDestroy } from 'svelte';
   import { showDiff } from '../lib/api';
 
   export let reference: string;
   export let to: string | null = null;
 
+  const ZOOM_KEY = 'projectmind.diffview.zoom';
+  const ZOOM_MIN = 0.6;
+  const ZOOM_MAX = 2.0;
+  const ZOOM_STEP = 0.1;
+
   let raw = '';
   let lines: { kind: 'meta' | 'header' | 'add' | 'del' | 'context' | 'hunk'; text: string }[] = [];
   let loading = false;
   let error: string | null = null;
+  let zoom = readZoom();
+  let rootEl: HTMLElement;
 
   $: if (reference) void load(reference, to);
 
@@ -45,9 +53,51 @@
       return { kind: 'context' as const, text };
     });
   }
+
+  function readZoom(): number {
+    try {
+      const v = parseFloat(localStorage.getItem(ZOOM_KEY) ?? '');
+      if (Number.isFinite(v) && v > 0) return clampZoom(v);
+    } catch {
+      // ignore
+    }
+    return 1.0;
+  }
+
+  function clampZoom(z: number): number {
+    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
+  }
+
+  function setZoom(z: number) {
+    zoom = clampZoom(z);
+    try {
+      localStorage.setItem(ZOOM_KEY, String(zoom));
+    } catch {
+      // ignore
+    }
+  }
+
+  function onWheel(ev: WheelEvent) {
+    if (!ev.shiftKey) return;
+    if (!rootEl || !rootEl.isConnected) return;
+    if (!(ev.target instanceof Node) || !rootEl.contains(ev.target)) return;
+    const delta = Math.abs(ev.deltaY) >= Math.abs(ev.deltaX) ? ev.deltaY : ev.deltaX;
+    if (delta === 0) return;
+    ev.preventDefault();
+    if (delta < 0) setZoom(zoom + ZOOM_STEP);
+    else setZoom(zoom - ZOOM_STEP);
+  }
+
+  onMount(() => {
+    window.addEventListener('wheel', onWheel, { passive: false });
+  });
+
+  onDestroy(() => {
+    window.removeEventListener('wheel', onWheel);
+  });
 </script>
 
-<section class="root">
+<section class="root" bind:this={rootEl} style="font-size: {zoom}em;">
   <header class="bar">
     <span class="kind">diff</span>
     <code class="ref">{reference}</code>
@@ -82,7 +132,7 @@
     padding: 6px 16px;
     background: var(--bg-1);
     border-bottom: 1px solid var(--bg-3);
-    font-size: 12px;
+    font-size: 0.86em;
     color: var(--fg-1);
   }
   .kind {
@@ -92,7 +142,7 @@
     background: var(--bg-2);
     border-radius: 3px;
     color: var(--fg-2);
-    font-size: 10px;
+    font-size: 0.72em;
   }
   .arrow {
     color: var(--fg-2);
@@ -118,7 +168,7 @@
     margin: 0;
     padding: 16px;
     font-family: var(--mono);
-    font-size: 12px;
+    font-size: 0.86em;
     line-height: 1.45;
     overflow: auto;
     flex: 1;

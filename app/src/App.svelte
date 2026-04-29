@@ -43,6 +43,7 @@
   import { resizable } from './lib/resizable';
 
   type Theme = 'dark' | 'light';
+  const BROWSER_STATE_POLL_MS = 500;
   let theme: Theme = readTheme();
   $: applyTheme(theme);
 
@@ -280,7 +281,7 @@
           .catch((err) => {
             errorMessage.set(String(err));
           });
-      }, 1500);
+      }, BROWSER_STATE_POLL_MS);
     }
   });
 

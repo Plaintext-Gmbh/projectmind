@@ -8,6 +8,7 @@
     readFileText,
     showDiff,
     ackWalkthrough,
+    currentWalkthroughFeedback,
     requestMoreWalkthrough,
     setWalkthroughStep,
     endWalkthrough,
@@ -17,6 +18,7 @@
     WalkthroughStep,
     LineRange,
     ClassEntry,
+    FeedbackEvent,
   } from '../lib/api';
   import { errorMessage, repo, viewMode, walkthroughCursor } from '../lib/store';
   import ClassViewer from './ClassViewer.svelte';
@@ -56,6 +58,16 @@
   let overrideLoading = false;
   let overrideError: string | null = null;
 
+  // Zoom for walk-through-owned detail text. Embedded ClassViewer, FileView
+  // and DiffView keep their own zoom handling.
+  const ZOOM_KEY = 'projectmind.walkthrough.detail.zoom';
+  const ZOOM_MIN = 0.6;
+  const ZOOM_MAX = 2.0;
+  const ZOOM_STEP = 0.1;
+  let detailZoom = readZoom();
+  let plainEl: HTMLPreElement | null = null;
+  let narrationEl: HTMLElement | null = null;
+
   // UI flow state.
   let feedbackPrompt = false;
   let feedbackText = '';
@@ -68,6 +80,9 @@
   /// waiting card can show it back AND include it in the copy-to-CLI hint.
   /// Cleared whenever a new tour starts.
   let lastQuestion = '';
+  let activeFeedbackKey = '';
+  let dismissedFeedbackKey = '';
+  let feedbackPoll: ReturnType<typeof setInterval> | null = null;
   /// Set after the user acks the LAST step — the UI shows a "Tour
   /// abgeschlossen" card with an explicit "Schliessen" button.
   let tourFinished = false;
@@ -93,6 +108,8 @@
       feedbackPrompt = false;
       feedbackText = '';
       lastQuestion = '';
+      activeFeedbackKey = '';
+      dismissedFeedbackKey = '';
       bodyLoading = true;
       try {
         body = await currentWalkthrough();
@@ -249,6 +266,7 @@
   /// current step. The feedback event is still in the log, so the LLM
   /// can react later.
   function dismissWaiting() {
+    dismissedFeedbackKey = activeFeedbackKey;
     waitingForFollowup = false;
   }
 
@@ -385,9 +403,80 @@
     }
   }
 
+  function readZoom(): number {
+    try {
+      const v = parseFloat(localStorage.getItem(ZOOM_KEY) ?? '');
+      if (Number.isFinite(v) && v > 0) return clampZoom(v);
+    } catch {
+      // ignore
+    }
+    return 1.0;
+  }
+
+  function clampZoom(z: number): number {
+    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
+  }
+
+  function setDetailZoom(z: number) {
+    detailZoom = clampZoom(z);
+    try {
+      localStorage.setItem(ZOOM_KEY, String(detailZoom));
+    } catch {
+      // ignore
+    }
+  }
+
+  function onWheel(ev: WheelEvent) {
+    if (!ev.shiftKey) return;
+    if (!(ev.target instanceof Node)) return;
+    const inPlain = plainEl?.contains(ev.target) ?? false;
+    const inNarration = narrationEl?.contains(ev.target) ?? false;
+    if (!inPlain && !inNarration) return;
+    const delta = Math.abs(ev.deltaY) >= Math.abs(ev.deltaX) ? ev.deltaY : ev.deltaX;
+    if (delta === 0) return;
+    ev.preventDefault();
+    if (delta < 0) setDetailZoom(detailZoom + ZOOM_STEP);
+    else setDetailZoom(detailZoom - ZOOM_STEP);
+  }
+
+  function feedbackKey(e: FeedbackEvent): string {
+    return `${e.walkthrough_id}:${e.step}:${e.kind}:${e.ts}`;
+  }
+
+  async function syncFeedbackState() {
+    if (!body || feedbackPrompt) return;
+    try {
+      const log = await currentWalkthroughFeedback();
+      const latest = [...log.events]
+        .reverse()
+        .find((e) => e.walkthrough_id === body?.id && e.step === cursorStep);
+      if (!latest) return;
+      const key = feedbackKey(latest);
+      if (latest.kind === 'more_detail') {
+        if (key === dismissedFeedbackKey || waitingForFollowup) return;
+        activeFeedbackKey = key;
+        lastQuestion = latest.comment ?? '';
+        feedbackText = '';
+        waitingForFollowup = true;
+      } else if (latest.kind === 'understood' && isLastStep) {
+        tourFinished = true;
+      }
+    } catch (err) {
+      errorMessage.set(String(err));
+    }
+  }
+
   onMount(() => {
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('wheel', onWheel, { passive: false });
+    feedbackPoll = setInterval(() => {
+      void syncFeedbackState();
+    }, 1500);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('wheel', onWheel);
+      if (feedbackPoll) clearInterval(feedbackPoll);
+    };
   });
 </script>
 
@@ -528,7 +617,7 @@
             {:else if overrideError}
               <div class="error">⚠ {overrideError}</div>
             {:else}
-              <pre class="plain"><code>{#each overrideSource.split('\n') as line, i (i)}{@const lineNo = i + 1}<span
+              <pre class="plain" bind:this={plainEl} style="font-size: {detailZoom}em;"><code>{#each overrideSource.split('\n') as line, i (i)}{@const lineNo = i + 1}<span
                 class="line"
                 data-line-no={lineNo}
                 class:wt-highlight={overrideHighlight.some((r) => lineNo >= r.from && lineNo <= r.to)}
@@ -549,7 +638,7 @@
           {:else if step.target.kind === 'file' && isMarkdown(step.target.path)}
             <FileView path={step.target.path} anchor={step.target.anchor ?? null} {nonce} />
           {:else if step.target.kind === 'file'}
-            <pre class="plain"><code>{#each plainSource.split('\n') as line, i (i)}{@const lineNo = i + 1}<span
+            <pre class="plain" bind:this={plainEl} style="font-size: {detailZoom}em;"><code>{#each plainSource.split('\n') as line, i (i)}{@const lineNo = i + 1}<span
               class="line"
               data-line-no={lineNo}
               class:wt-highlight={plainHighlight.some((r) => lineNo >= r.from && lineNo <= r.to)}
@@ -561,13 +650,15 @@
         </div>
 
         {#if narrationHtml}
-          <article class="narration">
+          <article class="narration" bind:this={narrationEl}>
             <header class="narration-head">
               <span class="narration-icon">📖</span>
               <span class="narration-label">Erklärung der KI</span>
             </header>
             <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
-            <div class="narration-body" on:click={onNarrationClick}>{@html narrationHtml}</div>
+            <div class="narration-body" on:click={onNarrationClick} style="font-size: {detailZoom}em;">
+              {@html narrationHtml}
+            </div>
           </article>
         {/if}
 
@@ -915,7 +1006,7 @@
     overflow: auto;
     flex: 1;
     font-family: var(--mono);
-    font-size: 12.5px;
+    font-size: 0.9em;
     line-height: 1.55;
     min-height: 0;
   }
@@ -1009,7 +1100,7 @@
     font-weight: 600;
   }
   .narration-body {
-    font-size: 15px;
+    font-size: 1em;
     line-height: 1.6;
     color: var(--fg-0);
     max-width: 820px;
