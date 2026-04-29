@@ -174,6 +174,20 @@ export async function listMarkdownFiles(root: string): Promise<MarkdownFile[]> {
   return invoke<MarkdownFile[]>('list_markdown_files', { root });
 }
 
+export interface ModuleFile {
+  abs: string;
+  rel: string;
+  kind: string;
+  size: number;
+}
+
+export async function listModuleFiles(moduleId: string): Promise<ModuleFile[]> {
+  if (!isTauriRuntime()) {
+    return api<ModuleFile[]>(`/api/list_module_files${query({ module: moduleId })}`);
+  }
+  return invoke<ModuleFile[]>('list_module_files', { moduleId });
+}
+
 export type MatchKind = 'title' | 'path' | 'content';
 
 export interface MarkdownHit {

@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use projectmind_core::file_access;
-use projectmind_core::files::{self, MarkdownFile, MarkdownHit};
+use projectmind_core::files::{self, MarkdownFile, MarkdownHit, ModuleFile};
 use projectmind_core::git::{self, ChangedFile};
 use projectmind_core::heartbeat;
 use projectmind_core::html::{self, HtmlFile, HtmlSnippet};
@@ -434,6 +434,28 @@ fn find_html_snippets(root: String) -> Result<Vec<HtmlSnippet>, String> {
     Ok(html::find_html_snippets(p))
 }
 
+/// List PDFs and images that live inside a module's root. Used by the
+/// Code-tab sidebar so non-source assets sit alongside the parsed class
+/// listing. Returns an empty Vec when the module has no matching files.
+#[tauri::command]
+fn list_module_files(
+    module_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<ModuleFile>, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    let module = repo
+        .modules
+        .get(&module_id)
+        .ok_or_else(|| format!("module not found: {module_id}"))?;
+    Ok(files::list_module_files(
+        &module.root,
+        &["pdf", "png", "jpg", "jpeg", "webp", "gif"],
+    ))
+}
+
 /// Best-effort publish: GUI tells the MCP/cooperating processes about its state.
 fn publish_state(payload: UiState) {
     if let Err(err) = state::write(payload) {
@@ -535,6 +557,7 @@ pub fn run() {
             search_markdown,
             list_html_files,
             find_html_snippets,
+            list_module_files,
             current_walkthrough,
             current_walkthrough_feedback,
             walkthrough_ack,

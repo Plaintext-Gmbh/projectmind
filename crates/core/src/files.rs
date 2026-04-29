@@ -23,6 +23,23 @@ pub struct MarkdownFile {
     pub size: u64,
 }
 
+/// One non-source asset (PDF, image, …) found inside a module root.
+///
+/// Returned by [`list_module_files`] for the Code-tab sidebar so PDFs and
+/// images can sit alongside the parsed class listing.
+#[derive(Debug, Clone, Serialize)]
+pub struct ModuleFile {
+    /// Absolute path on disk.
+    pub abs: PathBuf,
+    /// Path relative to the module root, with `/` separators.
+    pub rel: String,
+    /// Lowercase extension (e.g. `"pdf"`, `"png"`). Stored as `String` rather
+    /// than `&'static str` so the JSON serialisation round-trips cleanly.
+    pub kind: String,
+    /// File size in bytes.
+    pub size: u64,
+}
+
 /// Walk `root` and return every `*.md`, `*.markdown`, and `*.mdx` it finds.
 /// Honours `.gitignore`/`.ignore` (`ignore` crate default behaviour) and skips
 /// the usual build-output noise even if the project lacks a gitignore.
@@ -70,6 +87,67 @@ pub fn list_markdown_files(root: &Path) -> Vec<MarkdownFile> {
             abs: path.to_path_buf(),
             rel,
             title,
+            size,
+        });
+    }
+    out.sort_by(|a, b| a.rel.cmp(&b.rel));
+    out
+}
+
+/// Walk `module_root` and return every file whose lowercase extension is in
+/// `kinds`. Honours `.gitignore`/`.ignore` and skips the same build-output
+/// directories as [`list_markdown_files`] (`target`, `node_modules`, `dist`,
+/// `build`, `.git`, `.idea`, `.vscode`).
+///
+/// Source files (`.java`, `.rs`) are skipped explicitly even if the caller
+/// passes them in `kinds` — those are the class listing's job and shouldn't
+/// appear twice in the Code-tab sidebar.
+///
+/// Result is sorted alphabetically by relative path so the UI gets a stable
+/// order without re-sorting on every render.
+#[must_use]
+pub fn list_module_files(module_root: &Path, kinds: &[&str]) -> Vec<ModuleFile> {
+    let mut out: Vec<ModuleFile> = Vec::new();
+
+    // Normalise the requested extension list once. Callers are expected to
+    // pass lowercase already, but be tolerant.
+    let wanted: Vec<String> = kinds.iter().map(|k| k.to_ascii_lowercase()).collect();
+
+    let walker = WalkBuilder::new(module_root)
+        .standard_filters(true)
+        .hidden(true)
+        .filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
+            !matches!(
+                name.as_ref(),
+                "node_modules" | "target" | "dist" | "build" | ".git" | ".idea" | ".vscode"
+            )
+        })
+        .build();
+
+    for entry in walker.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+            continue;
+        };
+        let lower = ext.to_ascii_lowercase();
+        // Source files are the class listing's job — never surface them here.
+        if matches!(lower.as_str(), "java" | "rs") {
+            continue;
+        }
+        if !wanted.iter().any(|k| k == &lower) {
+            continue;
+        }
+        let rel_buf = path.strip_prefix(module_root).unwrap_or(path).to_path_buf();
+        let rel = rel_buf.to_string_lossy().replace('\\', "/");
+        let size = entry.metadata().map_or(0, |m| m.len());
+        out.push(ModuleFile {
+            abs: path.to_path_buf(),
+            rel,
+            kind: lower,
             size,
         });
     }
@@ -287,6 +365,70 @@ mod tests {
         let files = list_markdown_files(&root);
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].title, "notes");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn list_module_files_filters_kinds_and_skips_target() {
+        let root = tmp_dir("module-files");
+        std::fs::write(root.join("brochure.pdf"), b"%PDF-").unwrap();
+        std::fs::write(root.join("logo.png"), b"\x89PNG").unwrap();
+        // Source file — must NOT appear (class listing's job).
+        std::fs::write(root.join("App.java"), "class App {}").unwrap();
+        // Markdown — must NOT appear when caller doesn't ask for it.
+        std::fs::write(root.join("README.md"), "# Hi").unwrap();
+        // Nested PDF inside target/ — must be filtered.
+        std::fs::create_dir_all(root.join("target")).unwrap();
+        std::fs::write(root.join("target/leak.pdf"), b"%PDF-").unwrap();
+        // Nested image inside docs/ — must appear.
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/photo.jpg"), b"\xff\xd8\xff").unwrap();
+
+        let files = list_module_files(&root, &["pdf", "png", "jpg", "jpeg"]);
+        let names: Vec<&str> = files.iter().map(|f| f.rel.as_str()).collect();
+
+        // Expected matches.
+        assert!(names.contains(&"brochure.pdf"));
+        assert!(names.contains(&"logo.png"));
+        assert!(names.contains(&"docs/photo.jpg"));
+
+        // Filtered out.
+        assert!(!names.iter().any(|n| n.contains("target")));
+        assert!(!names
+            .iter()
+            .any(|n| std::path::Path::new(n).extension().is_some_and(|e| e == "java")));
+        assert!(!names
+            .iter()
+            .any(|n| std::path::Path::new(n).extension().is_some_and(|e| e == "md")));
+
+        // Alphabetical ordering by `rel`.
+        let sorted: Vec<&str> = {
+            let mut v = names.clone();
+            v.sort_unstable();
+            v
+        };
+        assert_eq!(names, sorted);
+
+        // `kind` field is the lowercase extension.
+        let pdf = files.iter().find(|f| f.rel == "brochure.pdf").unwrap();
+        assert_eq!(pdf.kind, "pdf");
+        let jpg = files.iter().find(|f| f.rel == "docs/photo.jpg").unwrap();
+        assert_eq!(jpg.kind, "jpg");
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn list_module_files_skips_source_extensions_even_if_requested() {
+        // Defensive: a buggy caller asks for `.java` / `.rs` — we still skip
+        // them so they never collide with the class listing.
+        let root = tmp_dir("module-files-defense");
+        std::fs::write(root.join("App.java"), "class App {}").unwrap();
+        std::fs::write(root.join("lib.rs"), "fn main() {}").unwrap();
+        std::fs::write(root.join("notes.pdf"), b"%PDF-").unwrap();
+        let files = list_module_files(&root, &["java", "rs", "pdf"]);
+        let names: Vec<&str> = files.iter().map(|f| f.rel.as_str()).collect();
+        assert_eq!(names, vec!["notes.pdf"]);
         std::fs::remove_dir_all(&root).ok();
     }
 }

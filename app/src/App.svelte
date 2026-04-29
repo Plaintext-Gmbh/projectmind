@@ -24,6 +24,7 @@
     openRepo,
     listClasses,
     listModules,
+    listModuleFiles,
     showClass,
     currentState,
     browserToken,
@@ -31,14 +32,16 @@
     isTauriRuntime,
     setBrowserToken,
   } from './lib/api';
-  import type { ClassEntry, UiState } from './lib/api';
+  import type { ClassEntry, ModuleFile, UiState } from './lib/api';
   import ClassViewer from './components/ClassViewer.svelte';
   import DiagramView from './components/DiagramView.svelte';
   import DiffView from './components/DiffView.svelte';
   import FileView from './components/FileView.svelte';
   import HtmlIndex from './components/HtmlIndex.svelte';
+  import ImageView from './components/ImageView.svelte';
   import MarkdownIndex from './components/MarkdownIndex.svelte';
   import ModuleSidebar from './components/ModuleSidebar.svelte';
+  import PdfView from './components/PdfView.svelte';
   import WalkthroughView from './components/WalkthroughView.svelte';
   import { resizable } from './lib/resizable';
 
@@ -97,6 +100,46 @@
     diagramKind = 'folder-map';
   }
   $: void loadSourceFor($selectedClass);
+
+  // PDFs / images that live inside the currently-filtered module. The list is
+  // reloaded whenever the module filter changes — when no module is picked we
+  // show nothing (the list is per-module by design).
+  let moduleFiles: ModuleFile[] = [];
+  let moduleFilesLoadedFor: string | null = null;
+  $: void loadModuleFilesFor($moduleFilter);
+
+  async function loadModuleFilesFor(moduleId: string | null) {
+    if (!moduleId) {
+      moduleFiles = [];
+      moduleFilesLoadedFor = null;
+      return;
+    }
+    if (moduleFilesLoadedFor === moduleId) return;
+    moduleFilesLoadedFor = moduleId;
+    try {
+      const items = await listModuleFiles(moduleId);
+      // Race guard: ignore the result if the user switched modules while we
+      // were fetching.
+      if (moduleFilesLoadedFor === moduleId) moduleFiles = items;
+    } catch (err) {
+      // Don't blow up the whole Code tab — non-fatal, just hide the section.
+      console.warn('list_module_files failed:', err);
+      if (moduleFilesLoadedFor === moduleId) moduleFiles = [];
+    }
+  }
+
+  function openModuleFile(f: ModuleFile) {
+    fileView.update((cur) => ({
+      path: f.abs,
+      anchor: null,
+      nonce: (cur?.nonce ?? 0) + 1,
+    }));
+    if (f.kind === 'pdf') {
+      viewMode.set('pdf');
+    } else {
+      viewMode.set('image');
+    }
+  }
 
   async function loadSourceFor(c: ClassEntry | null) {
     if (!c) {
@@ -322,7 +365,9 @@
     </div>
     <nav>
       <button
-        class:active={$viewMode === 'classes'}
+        class:active={$viewMode === 'classes' ||
+          $viewMode === 'pdf' ||
+          $viewMode === 'image'}
         disabled={!$repo}
         on:click={() => {
           followingMcp.set(false);
@@ -440,7 +485,7 @@
         </p>
       </div>
     </section>
-  {:else if $viewMode === 'classes'}
+  {:else if $viewMode === 'classes' || $viewMode === 'pdf' || $viewMode === 'image'}
     <section class="layout">
       <ModuleSidebar />
       <div
@@ -496,6 +541,34 @@
             </li>
           {/each}
         </ul>
+        {#if moduleFiles.length > 0}
+          <div class="files-section">
+            <div class="files-heading">
+              Dateien <span class="files-count">{moduleFiles.length}</span>
+            </div>
+            <ul class="file-list" role="listbox" aria-label="Module files">
+              {#each moduleFiles as f (f.abs)}
+                <li
+                  role="option"
+                  aria-selected={($viewMode === 'pdf' || $viewMode === 'image') &&
+                    $fileView?.path === f.abs}
+                >
+                  <button
+                    type="button"
+                    class="file-row"
+                    class:selected={($viewMode === 'pdf' || $viewMode === 'image') &&
+                      $fileView?.path === f.abs}
+                    on:click={() => openModuleFile(f)}
+                    title={f.abs}
+                  >
+                    <span class="file-name">{f.rel}</span>
+                    <span class="file-kind">{f.kind}</span>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          </div>
+        {/if}
       </aside>
       <div
         class="resizer"
@@ -509,7 +582,11 @@
         title="Drag to resize · double-click to reset"
       ></div>
       <main class="viewer">
-        {#if $selectedClass}
+        {#if $viewMode === 'pdf' && $fileView}
+          <PdfView path={$fileView.path} />
+        {:else if $viewMode === 'image' && $fileView}
+          <ImageView path={$fileView.path} />
+        {:else if $selectedClass}
           <ClassViewer
             klass={$selectedClass}
             source={classSource}
@@ -955,6 +1032,104 @@
 
   .stereotypes {
     margin-top: 2px;
+  }
+
+  .files-section {
+    border-top: 1px solid var(--bg-3);
+    background: var(--bg-1);
+    flex-shrink: 0;
+    max-height: 40%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .files-heading {
+    padding: 6px 12px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--fg-2);
+    font-weight: 600;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--bg-3);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .files-count {
+    color: var(--fg-2);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 400;
+    background: var(--bg-1);
+    border-radius: 10px;
+    padding: 1px 6px;
+  }
+
+  .file-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .file-list li {
+    border-bottom: 1px solid var(--bg-2);
+  }
+
+  .file-row {
+    width: 100%;
+    padding: 6px 12px;
+    background: transparent;
+    border: 0;
+    border-left: 3px solid transparent;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    font: inherit;
+  }
+
+  .file-row:hover {
+    background: var(--bg-2);
+  }
+
+  .file-row:focus-visible {
+    outline: 2px solid var(--accent-2);
+    outline-offset: -2px;
+  }
+
+  .file-row.selected {
+    background: color-mix(in srgb, var(--accent-2) 18%, var(--bg-1));
+    border-left-color: var(--accent-2);
+  }
+
+  .file-name {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--fg-1);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+
+  .file-kind {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 1px 6px;
+    background: var(--bg-2);
+    border-radius: 3px;
+    color: var(--fg-2);
+    font-family: var(--mono);
+    flex-shrink: 0;
   }
 
   .viewer {
