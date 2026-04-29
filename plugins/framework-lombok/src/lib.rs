@@ -12,7 +12,7 @@
 
 #![warn(missing_docs)]
 
-use plaintext_ide_plugin_api::{FrameworkPlugin, Module, PluginInfo, Relation, Result};
+use projectmind_plugin_api::{FrameworkPlugin, Module, PluginInfo, Relation, Result};
 
 /// Lombok annotations that touch class-level structure.
 const CLASS_ANNOTATIONS: &[&str] = &[
@@ -99,7 +99,7 @@ impl FrameworkPlugin for LombokPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plaintext_ide_plugin_api::{Annotation, Class, Field};
+    use projectmind_plugin_api::{Annotation, Class, Field};
 
     fn class_with_class_anns(fqn: &str, anns: &[&str]) -> Class {
         Class {

@@ -4,11 +4,11 @@
 
 //! Method dispatch and shared server state.
 
-use plaintext_ide_core::{Engine, Repository};
-use plaintext_ide_framework_lombok::LombokPlugin;
-use plaintext_ide_framework_spring::SpringPlugin;
-use plaintext_ide_lang_java::JavaPlugin;
-use plaintext_ide_lang_rust::RustPlugin;
+use projectmind_core::{Engine, Repository};
+use projectmind_framework_lombok::LombokPlugin;
+use projectmind_framework_spring::SpringPlugin;
+use projectmind_lang_java::JavaPlugin;
+use projectmind_lang_rust::RustPlugin;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;

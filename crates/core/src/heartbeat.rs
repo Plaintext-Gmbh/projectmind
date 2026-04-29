@@ -27,7 +27,7 @@ pub struct Heartbeat {
 }
 
 /// Path of the heartbeat file. Always next to the statefile so the same
-/// `$PLAINTEXT_IDE_STATE` override applies to both.
+/// `$PROJECTMIND_STATE` override applies to both.
 #[must_use]
 pub fn heartbeat_path() -> PathBuf {
     let state = crate::state::statefile_path();
@@ -86,11 +86,11 @@ mod tests {
 
     fn override_state_path(name: &str) -> PathBuf {
         let dir =
-            std::env::temp_dir().join(format!("plaintext-ide-hb-{name}-{}", std::process::id()));
+            std::env::temp_dir().join(format!("projectmind-hb-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("current.json");
-        std::env::set_var("PLAINTEXT_IDE_STATE", &p);
+        std::env::set_var("PROJECTMIND_STATE", &p);
         p
     }
 

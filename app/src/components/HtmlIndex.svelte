@@ -205,7 +205,7 @@
   }
 
   // ----- Zoom (Shift + wheel) ----------------------------------------------
-  const ZOOM_KEY = 'plaintext-ide.htmlindex.zoom';
+  const ZOOM_KEY = 'projectmind.htmlindex.zoom';
   const ZOOM_MIN = 0.6;
   const ZOOM_MAX = 2.0;
   const ZOOM_STEP = 0.1;
@@ -351,7 +351,7 @@
     <div
       class="resizer"
       use:resizable={{
-        storageKey: 'plaintext-ide.layout.html.col1',
+        storageKey: 'projectmind.layout.html.col1',
         cssVar: '--html-col-1',
         min: 220,
         max: 720,

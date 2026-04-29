@@ -1,30 +1,30 @@
 [package]
-name = "plaintext-ide-app"
+name = "projectmind-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "plaintext-ide Tauri shell — read-only architecture browser."
+description = "projectmind Tauri shell — read-only architecture browser."
 
 [lints]
 workspace = true
 
 [lib]
-name = "plaintext_ide_app_lib"
+name = "projectmind_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-plaintext-ide-plugin-api = { workspace = true }
-plaintext-ide-core       = { workspace = true }
-plaintext-ide-lang-java  = { path = "../../plugins/lang-java", version = "0.1.0" }
-plaintext-ide-lang-rust  = { path = "../../plugins/lang-rust", version = "0.1.0" }
-plaintext-ide-framework-spring = { path = "../../plugins/framework-spring", version = "0.1.0" }
-plaintext-ide-framework-lombok = { path = "../../plugins/framework-lombok", version = "0.1.0" }
+projectmind-plugin-api = { workspace = true }
+projectmind-core       = { workspace = true }
+projectmind-lang-java  = { path = "../../plugins/lang-java", version = "0.1.0" }
+projectmind-lang-rust  = { path = "../../plugins/lang-rust", version = "0.1.0" }
+projectmind-framework-spring = { path = "../../plugins/framework-spring", version = "0.1.0" }
+projectmind-framework-lombok = { path = "../../plugins/framework-lombok", version = "0.1.0" }
 
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"

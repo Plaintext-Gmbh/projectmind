@@ -15,7 +15,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
-repository = "https://github.com/daniel-marthaler/plaintext-ide"
+repository = "https://github.com/daniel-marthaler/projectmind"
 authors = ["Daniel Marthaler <daniel@marthaler.io>"]
 rust-version = "1.80"
 
@@ -48,8 +48,8 @@ struct_field_names = "allow"
 ignored_unit_patterns = "allow"
 
 [workspace.dependencies]
-plaintext-ide-plugin-api = { path = "crates/plugin-api", version = "0.1.0" }
-plaintext-ide-core       = { path = "crates/core",       version = "0.1.0" }
+projectmind-plugin-api = { path = "crates/plugin-api", version = "0.1.0" }
+projectmind-core       = { path = "crates/core",       version = "0.1.0" }
 
 # General
 anyhow      = "1.0"

@@ -6,7 +6,7 @@
 ///   <div class="grid" style="--col1: {col1}px;">
 ///     <aside style="width: var(--col1);">…</aside>
 ///     <div use:resizable={{
-///       storageKey: 'plaintext-ide.layout.code.col1',
+///       storageKey: 'projectmind.layout.code.col1',
 ///       cssVar: '--col1',
 ///       min: 140,
 ///       max: 480,

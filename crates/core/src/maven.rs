@@ -170,7 +170,7 @@ mod tests {
 
     fn tmpdir() -> PathBuf {
         let p = std::env::temp_dir().join(format!(
-            "plaintext-ide-mvn-{}-{}",
+            "projectmind-mvn-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

@@ -165,7 +165,7 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
         let p = std::env::temp_dir().join(format!(
-            "plaintext-ide-cargo-{}-{}",
+            "projectmind-cargo-{}-{}",
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));

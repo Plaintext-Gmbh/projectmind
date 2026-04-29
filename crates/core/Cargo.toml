@@ -1,18 +1,18 @@
 [package]
-name = "plaintext-ide-core"
+name = "projectmind-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "Core engine for plaintext-ide: repo loading, plugin registry, pipeline."
+description = "Core engine for projectmind: repo loading, plugin registry, pipeline."
 
 [lints]
 workspace = true
 
 [dependencies]
-plaintext-ide-plugin-api = { workspace = true }
+projectmind-plugin-api = { workspace = true }
 
 anyhow      = { workspace = true }
 thiserror   = { workspace = true }

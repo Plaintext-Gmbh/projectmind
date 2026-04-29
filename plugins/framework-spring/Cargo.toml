@@ -1,16 +1,16 @@
 [package]
-name = "plaintext-ide-framework-spring"
+name = "projectmind-framework-spring"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "Spring framework plugin for plaintext-ide."
+description = "Spring framework plugin for projectmind."
 
 [lints]
 workspace = true
 
 [dependencies]
-plaintext-ide-plugin-api = { workspace = true }
+projectmind-plugin-api = { workspace = true }
 tracing                   = { workspace = true }

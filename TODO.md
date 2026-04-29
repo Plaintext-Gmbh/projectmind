@@ -53,7 +53,7 @@ language packs can be added without code changes.
   100-line store-based translator (we have very few strings).
 - Translation files live in `app/src/i18n/{en,de}.json` — plain key → string.
 - Default language follows `navigator.language`; user override stored in
-  `localStorage` (`plaintext-ide.lang`).
+  `localStorage` (`projectmind.lang`).
 - Add a small language switcher to the header next to the theme toggle
   (`☀ / ☾` already there → add `EN / DE`).
 - Translate: nav labels (Code / Diagrams / MD / HTML / Open repo /

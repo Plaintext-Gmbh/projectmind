@@ -12,8 +12,8 @@
 //! map cleanly onto the language-agnostic class-centric domain model and aren't needed for
 //! Phase 1's architectural-overview goal.
 //!
-//! [`Class`]: plaintext_ide_plugin_api::Class
-//! [`Annotation`]: plaintext_ide_plugin_api::Annotation
+//! [`Class`]: projectmind_plugin_api::Class
+//! [`Annotation`]: projectmind_plugin_api::Annotation
 
 #![warn(missing_docs)]
 
@@ -21,7 +21,7 @@ mod parser;
 
 use std::path::Path;
 
-use plaintext_ide_plugin_api::{LanguagePlugin, Module, PluginInfo, Result};
+use projectmind_plugin_api::{LanguagePlugin, Module, PluginInfo, Result};
 
 /// The Rust language plugin.
 #[derive(Debug, Default)]

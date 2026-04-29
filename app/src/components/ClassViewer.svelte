@@ -19,7 +19,7 @@
   }
 
   // ----- Zoom (Shift + wheel) ----------------------------------------------
-  const ZOOM_KEY = 'plaintext-ide.classviewer.zoom';
+  const ZOOM_KEY = 'projectmind.classviewer.zoom';
   const ZOOM_MIN = 0.6;
   const ZOOM_MAX = 2.0;
   const ZOOM_STEP = 0.1;

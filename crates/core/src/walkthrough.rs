@@ -15,7 +15,7 @@
 //! The body and feedback live next to the statefile:
 //!
 //! ```text
-//! $cache/plaintext-ide/
+//! $cache/projectmind/
 //!   current.json            # existing — UiState; pointer is in here
 //!   ui-heartbeat.json       # existing
 //!   walkthrough.json        # ← body (this module)
@@ -272,11 +272,11 @@ mod tests {
 
     fn override_state(name: &str) -> PathBuf {
         let dir =
-            std::env::temp_dir().join(format!("plaintext-ide-wt-{name}-{}", std::process::id()));
+            std::env::temp_dir().join(format!("projectmind-wt-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("current.json");
-        std::env::set_var("PLAINTEXT_IDE_STATE", &p);
+        std::env::set_var("PROJECTMIND_STATE", &p);
         p
     }
 

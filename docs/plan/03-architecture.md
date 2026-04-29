@@ -5,7 +5,7 @@
 ## Workspace Layout
 
 ```
-plaintext-ide/
+projectmind/
 ├── Cargo.toml                # workspace root
 ├── rust-toolchain.toml       # pinned stable
 ├── rustfmt.toml              # formatting rules
@@ -47,7 +47,7 @@ The runtime that wires everything together.
 - **File walker** — `ignore`-respecting walk
 - **Pipeline** — `walk → parse (lang plugin) → enrich (framework plugin) → store`
 - **Diff service** — uses `git2` to get changes vs a ref
-- **Config** — reads `~/.config/plaintext-ide/config.toml` and `<repo>/.plaintext-ide/config.toml`
+- **Config** — reads `~/.config/projectmind/config.toml` and `<repo>/.projectmind/config.toml`
 
 ### `mcp-server`
 
@@ -140,7 +140,7 @@ The MCP server is the bus between the LLM and the IDE: every operation in the UI
 cargo build --release --workspace
 
 # Run the MCP server (used by Claude Code)
-./target/release/plaintext-ide-mcp
+./target/release/projectmind-mcp
 
 # Run tests
 cargo test --workspace

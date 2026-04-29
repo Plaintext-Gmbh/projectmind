@@ -30,7 +30,7 @@ so it's just as useful for live demos as for canned PR write-ups.
       "narration": "Optional `anchor` lets us scroll to a heading.\n\n…markdown…",
       "target": {
         "kind": "class",               // → ClassViewer
-        "fqn": "plaintext_ide_core::state::ViewIntent",
+        "fqn": "projectmind_core::state::ViewIntent",
         "highlight": [{ "from": 60, "to": 78 }]
       }
     },
@@ -73,7 +73,7 @@ A walk-through is bigger than `current.json` should hold; we keep it
 side-by-side instead:
 
 ```
-$XDG_CACHE_HOME/plaintext-ide/
+$XDG_CACHE_HOME/projectmind/
   current.json           # existing UiState
   ui-heartbeat.json      # existing
   walkthrough.json       # ← new, see schema above

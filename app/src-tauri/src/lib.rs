@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Tauri commands for the plaintext-ide shell.
+//! Tauri commands for the projectmind shell.
 //!
 //! The app holds the same [`Engine`] as the MCP server. Commands are intentionally thin wrappers
 //! around `core` operations so the same logic is exercised by both the LLM (via MCP) and the
@@ -19,19 +19,19 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use plaintext_ide_core::files::{self, MarkdownFile};
-use plaintext_ide_core::git::{self, ChangedFile};
-use plaintext_ide_core::heartbeat;
-use plaintext_ide_core::html::{self, HtmlFile, HtmlSnippet};
-use plaintext_ide_core::state::{self, UiState, ViewIntent};
-use plaintext_ide_core::walkthrough::{
+use projectmind_core::files::{self, MarkdownFile};
+use projectmind_core::git::{self, ChangedFile};
+use projectmind_core::heartbeat;
+use projectmind_core::html::{self, HtmlFile, HtmlSnippet};
+use projectmind_core::state::{self, UiState, ViewIntent};
+use projectmind_core::walkthrough::{
     self as wt, FeedbackEvent, FeedbackKind, FeedbackLog, Walkthrough,
 };
-use plaintext_ide_core::{diagram, Engine, Repository};
-use plaintext_ide_framework_lombok::LombokPlugin;
-use plaintext_ide_framework_spring::SpringPlugin;
-use plaintext_ide_lang_java::JavaPlugin;
-use plaintext_ide_lang_rust::RustPlugin;
+use projectmind_core::{diagram, Engine, Repository};
+use projectmind_framework_lombok::LombokPlugin;
+use projectmind_framework_spring::SpringPlugin;
+use projectmind_lang_java::JavaPlugin;
+use projectmind_lang_rust::RustPlugin;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 

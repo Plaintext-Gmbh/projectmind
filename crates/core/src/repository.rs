@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use plaintext_ide_plugin_api::Module;
+use projectmind_plugin_api::Module;
 use serde::{Deserialize, Serialize};
 
 /// A parsed repository: the root directory plus its modules.
@@ -39,7 +39,7 @@ impl Repository {
     /// Returns the owning module so callers can resolve `class.file` (which is
     /// stored relative to the module root) back to an absolute path.
     #[must_use]
-    pub fn find_class(&self, fqn: &str) -> Option<(&Module, &plaintext_ide_plugin_api::Class)> {
+    pub fn find_class(&self, fqn: &str) -> Option<(&Module, &projectmind_plugin_api::Class)> {
         for module in self.modules.values() {
             if let Some(class) = module.classes.get(fqn) {
                 return Some((module, class));
@@ -79,13 +79,13 @@ pub enum RepositoryError {
 
     /// A plugin failed.
     #[error("plugin error: {0}")]
-    Plugin(#[from] plaintext_ide_plugin_api::Error),
+    Plugin(#[from] projectmind_plugin_api::Error),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plaintext_ide_plugin_api::{Class, ClassKind, Module};
+    use projectmind_plugin_api::{Class, ClassKind, Module};
 
     fn sample_module() -> Module {
         let mut m = Module {

@@ -1,29 +1,29 @@
 [package]
-name = "plaintext-ide-mcp"
+name = "projectmind-mcp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "MCP server exposing plaintext-ide tools to LLM agents (Claude Code, etc.)."
+description = "MCP server exposing projectmind tools to LLM agents (Claude Code, etc.)."
 
 [[bin]]
-name = "plaintext-ide-mcp"
+name = "projectmind-mcp"
 path = "src/main.rs"
 
 [lints]
 workspace = true
 
 [dependencies]
-plaintext-ide-plugin-api = { workspace = true }
-plaintext-ide-core       = { workspace = true }
+projectmind-plugin-api = { workspace = true }
+projectmind-core       = { workspace = true }
 
 # Local plugins linked statically for Phase 1
-plaintext-ide-lang-java         = { path = "../../plugins/lang-java", version = "0.1.0" }
-plaintext-ide-lang-rust         = { path = "../../plugins/lang-rust", version = "0.1.0" }
-plaintext-ide-framework-spring  = { path = "../../plugins/framework-spring", version = "0.1.0" }
-plaintext-ide-framework-lombok  = { path = "../../plugins/framework-lombok", version = "0.1.0" }
+projectmind-lang-java         = { path = "../../plugins/lang-java", version = "0.1.0" }
+projectmind-lang-rust         = { path = "../../plugins/lang-rust", version = "0.1.0" }
+projectmind-framework-spring  = { path = "../../plugins/framework-spring", version = "0.1.0" }
+projectmind-framework-lombok  = { path = "../../plugins/framework-lombok", version = "0.1.0" }
 
 anyhow      = { workspace = true }
 clap        = { workspace = true }

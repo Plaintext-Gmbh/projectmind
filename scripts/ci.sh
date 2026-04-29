@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build & test driver for plaintext-ide.
+# Build & test driver for projectmind.
 #
 # Same logic the GitHub Actions workflow runs. Reproduce CI locally with:
 #
@@ -28,7 +28,7 @@ Commands:
   check                       cargo fmt --check + cargo clippy --workspace
   test                        cargo test --workspace --all-targets + --doc
   install-deps                Install Linux Tauri build deps via apt (no-op on macOS)
-  release-build [<target>]    cargo build --release --bin plaintext-ide-mcp [--target <target>]
+  release-build [<target>]    cargo build --release --bin projectmind-mcp [--target <target>]
   release-smoke               release-build + stdio JSON-RPC ping against the binary
   release-package <target> <suffix>
                               tar.gz + sha256 packaging for the release workflow
@@ -65,17 +65,17 @@ cmd_install_deps() {
 cmd_release_build() {
     local target="${1:-}"
     if [[ -n "$target" ]]; then
-        cargo build --release --bin plaintext-ide-mcp --target "$target"
+        cargo build --release --bin projectmind-mcp --target "$target"
     else
-        cargo build --release --bin plaintext-ide-mcp
+        cargo build --release --bin projectmind-mcp
     fi
 }
 
 cmd_release_smoke() {
     cmd_release_build
-    local bin="target/release/plaintext-ide-mcp"
+    local bin="target/release/projectmind-mcp"
     local tmp
-    tmp="$(mktemp -t plaintext-ide-smoke)"
+    tmp="$(mktemp -t projectmind-smoke)"
     trap 'rm -f "$tmp"' RETURN
 
     # Pipe stays open until the server reads EOF and exits cleanly. Using `grep -q` in
@@ -86,7 +86,7 @@ cmd_release_smoke() {
         '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
         | "$bin" > "$tmp"
 
-    if ! grep -q '"name":"plaintext-ide-mcp"' "$tmp"; then
+    if ! grep -q '"name":"projectmind-mcp"' "$tmp"; then
         echo "release-smoke: server name not found in response" >&2
         cat "$tmp" >&2
         exit 1
@@ -102,7 +102,7 @@ cmd_release_smoke() {
 cmd_release_package() {
     local target="${1:?target required}"
     local suffix="${2:?asset suffix required}"
-    local artifact_name="plaintext-ide-mcp"
+    local artifact_name="projectmind-mcp"
     local bin_path="target/${target}/release/${artifact_name}"
     local archive="${artifact_name}-${suffix}.tar.gz"
 

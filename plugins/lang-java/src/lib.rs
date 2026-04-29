@@ -14,7 +14,7 @@ mod parser;
 
 use std::path::Path;
 
-use plaintext_ide_plugin_api::{LanguagePlugin, Module, PluginInfo, Result};
+use projectmind_plugin_api::{LanguagePlugin, Module, PluginInfo, Result};
 
 /// The Java language plugin.
 #[derive(Debug, Default)]

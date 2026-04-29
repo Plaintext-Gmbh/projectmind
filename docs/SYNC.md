@@ -1,6 +1,6 @@
 # MCP ↔ GUI sync
 
-How the `plaintext-ide-mcp` server (driven by the LLM) and the Tauri GUI
+How the `projectmind-mcp` server (driven by the LLM) and the Tauri GUI
 (driven by the user) stay in sync.
 
 ## Goal
@@ -16,9 +16,9 @@ Both processes read and write one JSON file:
 
 | Source                       | Path                                            |
 | ---------------------------- | ----------------------------------------------- |
-| Linux / others (`XDG_CACHE_HOME`) | `~/.cache/plaintext-ide/current.json`       |
-| macOS                        | `~/Library/Caches/plaintext-ide/current.json`   |
-| Override                     | `$PLAINTEXT_IDE_STATE`                          |
+| Linux / others (`XDG_CACHE_HOME`) | `~/.cache/projectmind/current.json`       |
+| macOS                        | `~/Library/Caches/projectmind/current.json`   |
+| Override                     | `$PROJECTMIND_STATE`                          |
 
 Schema (`crates/core/src/state.rs`):
 
@@ -46,7 +46,7 @@ never reads a half-written document.
    │                         │    │ user picks repo manually    │
    │                         │◀───│ → state::write()            │
    └─────────────────────────┘    └─────────────────────────────┘
-                       ~/.cache/plaintext-ide/current.json
+                       ~/.cache/projectmind/current.json
 ```
 
 ## Why a file (and not a socket)
@@ -157,7 +157,7 @@ already a parseable line stream.
 
 ## Quick demo flow
 
-With Claude Code wired to `plaintext-ide-mcp`:
+With Claude Code wired to `projectmind-mcp`:
 
 ```
 You: Open /Users/mad/codeplain/plaintext-app, then show me UserService.

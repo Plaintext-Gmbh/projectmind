@@ -2,13 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Core engine for `plaintext-ide`.
+//! Core engine for `projectmind`.
 //!
 //! Wires together plugins, repository discovery, and the parsing pipeline.
 //!
 //! Phase 1 keeps the API minimal: callers create an [`Engine`] with the language and framework
 //! plugins they want, then [`Engine::open_repo`] returns a parsed [`Repository`]. Future phases
-//! will introduce caching ([`plaintext_ide_plugin_api::CodeGraphStore`]) and async parsing.
+//! will introduce caching ([`projectmind_plugin_api::CodeGraphStore`]) and async parsing.
 
 #![warn(missing_docs)]
 
@@ -29,7 +29,7 @@ pub use engine::Engine;
 pub use maven::MavenModule;
 pub use repository::{Repository, RepositoryError};
 
-/// Process-wide mutex for tests that mutate the `PLAINTEXT_IDE_STATE`
+/// Process-wide mutex for tests that mutate the `PROJECTMIND_STATE`
 /// env var. Several modules (heartbeat, walkthrough) share that env var
 /// and would race when cargo runs their tests in parallel.
 #[cfg(test)]

@@ -21,7 +21,7 @@ Different storage choices may suit each class. The configuration model below let
 `plaintext-mempalace` already provides a knowledge graph with `kg_add`, `kg_query`, `kg_invalidate`, plus the room/wing/drawer model.
 
 - **Pro:** zero new infrastructure if the user is already running it; annotations could live alongside other personal knowledge; rich KG queries; cross-project memory.
-- **Con:** ties `plaintext-ide` to a Mempalace instance; not ideal for sharing a repo with colleagues without one; the code graph cache might bloat the KG.
+- **Con:** ties `projectmind` to a Mempalace instance; not ideal for sharing a repo with colleagues without one; the code graph cache might bloat the KG.
 - **Best for:** annotations + selected high-level relations the user wants to remember long-term.
 
 ### B. SurrealDB (embedded)
@@ -58,7 +58,7 @@ SQLite for the cache, with property-graph queries via [DuckPGQ](https://duckdb.o
 
 ### F. JSON / TOML files
 
-Plain files in `.plaintext-ide/` per repo.
+Plain files in `.projectmind/` per repo.
 
 - **Pro:** zero dependencies, human-readable, diffable in git.
 - **Con:** doesn't scale beyond a few thousand annotations; no transactional guarantees.
@@ -81,15 +81,15 @@ Session-state:  [json]                                   (default: json, no choi
 
 ### Default for the MVP
 
-- **Annotations → JSON** in `.plaintext-ide/annotations.json` per repo. Zero-config, human-readable, diffable.
-- **Code-graph cache → SQLite** in `~/.cache/plaintext-ide/<repo-hash>.db`. Fast, no server, can be rebuilt freely.
-- **Session state → JSON** in `~/.config/plaintext-ide/session.json`.
+- **Annotations → JSON** in `.projectmind/annotations.json` per repo. Zero-config, human-readable, diffable.
+- **Code-graph cache → SQLite** in `~/.cache/projectmind/<repo-hash>.db`. Fast, no server, can be rebuilt freely.
+- **Session state → JSON** in `~/.config/projectmind/session.json`.
 
 Mempalace and SurrealDB integrations land later behind the same trait, swappable via config.
 
 ## Configuration Model
 
-Per-repo config: `.plaintext-ide/config.toml` (committed if the team agrees on a backend):
+Per-repo config: `.projectmind/config.toml` (committed if the team agrees on a backend):
 
 ```toml
 [storage.annotations]
@@ -97,12 +97,12 @@ backend = "json"              # one of: json | sqlite | mempalace | surrealdb
 
 [storage.code_graph]
 backend = "sqlite"            # one of: sqlite | surrealdb | mempalace
-location = "cache"            # cache (XDG cache dir) | repo (.plaintext-ide/) | custom
+location = "cache"            # cache (XDG cache dir) | repo (.projectmind/) | custom
 
 [storage.code_graph.surrealdb]
 # only used if backend = "surrealdb"
 mode = "embedded"             # embedded | remote
-path  = ".plaintext-ide/graph.db"
+path  = ".projectmind/graph.db"
 # url = "ws://localhost:8000"
 # ns  = "plaintext"
 # db  = "ide"
@@ -114,7 +114,7 @@ wing     = "code"
 room     = "annotations"
 ```
 
-Global user config: `~/.config/plaintext-ide/config.toml` overrides defaults but is overridden by per-repo config.
+Global user config: `~/.config/projectmind/config.toml` overrides defaults but is overridden by per-repo config.
 
 ## Plugin API for Storage
 

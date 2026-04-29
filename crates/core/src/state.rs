@@ -14,9 +14,9 @@
 //! struct with a tagged-union [`ViewIntent`] inside. A monotonically
 //! increasing `seq` lets watchers ignore duplicate writes.
 //!
-//! Path: `$PLAINTEXT_IDE_STATE` if set, else
-//! `$XDG_CACHE_HOME/plaintext-ide/current.json` on Linux,
-//! `~/Library/Caches/plaintext-ide/current.json` on macOS.
+//! Path: `$PROJECTMIND_STATE` if set, else
+//! `$XDG_CACHE_HOME/projectmind/current.json` on Linux,
+//! `~/Library/Caches/projectmind/current.json` on macOS.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -101,11 +101,11 @@ impl Default for ViewIntent {
 /// Where the statefile lives.
 #[must_use]
 pub fn statefile_path() -> PathBuf {
-    if let Some(p) = std::env::var_os("PLAINTEXT_IDE_STATE") {
+    if let Some(p) = std::env::var_os("PROJECTMIND_STATE") {
         return PathBuf::from(p);
     }
     let cache = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
-    cache.join("plaintext-ide").join("current.json")
+    cache.join("projectmind").join("current.json")
 }
 
 /// Read the current state, returning `None` if the file does not exist yet.
@@ -175,7 +175,7 @@ mod tests {
 
     fn tmp_state(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "plaintext-ide-state-{}-{}-{}",
+            "projectmind-state-{}-{}-{}",
             std::process::id(),
             name,
             std::time::SystemTime::now()
@@ -247,11 +247,11 @@ mod tests {
 
     #[test]
     fn statefile_path_honours_env_override() {
-        std::env::set_var("PLAINTEXT_IDE_STATE", "/tmp/plaintext-ide-explicit.json");
+        std::env::set_var("PROJECTMIND_STATE", "/tmp/projectmind-explicit.json");
         assert_eq!(
             statefile_path(),
-            PathBuf::from("/tmp/plaintext-ide-explicit.json")
+            PathBuf::from("/tmp/projectmind-explicit.json")
         );
-        std::env::remove_var("PLAINTEXT_IDE_STATE");
+        std::env::remove_var("PROJECTMIND_STATE");
     }
 }

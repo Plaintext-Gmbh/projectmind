@@ -2995,112 +2995,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
-name = "plaintext-ide-app"
-version = "0.1.0"
-dependencies = [
- "notify",
- "parking_lot",
- "plaintext-ide-core",
- "plaintext-ide-framework-lombok",
- "plaintext-ide-framework-spring",
- "plaintext-ide-lang-java",
- "plaintext-ide-lang-rust",
- "plaintext-ide-plugin-api",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "plaintext-ide-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dirs 5.0.1",
- "git2",
- "ignore",
- "plaintext-ide-plugin-api",
- "quick-xml 0.36.2",
- "regex",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tracing",
- "walkdir",
-]
-
-[[package]]
-name = "plaintext-ide-framework-lombok"
-version = "0.1.0"
-dependencies = [
- "plaintext-ide-plugin-api",
- "serde_json",
-]
-
-[[package]]
-name = "plaintext-ide-framework-spring"
-version = "0.1.0"
-dependencies = [
- "plaintext-ide-plugin-api",
- "tracing",
-]
-
-[[package]]
-name = "plaintext-ide-lang-java"
-version = "0.1.0"
-dependencies = [
- "plaintext-ide-plugin-api",
- "tracing",
- "tree-sitter",
- "tree-sitter-java",
-]
-
-[[package]]
-name = "plaintext-ide-lang-rust"
-version = "0.1.0"
-dependencies = [
- "plaintext-ide-plugin-api",
- "tracing",
- "tree-sitter",
- "tree-sitter-rust",
-]
-
-[[package]]
-name = "plaintext-ide-mcp"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "dirs 5.0.1",
- "plaintext-ide-core",
- "plaintext-ide-framework-lombok",
- "plaintext-ide-framework-spring",
- "plaintext-ide-lang-java",
- "plaintext-ide-lang-rust",
- "plaintext-ide-plugin-api",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "plaintext-ide-plugin-api"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "plist"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3246,6 +3140,112 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "projectmind-app"
+version = "0.1.0"
+dependencies = [
+ "notify",
+ "parking_lot",
+ "projectmind-core",
+ "projectmind-framework-lombok",
+ "projectmind-framework-spring",
+ "projectmind-lang-java",
+ "projectmind-lang-rust",
+ "projectmind-plugin-api",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "projectmind-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs 5.0.1",
+ "git2",
+ "ignore",
+ "projectmind-plugin-api",
+ "quick-xml 0.36.2",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
+name = "projectmind-framework-lombok"
+version = "0.1.0"
+dependencies = [
+ "projectmind-plugin-api",
+ "serde_json",
+]
+
+[[package]]
+name = "projectmind-framework-spring"
+version = "0.1.0"
+dependencies = [
+ "projectmind-plugin-api",
+ "tracing",
+]
+
+[[package]]
+name = "projectmind-lang-java"
+version = "0.1.0"
+dependencies = [
+ "projectmind-plugin-api",
+ "tracing",
+ "tree-sitter",
+ "tree-sitter-java",
+]
+
+[[package]]
+name = "projectmind-lang-rust"
+version = "0.1.0"
+dependencies = [
+ "projectmind-plugin-api",
+ "tracing",
+ "tree-sitter",
+ "tree-sitter-rust",
+]
+
+[[package]]
+name = "projectmind-mcp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dirs 5.0.1",
+ "projectmind-core",
+ "projectmind-framework-lombok",
+ "projectmind-framework-spring",
+ "projectmind-lang-java",
+ "projectmind-lang-rust",
+ "projectmind-plugin-api",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "projectmind-plugin-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2.0.0",
-  "productName": "plaintext-ide",
+  "productName": "ProjectMind",
   "version": "0.1.0",
-  "identifier": "ch.plaintext.ide",
+  "identifier": "ch.plaintext.projectmind",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "plaintext-ide",
+        "title": "ProjectMind",
         "width": 1280,
         "height": 800,
         "minWidth": 800,

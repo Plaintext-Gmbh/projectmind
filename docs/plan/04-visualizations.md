@@ -1,10 +1,10 @@
 # Visualization Catalogue & Sketches
 
-> **Status:** 2026-04-28 — open catalogue. Goal: collect visualization concepts, candidate libraries, and sketches that we want to land in `plaintext-ide` over time. Submissions welcome — drop a sketch in this folder as `04-viz-<short-name>.md`.
+> **Status:** 2026-04-28 — open catalogue. Goal: collect visualization concepts, candidate libraries, and sketches that we want to land in `projectmind` over time. Submissions welcome — drop a sketch in this folder as `04-viz-<short-name>.md`.
 
 ## North Star
 
-> The user opens `plaintext-ide`, sees a map of their software they've never seen this clearly before, and *enjoys* using it. Every visualization should pull its weight in **clarity, density, or delight**.
+> The user opens `projectmind`, sees a map of their software they've never seen this clearly before, and *enjoys* using it. Every visualization should pull its weight in **clarity, density, or delight**.
 
 Gamification is **low priority** but allowed where it doesn't get in the way (XP for documenting modules, badges for first contributors per area, etc.).
 
@@ -85,7 +85,7 @@ The plugin API allows **multiple visualizer plugins per data shape** — so a `b
 
 1. Drop a Markdown sketch in `docs/plan/sketches/<your-name>-<topic>.md`
 2. Include: concept, what it answers, candidate library, rough mock (ASCII / image / Mermaid)
-3. Open a [Discussion](https://github.com/daniel-marthaler/plaintext-ide/discussions) linking the sketch
+3. Open a [Discussion](https://github.com/daniel-marthaler/projectmind/discussions) linking the sketch
 4. Promising sketches graduate to `docs/plan/04-viz-<short-name>.md` with a more detailed design
 5. Adopted sketches become a `viz-*` plugin in `plugins/`
 

@@ -6,11 +6,11 @@
 
 use std::path::PathBuf;
 
-use plaintext_ide_core::state::{self, UiState, ViewIntent};
-use plaintext_ide_core::walkthrough::{self as wt, Walkthrough, WalkthroughStep};
-use plaintext_ide_core::{diagram, git, html};
-use plaintext_ide_framework_spring::SpringPlugin;
-use plaintext_ide_plugin_api::FrameworkPlugin;
+use projectmind_core::state::{self, UiState, ViewIntent};
+use projectmind_core::walkthrough::{self as wt, Walkthrough, WalkthroughStep};
+use projectmind_core::{diagram, git, html};
+use projectmind_framework_spring::SpringPlugin;
+use projectmind_plugin_api::FrameworkPlugin;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
@@ -992,7 +992,7 @@ fn walkthrough_feedback(args: Value) -> DispatchResult {
 /// doesn't double-spawn.
 fn publish_state(state: UiState) {
     launch::ensure_gui_running();
-    if let Err(err) = plaintext_ide_core::state::write(state) {
+    if let Err(err) = projectmind_core::state::write(state) {
         tracing::warn!(error = %err, "failed to publish UI state");
     }
 }

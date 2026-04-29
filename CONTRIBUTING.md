@@ -1,6 +1,6 @@
-# Contributing to plaintext-ide
+# Contributing to projectmind
 
-Thanks for your interest! `plaintext-ide` is an **early MVP** — the MCP server and Tauri shell both work end-to-end, but the project is still small and easy to read in one sitting. **Design discussions, bug reports and PRs are all welcome.**
+Thanks for your interest! `projectmind` is an **early MVP** — the MCP server and Tauri shell both work end-to-end, but the project is still small and easy to read in one sitting. **Design discussions, bug reports and PRs are all welcome.**
 
 ## How to Contribute
 
@@ -8,8 +8,8 @@ Thanks for your interest! `plaintext-ide` is an **early MVP** — the MCP server
 
 The current design notes live under [`docs/plan/`](docs/plan/). If something is unclear, missing, or could be improved:
 
-- Open a [Discussion](https://github.com/daniel-marthaler/plaintext-ide/discussions) for open-ended topics
-- Open an [Issue](https://github.com/daniel-marthaler/plaintext-ide/issues) for concrete proposals or problems
+- Open a [Discussion](https://github.com/daniel-marthaler/projectmind/discussions) for open-ended topics
+- Open an [Issue](https://github.com/daniel-marthaler/projectmind/issues) for concrete proposals or problems
 
 ### Reporting Bugs
 
@@ -36,7 +36,7 @@ Use the [feature request template](.github/ISSUE_TEMPLATE/feature_request.md). D
 
 ## Plugin Development
 
-Phase 1 plugins are statically registered. Each plugin is its own crate under `plugins/` and implements either `LanguagePlugin` or `FrameworkPlugin` from `plaintext-ide-plugin-api`. Look at `plugins/lang-rust` for a small, self-contained example. Phase 2 will add dynamic loading from a `./plugins/` directory next to the binary.
+Phase 1 plugins are statically registered. Each plugin is its own crate under `plugins/` and implements either `LanguagePlugin` or `FrameworkPlugin` from `projectmind-plugin-api`. Look at `plugins/lang-rust` for a small, self-contained example. Phase 2 will add dynamic loading from a `./plugins/` directory next to the binary.
 
 ## Code of Conduct
 

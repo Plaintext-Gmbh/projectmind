@@ -18,12 +18,12 @@
 //! annotation per derived trait so that downstream consumers can match them by simple
 //! name (the same way Java framework plugins match `@Service`).
 //!
-//! [`Class`]: plaintext_ide_plugin_api::Class
-//! [`Annotation`]: plaintext_ide_plugin_api::Annotation
+//! [`Class`]: projectmind_plugin_api::Class
+//! [`Annotation`]: projectmind_plugin_api::Annotation
 
 use std::path::{Path, PathBuf};
 
-use plaintext_ide_plugin_api::{
+use projectmind_plugin_api::{
     Annotation, Class, ClassKind, Field, Method, Module, Result, Visibility,
 };
 use tree_sitter::{Node, Parser, Tree};
@@ -62,10 +62,10 @@ fn build_tree(source: &str) -> Result<Tree> {
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_rust::language())
-        .map_err(|e| plaintext_ide_plugin_api::Error::Parse(e.to_string()))?;
+        .map_err(|e| projectmind_plugin_api::Error::Parse(e.to_string()))?;
     parser
         .parse(source, None)
-        .ok_or_else(|| plaintext_ide_plugin_api::Error::Parse("tree-sitter returned None".into()))
+        .ok_or_else(|| projectmind_plugin_api::Error::Parse("tree-sitter returned None".into()))
 }
 
 fn build_class(
@@ -561,7 +561,7 @@ mod tests {
     fn namespace_is_crate_plus_file_stem() {
         // Pretend there's a Cargo.toml at /repo/Cargo.toml with name = "myapp".
         let dir = std::env::temp_dir().join(format!(
-            "plaintext-ide-lang-rust-test-{}",
+            "projectmind-lang-rust-test-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);

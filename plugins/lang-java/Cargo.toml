@@ -1,18 +1,18 @@
 [package]
-name = "plaintext-ide-lang-java"
+name = "projectmind-lang-java"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "Java language plugin for plaintext-ide (Tree-sitter based)."
+description = "Java language plugin for projectmind (Tree-sitter based)."
 
 [lints]
 workspace = true
 
 [dependencies]
-plaintext-ide-plugin-api = { workspace = true }
+projectmind-plugin-api = { workspace = true }
 
 tree-sitter      = { workspace = true }
 tree-sitter-java = { workspace = true }

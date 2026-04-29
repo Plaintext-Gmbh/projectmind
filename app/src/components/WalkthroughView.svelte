@@ -50,6 +50,10 @@
   /// shows a waiting card until either a new tour arrives (auto-clear) or
   /// the user opts to keep going manually.
   let waitingForFollowup = false;
+  /// The question the user typed into the feedback form, preserved so the
+  /// waiting card can show it back AND include it in the copy-to-CLI hint.
+  /// Cleared whenever a new tour starts.
+  let lastQuestion = '';
   /// Set after the user acks the LAST step — the UI shows a "Tour
   /// abgeschlossen" card with an explicit "Schliessen" button.
   let tourFinished = false;
@@ -61,29 +65,30 @@
   $: isLastStep = body !== null && cursorStep === body.steps.length - 1;
 
   async function load(id: string, _step: number, n: number) {
-    // Same intent — just (re)load the target if needed.
-    if (n === lastNonce && id === lastLoadedId && body !== null) {
-      await loadTargetForCurrentStep();
-      return;
-    }
-    // New tour id detected — reset the "waiting / finished" UI flags.
-    if (id !== lastLoadedId) {
+    // Already applied this exact intent.
+    if (n === lastNonce) return;
+    lastNonce = n;
+
+    // New tour id detected — reset the waiting/finished flags AND fetch
+    // the new body. Inside the same tour, body is unchanged (only the
+    // pointer moves), so we skip the network round-trip.
+    const isNewTour = id !== lastLoadedId || body === null;
+    if (isNewTour) {
       waitingForFollowup = false;
       tourFinished = false;
       feedbackPrompt = false;
       feedbackText = '';
-    }
-    lastNonce = n;
-    bodyLoading = true;
-    try {
-      const fresh = await currentWalkthrough();
-      body = fresh;
-      lastLoadedId = body?.id ?? null;
-    } catch (err) {
-      errorMessage.set(String(err));
-      body = null;
-    } finally {
-      bodyLoading = false;
+      lastQuestion = '';
+      bodyLoading = true;
+      try {
+        body = await currentWalkthrough();
+        lastLoadedId = body?.id ?? null;
+      } catch (err) {
+        errorMessage.set(String(err));
+        body = null;
+      } finally {
+        bodyLoading = false;
+      }
     }
     await loadTargetForCurrentStep();
   }
@@ -154,8 +159,18 @@
     if (!body) return;
     const clamped = Math.max(0, Math.min(idx, body.steps.length - 1));
     if (clamped === cursorStep) return;
+    const tourId = body.id;
     try {
-      await setWalkthroughStep(body.id, clamped);
+      await setWalkthroughStep(tourId, clamped);
+      // Optimistic local update — don't wait on the file watcher (fsevents
+      // can lag noticeably on macOS). The watcher's later state-changed
+      // event is filtered out by App.svelte's lastSeq, so we won't
+      // double-apply.
+      walkthroughCursor.update((cur) => ({
+        id: tourId,
+        step: clamped,
+        nonce: (cur?.nonce ?? 0) + 1,
+      }));
     } catch (err) {
       errorMessage.set(String(err));
     }
@@ -196,12 +211,10 @@
   async function submitMore() {
     if (!body) return;
     feedbackSubmitting = true;
+    const question = feedbackText.trim();
     try {
-      await requestMoreWalkthrough(
-        body.id,
-        cursorStep,
-        feedbackText.trim() ? feedbackText.trim() : null,
-      );
+      await requestMoreWalkthrough(body.id, cursorStep, question || null);
+      lastQuestion = question;
       feedbackPrompt = false;
       feedbackText = '';
       waitingForFollowup = true;
@@ -236,8 +249,12 @@
     }
   }
 
-  // CLI hand-off — phrase the user can say to wake the LLM up.
-  const cliHint = 'plaintext-ide walkthrough_feedback prüfen und Folge-Tour starten';
+  // CLI hand-off — phrase the user pastes into their LLM CLI. If they
+  // typed a specific question, ship it inline so the LLM has full context
+  // without having to poll walkthrough_feedback first.
+  $: cliHint = lastQuestion
+    ? `projectmind nochmal: „${lastQuestion}" — bitte als fokussierte Folge-Tour beantworten (walkthrough_start mit nur den relevanten Steps)`
+    : 'projectmind walkthrough_feedback prüfen und Folge-Tour starten';
   let cliCopied = false;
   async function copyCli() {
     try {
@@ -295,10 +312,14 @@
   <section class="state-card">
     <div class="card waiting">
       <div class="spinner"></div>
-      <h2>Die KI bereitet eine ergänzende Erklärung vor</h2>
-      <p>
-        Deine Rückfrage ist im Feedback-Log. Geh zurück zu deiner KI-CLI und sag z.B.:
-      </p>
+      <h2>Die KI bereitet eine Antwort vor</h2>
+      {#if lastQuestion}
+        <blockquote class="user-question">
+          <span class="quote-label">Deine Frage</span>
+          <span class="quote-text">{lastQuestion}</span>
+        </blockquote>
+      {/if}
+      <p>Tippe in deiner KI-CLI:</p>
       <div class="cli-hint">
         <code>{cliHint}</code>
         <button class="btn btn-ghost copy-btn" on:click={copyCli}>
@@ -536,11 +557,35 @@
     to { transform: rotate(360deg); }
   }
 
+  .user-question {
+    margin: 14px 0;
+    padding: 12px 16px;
+    background: var(--bg-0);
+    border-left: 3px solid var(--accent-2);
+    border-radius: 4px;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .quote-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent-2);
+    font-weight: 600;
+  }
+  .quote-text {
+    font-size: 14px;
+    color: var(--fg-0);
+    line-height: 1.45;
+  }
+
   .cli-hint {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 8px;
-    margin: 14px 0 4px;
+    margin: 6px 0 4px;
     padding: 10px 14px;
     background: var(--bg-0);
     border: 1px solid var(--bg-3);
@@ -552,9 +597,9 @@
     font-family: var(--mono);
     font-size: 12px;
     color: var(--fg-0);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    line-height: 1.5;
+    word-break: break-word;
+    white-space: pre-wrap;
   }
 
   .state-actions {

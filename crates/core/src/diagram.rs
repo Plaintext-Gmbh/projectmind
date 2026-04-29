@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use plaintext_ide_plugin_api::{FrameworkPlugin, Relation, RelationKind};
+use projectmind_plugin_api::{FrameworkPlugin, Relation, RelationKind};
 
 use crate::Repository;
 
@@ -267,7 +267,7 @@ fn short_module(mod_id: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plaintext_ide_plugin_api::{
+    use projectmind_plugin_api::{
         Annotation, Class, FrameworkPlugin, Module, PluginInfo, Result as PiResult,
     };
 

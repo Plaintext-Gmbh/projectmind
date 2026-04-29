@@ -21,7 +21,7 @@ What you expected to happen.
 What actually happened.
 
 ## Environment
-- plaintext-ide version:
+- projectmind version:
 - Operating System (Mac/Linux + version):
 - Architecture (x86_64 / arm64):
 - Active plugins:

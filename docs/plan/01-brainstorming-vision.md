@@ -1,4 +1,4 @@
-# Brainstorming: plaintext-ide Vision
+# Brainstorming: projectmind Vision
 
 > **Status:** 2026-04-28 — initial brainstorming. Some design decisions are still open.
 
@@ -196,9 +196,9 @@ VisualizerPlugin {
 
 ## 10. Open Questions
 
-1. **Persistence:** where are annotations + markers stored? `.plaintext-ide/` folder per repo, or central per user?
+1. **Persistence:** where are annotations + markers stored? `.projectmind/` folder per repo, or central per user?
 2. **MCP transport:** stdio only (local Claude Code) or also HTTP / SSE for remote use?
-3. **Per-repo configuration:** `plaintext-ide.toml` / `.yml` with plugin activation + conventions?
+3. **Per-repo configuration:** `projectmind.toml` / `.yml` with plugin activation + conventions?
 4. **Caching:** cache parsed ASTs (SQLite, like code-review-graph)?
 5. **Self-update mechanism** for the app itself?
 6. **Framework auto-detection** (read `pom.xml` → detect Spring) or manual activation?

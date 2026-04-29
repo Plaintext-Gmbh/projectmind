@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use ignore::WalkBuilder;
-use plaintext_ide_plugin_api::{FrameworkPlugin, LanguagePlugin, Module};
+use projectmind_plugin_api::{FrameworkPlugin, LanguagePlugin, Module};
 use tracing::{debug, info, warn};
 
 use crate::repository::{Repository, RepositoryError};
@@ -334,7 +334,7 @@ impl RelativizePath for Path {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plaintext_ide_plugin_api::PluginInfo;
+    use projectmind_plugin_api::PluginInfo;
 
     struct DotPlugin;
     impl LanguagePlugin for DotPlugin {
@@ -353,10 +353,10 @@ mod tests {
             _file: &Path,
             _source: &str,
             module: &mut Module,
-        ) -> plaintext_ide_plugin_api::Result<()> {
+        ) -> projectmind_plugin_api::Result<()> {
             module.classes.insert(
                 "dot.File".into(),
-                plaintext_ide_plugin_api::Class {
+                projectmind_plugin_api::Class {
                     fqn: "dot.File".into(),
                     name: "File".into(),
                     ..Default::default()
@@ -384,7 +384,7 @@ mod tests {
     impl TempDir {
         fn new() -> Self {
             let mut p = std::env::temp_dir();
-            p.push(format!("plaintext-ide-test-{}", std::process::id()));
+            p.push(format!("projectmind-test-{}", std::process::id()));
             std::fs::create_dir_all(&p).unwrap();
             Self(p)
         }

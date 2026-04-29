@@ -30,7 +30,7 @@ info()  { printf '\033[36m::\033[0m %s\n' "$*"; }
 warn()  { printf '\033[33m!!\033[0m %s\n' "$*"; }
 ok()    { printf '\033[32m✓\033[0m %s\n' "$*"; }
 
-bold "plaintext-ide installer for Ubuntu / Debian"
+bold "projectmind installer for Ubuntu / Debian"
 echo
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -64,10 +64,10 @@ else
     ok "Rust already installed: $(cargo --version)"
 fi
 
-info "Building plaintext-ide-mcp (release)"
-cargo build --release --bin plaintext-ide-mcp
+info "Building projectmind-mcp (release)"
+cargo build --release --bin projectmind-mcp
 
-MCP_BIN="$REPO_ROOT/target/release/plaintext-ide-mcp"
+MCP_BIN="$REPO_ROOT/target/release/projectmind-mcp"
 ok "Built: $MCP_BIN"
 
 if [[ $WITH_APP -eq 1 ]]; then
@@ -86,10 +86,10 @@ bold "Add this to your Claude Code configuration (.mcp.json)"
 cat <<EOF
 {
   "mcpServers": {
-    "plaintext-ide": {
+    "projectmind": {
       "type": "stdio",
       "command": "$MCP_BIN",
-      "env": { "PLAINTEXT_IDE_LOG": "info" }
+      "env": { "PROJECTMIND_LOG": "info" }
     }
   }
 }

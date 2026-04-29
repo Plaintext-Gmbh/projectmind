@@ -11,7 +11,7 @@
 //! the GUI it picks up where the LLM left off.
 //!
 //! Resolution order for the executable:
-//! 1. `$PLAINTEXT_IDE_APP` — explicit user override (path or app bundle).
+//! 1. `$PROJECTMIND_APP` — explicit user override (path or app bundle).
 //! 2. Platform defaults (see [`platform_candidates`]).
 //!
 //! A small in-process throttle prevents a series of `view_*` calls from
@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use plaintext_ide_core::heartbeat;
+use projectmind_core::heartbeat;
 
 /// Maximum age of a heartbeat for the GUI to be considered alive. The shell
 /// writes every ~2s, so 5s is comfortable headroom.
@@ -53,13 +53,13 @@ pub(crate) fn ensure_gui_running() {
     if let Err(err) = launch() {
         tracing::warn!(error = %err, "failed to auto-launch GUI");
     } else {
-        tracing::info!("auto-launched plaintext-ide GUI");
+        tracing::info!("auto-launched projectmind GUI");
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 enum LaunchError {
-    #[error("no plaintext-ide GUI binary found (set $PLAINTEXT_IDE_APP)")]
+    #[error("no projectmind GUI binary found (set $PROJECTMIND_APP)")]
     NotFound,
     #[error("spawn failed for {path}: {source}")]
     Spawn {
@@ -78,7 +78,7 @@ fn launch() -> Result<(), LaunchError> {
 }
 
 fn resolve_app() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("PLAINTEXT_IDE_APP") {
+    if let Ok(p) = std::env::var("PROJECTMIND_APP") {
         let pb = PathBuf::from(p);
         if pb.exists() {
             return Some(pb);
@@ -90,11 +90,11 @@ fn resolve_app() -> Option<PathBuf> {
 #[cfg(target_os = "macos")]
 fn platform_candidates() -> Vec<PathBuf> {
     let mut v = vec![
-        PathBuf::from("/Applications/plaintext-ide.app"),
-        PathBuf::from("/Applications/plaintext ide.app"),
+        PathBuf::from("/Applications/projectmind.app"),
+        PathBuf::from("/Applications/ProjectMind.app"),
     ];
     if let Some(home) = dirs::home_dir() {
-        v.push(home.join("Applications/plaintext-ide.app"));
+        v.push(home.join("Applications/projectmind.app"));
     }
     v
 }
@@ -103,12 +103,12 @@ fn platform_candidates() -> Vec<PathBuf> {
 fn platform_candidates() -> Vec<PathBuf> {
     let mut v = Vec::new();
     if let Some(home) = dirs::home_dir() {
-        v.push(home.join(".local/bin/plaintext-ide"));
-        v.push(home.join(".local/bin/plaintext-ide-app"));
+        v.push(home.join(".local/bin/projectmind"));
+        v.push(home.join(".local/bin/projectmind-app"));
     }
-    v.push(PathBuf::from("/usr/local/bin/plaintext-ide"));
-    v.push(PathBuf::from("/usr/bin/plaintext-ide"));
-    v.push(PathBuf::from("/opt/plaintext-ide/plaintext-ide"));
+    v.push(PathBuf::from("/usr/local/bin/projectmind"));
+    v.push(PathBuf::from("/usr/bin/projectmind"));
+    v.push(PathBuf::from("/opt/projectmind/projectmind"));
     v
 }
 

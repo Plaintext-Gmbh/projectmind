@@ -44,7 +44,7 @@
 
   function readTheme(): Theme {
     try {
-      const v = localStorage.getItem('plaintext-ide.theme');
+      const v = localStorage.getItem('projectmind.theme');
       if (v === 'dark' || v === 'light') return v;
     } catch {
       // localStorage unavailable
@@ -56,7 +56,7 @@
     if (typeof document === 'undefined') return;
     document.documentElement.dataset.theme = t;
     try {
-      localStorage.setItem('plaintext-ide.theme', t);
+      localStorage.setItem('projectmind.theme', t);
     } catch {
       // ignore
     }
@@ -230,8 +230,8 @@
 <main>
   <header>
     <div class="brand">
-      <img class="logo" src="/logo.png" alt="plaintext-ide" />
-      <span class="title">plaintext-ide</span>
+      <img class="logo" src="/logo.png" alt="ProjectMind" />
+      <span class="title">ProjectMind</span>
       {#if $repo}
         <span class="repo" title={$repo.root}>
           <span class="repo-name">{basename($repo.root)}</span>
@@ -336,12 +336,13 @@
   {#if !$repo}
     <section class="empty">
       <div class="welcome">
-        <img class="welcome-logo" src="/logo.png" alt="plaintext-ide" />
-        <h1>plaintext-ide</h1>
-        <p>A read-only architecture browser.</p>
+        <img class="welcome-logo" src="/logo.png" alt="ProjectMind" />
+        <h1>ProjectMind</h1>
+        <p class="claim">Your project, explained by AI.</p>
+        <p class="by">by Plaintext</p>
         <button on:click={pickAndOpen}>Open a repository to begin</button>
         <p class="hint">
-          Or use the <code>plaintext-ide-mcp</code> server with your favourite LLM CLI — see the README.
+          Or use the <code>projectmind-mcp</code> server with your favourite LLM CLI — see the README.
         </p>
       </div>
     </section>
@@ -351,7 +352,7 @@
       <div
         class="resizer"
         use:resizable={{
-          storageKey: 'plaintext-ide.layout.code.col1',
+          storageKey: 'projectmind.layout.code.col1',
           cssVar: '--code-col-1',
           min: 140,
           max: 480,
@@ -405,7 +406,7 @@
       <div
         class="resizer"
         use:resizable={{
-          storageKey: 'plaintext-ide.layout.code.col2',
+          storageKey: 'projectmind.layout.code.col2',
           cssVar: '--code-col-2',
           min: 220,
           max: 720,
@@ -627,6 +628,19 @@
   .welcome p {
     color: var(--fg-1);
     margin: 0 0 20px;
+  }
+
+  .welcome p.claim {
+    font-size: 16px;
+    color: var(--accent-2);
+    margin: 0 0 4px;
+    font-weight: 500;
+  }
+
+  .welcome p.by {
+    margin: 0 0 20px;
+    color: var(--fg-2);
+    font-size: 12px;
   }
 
   .welcome button {

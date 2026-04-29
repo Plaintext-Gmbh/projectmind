@@ -337,7 +337,7 @@
 
   function readZoom(): number {
     try {
-      const v = parseFloat(localStorage.getItem('plaintext-ide.fileview.zoom') ?? '');
+      const v = parseFloat(localStorage.getItem('projectmind.fileview.zoom') ?? '');
       if (Number.isFinite(v) && v > 0) return clampZoom(v);
     } catch {
       // localStorage unavailable — fine.
@@ -347,7 +347,7 @@
 
   function persistZoom(z: number) {
     try {
-      localStorage.setItem('plaintext-ide.fileview.zoom', String(z));
+      localStorage.setItem('projectmind.fileview.zoom', String(z));
     } catch {
       // ignore
     }

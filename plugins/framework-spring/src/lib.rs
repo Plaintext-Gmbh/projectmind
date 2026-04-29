@@ -10,7 +10,7 @@
 
 #![warn(missing_docs)]
 
-use plaintext_ide_plugin_api::{
+use projectmind_plugin_api::{
     Annotation, Class, FrameworkPlugin, Module, PluginInfo, Relation, RelationKind, Result,
 };
 
@@ -125,7 +125,7 @@ fn simple_name(fqn: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plaintext_ide_plugin_api::{Annotation, Class, Field, Module, Visibility};
+    use projectmind_plugin_api::{Annotation, Class, Field, Module, Visibility};
 
     fn class_with_annotation(fqn: &str, annot: &str) -> Class {
         Class {

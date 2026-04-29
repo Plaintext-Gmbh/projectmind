@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 fn binary_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_plaintext-ide-mcp"))
+    PathBuf::from(env!("CARGO_BIN_EXE_projectmind-mcp"))
 }
 
 struct Server {
@@ -27,7 +27,7 @@ impl Server {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
-            .env("PLAINTEXT_IDE_LOG", "error")
+            .env("PROJECTMIND_LOG", "error")
             .spawn()
             .expect("spawn binary");
         let stdin = child.stdin.take().expect("stdin");
@@ -61,7 +61,7 @@ fn initialize_returns_server_info() {
     let resp = s.call(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#);
     assert_eq!(resp["jsonrpc"], "2.0");
     assert_eq!(resp["id"], 1);
-    assert_eq!(resp["result"]["serverInfo"]["name"], "plaintext-ide-mcp");
+    assert_eq!(resp["result"]["serverInfo"]["name"], "projectmind-mcp");
     assert_eq!(resp["result"]["protocolVersion"], "2024-11-05");
 }
 
@@ -230,7 +230,7 @@ struct TempRepo {
 impl TempRepo {
     fn create_with_java_class() -> Self {
         let root = std::env::temp_dir().join(format!(
-            "plaintext-ide-it-{}-{}",
+            "projectmind-it-{}-{}",
             std::process::id(),
             uniq()
         ));
@@ -245,7 +245,7 @@ impl TempRepo {
 
     fn create_with_spring_service() -> Self {
         let root = std::env::temp_dir().join(format!(
-            "plaintext-ide-it-{}-{}",
+            "projectmind-it-{}-{}",
             std::process::id(),
             uniq()
         ));
@@ -265,7 +265,7 @@ impl TempRepo {
 
     fn create_with_class_outline() -> Self {
         let root = std::env::temp_dir().join(format!(
-            "plaintext-ide-it-{}-{}",
+            "projectmind-it-{}-{}",
             std::process::id(),
             uniq()
         ));

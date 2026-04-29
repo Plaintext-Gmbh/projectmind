@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! `plaintext-ide-mcp` — MCP server binary.
+//! `projectmind-mcp` — MCP server binary.
 //!
-//! Speaks newline-delimited JSON-RPC 2.0 on stdio, exposing the plaintext-ide tools.
+//! Speaks newline-delimited JSON-RPC 2.0 on stdio, exposing the projectmind tools.
 //! Logs go to stderr only (stdout is the protocol channel).
 
 #![warn(clippy::pedantic)]
@@ -33,7 +33,7 @@ async fn main() -> Result<()> {
     init_tracing();
     info!(
         version = SERVER_VERSION,
-        "plaintext-ide MCP server starting"
+        "projectmind MCP server starting"
     );
 
     let state = Mutex::new(ServerState::new());
@@ -69,12 +69,12 @@ async fn main() -> Result<()> {
             stdout.flush()?;
         }
     }
-    info!("plaintext-ide MCP server exiting");
+    info!("projectmind MCP server exiting");
     Ok(())
 }
 
 fn init_tracing() {
-    let filter = EnvFilter::try_from_env("PLAINTEXT_IDE_LOG")
+    let filter = EnvFilter::try_from_env("PROJECTMIND_LOG")
         .or_else(|_| EnvFilter::try_new("info"))
         .expect("default filter parses");
     let _ = tracing_subscriber::fmt()

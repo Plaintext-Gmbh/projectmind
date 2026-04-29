@@ -1,10 +1,16 @@
 <p align="center">
-  <img src="docs/assets/logo.png" alt="plaintext-ide" width="96" height="96"/>
+  <img src="docs/assets/logo.png" alt="ProjectMind" width="96" height="96"/>
 </p>
 
-# plaintext-ide
+<h1 align="center">ProjectMind</h1>
+<p align="center"><strong>Your project, explained by AI.</strong></p>
+<p align="center"><sub>by Plaintext · MPL-2.0</sub></p>
 
-A lightweight, **read-only** architecture browser for source code, designed to work bidirectionally with LLM-driven coding agents (Claude Code, etc.) via the **Model Context Protocol (MCP)**.
+ProjectMind uses AI-ready project maps to explain software architecture,
+classes, modules and relationships in a way humans and coding agents can
+navigate. It's a lightweight, **read-only** architecture browser for source
+code that pairs bidirectionally with LLM-driven coding agents (Claude Code,
+etc.) via the **Model Context Protocol (MCP)**.
 
 > **Status:** Early MVP — the **MCP server** and a basic **Tauri UI** both work. Java + Rust language plugins, Spring + Lombok framework recognisers, Mermaid bean graph and package tree, plus an HTML browser that renders `.html` / `.xhtml` / `.jsp` files and embedded HTML snippets in a sandboxed iframe.
 
@@ -12,7 +18,7 @@ A lightweight, **read-only** architecture browser for source code, designed to w
 
 Modern AI-assisted development with CLI agents is great — until you want to *see* what just changed, *visualise* how the architecture is evolving, or *drill into* the structure without firing up a heavy IDE.
 
-`plaintext-ide` aims to be the missing piece:
+`projectmind` aims to be the missing piece:
 
 - **Standalone** desktop app (Mac & Linux); not a VS Code extension.
 - **Read-only** — no editing, no builds. Just an "architecture lens".
@@ -30,7 +36,7 @@ The Tauri shell has four tabs (each disabled until a repository is open):
 
 ## What works today
 
-The Phase 1 MVP ships a **Rust MCP server** (`plaintext-ide-mcp`) that Claude Code can connect to. It implements:
+The Phase 1 MVP ships a **Rust MCP server** (`projectmind-mcp`) that Claude Code can connect to. It implements:
 
 | Tool | What it does |
 |---|---|
@@ -62,13 +68,13 @@ Smoke-tested against real codebases: a 21-module Spring Boot Maven monorepo pars
 
 ## Build the MCP server (Ubuntu / Debian)
 
-This is the path you want for **using `plaintext-ide` from Claude Code on Ubuntu** — no GUI required.
+This is the path you want for **using `projectmind` from Claude Code on Ubuntu** — no GUI required.
 
 The repo ships an installer for the impatient:
 
 ```bash
-git clone git@github.com:daniel-marthaler/plaintext-ide.git
-cd plaintext-ide
+git clone git@github.com:daniel-marthaler/projectmind.git
+cd projectmind
 ./scripts/install-ubuntu.sh             # MCP server only
 # or:
 ./scripts/install-ubuntu.sh --with-app  # also build the Tauri shell
@@ -82,11 +88,11 @@ sudo apt install -y build-essential pkg-config libssl-dev cmake git curl
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
 
-git clone git@github.com:daniel-marthaler/plaintext-ide.git
-cd plaintext-ide
-cargo build --release --bin plaintext-ide-mcp
+git clone git@github.com:daniel-marthaler/projectmind.git
+cd projectmind
+cargo build --release --bin projectmind-mcp
 
-# Result: target/release/plaintext-ide-mcp
+# Result: target/release/projectmind-mcp
 ```
 
 ## Build the MCP server (macOS)
@@ -97,9 +103,9 @@ brew install rustup-init || true
 rustup-init -y
 source "$HOME/.cargo/env"
 
-git clone git@github.com:daniel-marthaler/plaintext-ide.git
-cd plaintext-ide
-cargo build --release --bin plaintext-ide-mcp
+git clone git@github.com:daniel-marthaler/projectmind.git
+cd projectmind
+cargo build --release --bin projectmind-mcp
 ```
 
 ## Build the Tauri shell (optional, GUI)
@@ -147,11 +153,11 @@ Add to your project's `.mcp.json` (or your global Claude Code config):
 ```json
 {
   "mcpServers": {
-    "plaintext-ide": {
+    "projectmind": {
       "type": "stdio",
-      "command": "/absolute/path/to/plaintext-ide/target/release/plaintext-ide-mcp",
+      "command": "/absolute/path/to/projectmind/target/release/projectmind-mcp",
       "env": {
-        "PLAINTEXT_IDE_LOG": "info"
+        "PROJECTMIND_LOG": "info"
       }
     }
   }
@@ -170,7 +176,7 @@ The agent will pick the right tool calls from the list above.
 
 ### Pre-built binary
 
-When a `v*.*.*` tag is pushed, GitHub Actions publishes a release with `plaintext-ide-mcp` binaries for **Linux x86_64**, **macOS arm64** and **macOS x86_64** (each as a `.tar.gz` plus a `.sha256`). Until the first tag is cut, build from source as shown above.
+When a `v*.*.*` tag is pushed, GitHub Actions publishes a release with `projectmind-mcp` binaries for **Linux x86_64**, **macOS arm64** and **macOS x86_64** (each as a `.tar.gz` plus a `.sha256`). Until the first tag is cut, build from source as shown above.
 
 ## Tests / development
 
@@ -201,7 +207,7 @@ A Cargo workspace with seven crates plus a Svelte frontend:
 |---|---|
 | `crates/plugin-api` | Public traits and types (no implementations) |
 | `crates/core` | Repo loader, file walker, plugin pipeline, Maven + Cargo discovery, git helpers |
-| `crates/mcp-server` | The `plaintext-ide-mcp` binary (JSON-RPC over stdio) |
+| `crates/mcp-server` | The `projectmind-mcp` binary (JSON-RPC over stdio) |
 | `plugins/lang-java` | Java parser via Tree-sitter |
 | `plugins/lang-rust` | Rust parser via Tree-sitter |
 | `plugins/framework-spring` | Spring stereotypes + bean graph |
