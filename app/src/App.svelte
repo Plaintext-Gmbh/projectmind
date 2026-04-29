@@ -24,6 +24,11 @@
   let classMeta: { file: string; line_start: number; line_end: number } | null = null;
   let loading = false;
 
+  function basename(p: string): string {
+    const idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+    return idx === -1 ? p : p.slice(idx + 1);
+  }
+
   async function pickAndOpen() {
     const picked = await openDialog({ directory: true, multiple: false });
     if (!picked || Array.isArray(picked)) return;
@@ -75,15 +80,21 @@
     <div class="brand">
       <span class="logo">◊</span>
       <span class="title">plaintext-ide</span>
-      <span class="status">
-        {#if $repo}
+      {#if $repo}
+        <span class="repo" title={$repo.root}>
+          <span class="repo-name">{basename($repo.root)}</span>
+          <span class="repo-path">{$repo.root}</span>
+        </span>
+        <span class="status">
           <span class="dot"></span>
           {$repo.classes} classes • {$repo.modules} module{$repo.modules === 1 ? '' : 's'}
-        {:else}
+        </span>
+      {:else}
+        <span class="status">
           <span class="dot dim"></span>
           no repository
-        {/if}
-      </span>
+        </span>
+      {/if}
     </div>
     <nav>
       <button class:active={viewMode === 'classes'} on:click={() => (viewMode = 'classes')}>
@@ -210,6 +221,36 @@
   .title {
     font-weight: 600;
     font-size: 15px;
+    color: var(--fg-2);
+  }
+
+  .repo {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 2px 10px;
+    background: var(--bg-2);
+    border-radius: 4px;
+    border: 1px solid var(--bg-3);
+    cursor: default;
+  }
+
+  .repo-name {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--fg-0);
+  }
+
+  .repo-path {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg-2);
+    max-width: 360px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl;
+    text-align: left;
   }
 
   .status {

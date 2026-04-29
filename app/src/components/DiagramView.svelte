@@ -21,12 +21,33 @@
   let dragStartTx = 0;
   let dragStartTy = 0;
 
+  // SVG size at scale=1 (after fit-to-stage). Zoom is applied by resizing the
+  // SVG itself (so the vector re-rasterises crisply at the new resolution)
+  // rather than by CSS `transform: scale()` which would blur a bitmap.
+  let baseW = 0;
+  let baseH = 0;
+
+  $: applyScale(scale);
+
   $: if (kind) {
     void render(kind);
   }
 
   onMount(() => {
-    mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'dark',
+      securityLevel: 'loose',
+      // Large repositories produce diagrams well past Mermaid's defaults
+      // (50 000 chars / 500 edges). Allow up to ~1 MB and 10 000 edges.
+      maxTextSize: 1_000_000,
+      maxEdges: 10_000,
+      // Render labels as SVG <text> instead of HTML inside <foreignObject>.
+      // HTML labels rasterise once and scale as a bitmap when the SVG is
+      // resized — SVG text re-renders crisply at any zoom level.
+      flowchart: { htmlLabels: false, useMaxWidth: false },
+      class: { htmlLabels: false, useMaxWidth: false },
+    });
   });
 
   function resetView() {
@@ -45,16 +66,25 @@
       svg = result.svg;
       resetView();
       await tick();
-      // Defeat Mermaid's inline max-width that pins the SVG to its intrinsic
-      // pixel width — we want it to grow to fill the stage.
-      const node = stage?.querySelector('svg');
+      const node = stage?.querySelector('svg') as SVGSVGElement | null;
       if (node) {
+        // Drop Mermaid's inline width/maxWidth so we control sizing.
         node.removeAttribute('style');
-        node.setAttribute('width', '100%');
-        node.setAttribute('height', '100%');
-        node.style.maxWidth = 'none';
-        node.style.height = '100%';
-        node.style.width = '100%';
+        // Compute fit-to-stage at scale=1 from the SVG's viewBox aspect ratio.
+        const vb = (node.getAttribute('viewBox') ?? '').split(/\s+/).map(Number);
+        const [, , vbW = 0, vbH = 0] = vb;
+        const sw = stage?.clientWidth ?? 0;
+        const sh = stage?.clientHeight ?? 0;
+        if (vbW > 0 && vbH > 0 && sw > 0 && sh > 0) {
+          const fit = Math.min(sw / vbW, sh / vbH);
+          baseW = vbW * fit;
+          baseH = vbH * fit;
+        } else {
+          baseW = sw;
+          baseH = sh;
+        }
+        node.style.display = 'block';
+        applyScale(scale);
       }
     } catch (err) {
       error = String(err);
@@ -62,6 +92,17 @@
     } finally {
       loading = false;
     }
+  }
+
+  function applyScale(s: number) {
+    if (!stage || !baseW || !baseH) return;
+    const node = stage.querySelector('svg');
+    if (!node) return;
+    // Resize the SVG so the renderer re-rasterises the vector at the new size.
+    // `width`/`height` attributes (rather than CSS) keep `viewBox` scaling
+    // crisp at any zoom level.
+    node.setAttribute('width', String(baseW * s));
+    node.setAttribute('height', String(baseH * s));
   }
 
   function onWheel(e: WheelEvent) {
@@ -137,7 +178,7 @@
     >
       <div
         class="diagram"
-        style="transform: translate({tx}px, {ty}px) scale({scale}); transform-origin: 0 0;"
+        style="transform: translate({tx}px, {ty}px); transform-origin: 0 0;"
       >
         {@html svg}
       </div>
@@ -210,12 +251,10 @@
     will-change: transform;
   }
 
-  /* Override Mermaid's inline style="max-width: …px" that otherwise pins
-     the SVG to its tiny intrinsic width. */
+  /* Width/height are set explicitly on the SVG by JS so zoom triggers a vector
+     re-render. Make sure no UA stylesheet caps the size. */
   .diagram :global(svg) {
-    width: 100% !important;
-    height: 100% !important;
-    max-width: none !important;
+    max-width: none;
     display: block;
   }
 
