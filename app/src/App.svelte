@@ -15,7 +15,7 @@
     filteredClasses,
     stereotypeCounts,
     viewMode,
-    fileViewPath,
+    fileView,
     diffViewRef,
     followingMcp,
   } from './lib/store';
@@ -32,6 +32,34 @@
   import DiffView from './components/DiffView.svelte';
   import FileView from './components/FileView.svelte';
   import ModuleSidebar from './components/ModuleSidebar.svelte';
+
+  type Theme = 'dark' | 'light';
+  let theme: Theme = readTheme();
+  $: applyTheme(theme);
+
+  function readTheme(): Theme {
+    try {
+      const v = localStorage.getItem('plaintext-ide.theme');
+      if (v === 'dark' || v === 'light') return v;
+    } catch {
+      // localStorage unavailable
+    }
+    return 'dark';
+  }
+
+  function applyTheme(t: Theme) {
+    if (typeof document === 'undefined') return;
+    document.documentElement.dataset.theme = t;
+    try {
+      localStorage.setItem('plaintext-ide.theme', t);
+    } catch {
+      // ignore
+    }
+  }
+
+  function toggleTheme() {
+    theme = theme === 'dark' ? 'light' : 'dark';
+  }
 
   let diagramKind: 'bean-graph' | 'package-tree' = 'bean-graph';
   let classSource = '';
@@ -140,7 +168,11 @@
           viewMode.set('diff');
           break;
         case 'file':
-          fileViewPath.set(v.path);
+          fileView.update((cur) => ({
+            path: v.path,
+            anchor: v.anchor ?? null,
+            nonce: (cur?.nonce ?? 0) + 1,
+          }));
           viewMode.set('file');
           break;
       }
@@ -219,6 +251,14 @@
       {/if}
       <button on:click={pickAndOpen} disabled={loading}>
         {loading ? '…' : 'Open repo'}
+      </button>
+      <button
+        class="theme-toggle"
+        on:click={toggleTheme}
+        title="Switch to {theme === 'dark' ? 'light' : 'dark'} mode"
+        aria-label="Toggle theme"
+      >
+        {theme === 'dark' ? '☀' : '☾'}
       </button>
     </nav>
   </header>
@@ -310,8 +350,12 @@
       </div>
       <DiagramView kind={diagramKind} />
     </section>
-  {:else if $viewMode === 'file' && $fileViewPath}
-    <FileView path={$fileViewPath} />
+  {:else if $viewMode === 'file' && $fileView}
+    <FileView
+      path={$fileView.path}
+      anchor={$fileView.anchor}
+      nonce={$fileView.nonce}
+    />
   {:else if $viewMode === 'diff' && $diffViewRef}
     <DiffView reference={$diffViewRef.reference} to={$diffViewRef.to} />
   {:else}
@@ -426,6 +470,14 @@
   nav button.active {
     border-color: var(--accent-2);
     color: var(--accent-2);
+  }
+
+  .theme-toggle {
+    width: 34px;
+    padding: 6px 0;
+    text-align: center;
+    font-size: 15px;
+    line-height: 1;
   }
 
   .follow {

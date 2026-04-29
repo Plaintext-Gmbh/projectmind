@@ -64,6 +64,17 @@ export async function readFileText(path: string): Promise<string> {
   return invoke<string>('read_file_text', { path });
 }
 
+export interface MarkdownFile {
+  abs: string;
+  rel: string;
+  title: string;
+  size: number;
+}
+
+export async function listMarkdownFiles(root: string): Promise<MarkdownFile[]> {
+  return invoke<MarkdownFile[]>('list_markdown_files', { root });
+}
+
 export interface UiState {
   version: number;
   repo_root: string | null;
@@ -75,7 +86,7 @@ export type ViewIntent =
   | { kind: 'classes'; selected_fqn?: string | null }
   | { kind: 'diagram'; diagram_kind: string }
   | { kind: 'diff'; reference: string; to?: string | null }
-  | { kind: 'file'; path: string };
+  | { kind: 'file'; path: string; anchor?: string | null };
 
 export async function currentState(): Promise<UiState | null> {
   return invoke<UiState | null>('current_state');

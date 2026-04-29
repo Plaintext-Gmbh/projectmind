@@ -71,6 +71,10 @@ pub enum ViewIntent {
     File {
         /// Absolute path to the file.
         path: PathBuf,
+        /// Optional heading anchor (slug) to scroll to after rendering.
+        /// Markdown only; ignored for plain files.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        anchor: Option<String>,
     },
 }
 
@@ -204,6 +208,7 @@ mod tests {
             repo_root: None,
             view: ViewIntent::File {
                 path: PathBuf::from("/repo/README.md"),
+                anchor: None,
             },
             seq: 0,
         };

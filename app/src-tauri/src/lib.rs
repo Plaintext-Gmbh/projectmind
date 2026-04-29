@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
+use plaintext_ide_core::files::{self, MarkdownFile};
 use plaintext_ide_core::git::{self, ChangedFile};
 use plaintext_ide_core::state::{self, UiState, ViewIntent};
 use plaintext_ide_core::{diagram, Engine, Repository};
@@ -267,6 +268,21 @@ fn current_state() -> Option<UiState> {
     state::read().ok().flatten()
 }
 
+/// List every markdown file under `root` (recursive, gitignore-aware,
+/// build-output dirs filtered). Used by the file viewer's project-wide
+/// markdown picker.
+#[tauri::command]
+fn list_markdown_files(root: String) -> Result<Vec<MarkdownFile>, String> {
+    let p = std::path::Path::new(&root);
+    if !p.is_absolute() {
+        return Err(format!("root must be absolute: {root}"));
+    }
+    if !p.is_dir() {
+        return Err(format!("root is not a directory: {root}"));
+    }
+    Ok(files::list_markdown_files(p))
+}
+
 /// Best-effort publish: GUI tells the MCP/cooperating processes about its state.
 fn publish_state(payload: UiState) {
     if let Err(err) = state::write(payload) {
@@ -350,6 +366,7 @@ pub fn run() {
             show_diff,
             read_file_text,
             current_state,
+            list_markdown_files,
         ])
         .setup(|app| {
             spawn_state_watcher(app.handle().clone());

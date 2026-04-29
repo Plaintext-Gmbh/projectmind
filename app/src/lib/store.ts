@@ -12,7 +12,14 @@ export const errorMessage = writable<string | null>(null);
 export type ViewMode = 'classes' | 'diagram' | 'file' | 'diff';
 export const viewMode = writable<ViewMode>('classes');
 
-export const fileViewPath = writable<string | null>(null);
+export interface FileView {
+  path: string;
+  anchor: string | null;
+  /// Bumped on every (re)issued intent, even if path/anchor stays the same.
+  /// FileView listens to this to re-scroll on repeated MCP intents.
+  nonce: number;
+}
+export const fileView = writable<FileView | null>(null);
 export const diffViewRef = writable<{ reference: string; to: string | null } | null>(null);
 /// When the GUI is currently following an MCP-driven view intent, this is true.
 /// Used purely for UI affordances (tooltip / banner) — MCP always wins, so the

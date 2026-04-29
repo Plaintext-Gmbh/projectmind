@@ -1,5 +1,5 @@
 :root {
-  /* dark, slightly cool palette */
+  /* dark, slightly cool palette (default) */
   --bg-0: #0e1117;
   --bg-1: #161b22;
   --bg-2: #1e242c;
@@ -25,6 +25,29 @@
   --sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
 
   color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  /* light palette — high readability, low blue tint */
+  --bg-0: #ffffff;
+  --bg-1: #f6f8fa;
+  --bg-2: #eaeef2;
+  --bg-3: #d0d7de;
+  --fg-0: #1f2328;
+  --fg-1: #424950;
+  --fg-2: #6e7781;
+  --accent: #2da44e;
+  --accent-2: #0969da;
+  --warn: #bc4c00;
+  --error: #cf222e;
+  --service: #1a7f37;
+  --controller: #0969da;
+  --rest-controller: #0550ae;
+  --repository: #8250df;
+  --component: #9a6700;
+  --configuration: #cf222e;
+
+  color-scheme: light;
 }
 
 * {

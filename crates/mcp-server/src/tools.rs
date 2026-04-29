@@ -111,7 +111,8 @@ fn file_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "path": { "type": "string", "description": "Absolute path to the file" }
+            "path":   { "type": "string", "description": "Absolute path to the file" },
+            "anchor": { "type": "string", "description": "Optional heading slug (e.g. \"installation\" for `## Installation`) to scroll to after rendering. Markdown only." }
         },
         "required": ["path"]
     })
@@ -627,6 +628,8 @@ fn view_diff(args: Value) -> DispatchResult {
 #[derive(Deserialize)]
 struct ViewFileArgs {
     path: String,
+    #[serde(default)]
+    anchor: Option<String>,
 }
 
 fn view_file(args: Value) -> DispatchResult {
@@ -640,12 +643,18 @@ fn view_file(args: Value) -> DispatchResult {
         )));
     }
     let prev = state::read().ok().flatten().unwrap_or_default();
+    let anchor = args.anchor.clone();
     publish_state(UiState {
         repo_root: prev.repo_root,
-        view: ViewIntent::File { path: path.clone() },
+        view: ViewIntent::File {
+            path: path.clone(),
+            anchor: anchor.clone(),
+        },
         ..UiState::default()
     });
-    Ok(text_result(json!({"ok": true, "path": path}).to_string()))
+    Ok(text_result(
+        json!({"ok": true, "path": path, "anchor": anchor}).to_string(),
+    ))
 }
 
 #[derive(Deserialize)]
