@@ -6,7 +6,7 @@
 
 A lightweight, **read-only** architecture browser for source code, designed to work bidirectionally with LLM-driven coding agents (Claude Code, etc.) via the **Model Context Protocol (MCP)**.
 
-> **Status:** Early MVP — the **MCP server** and a basic **Tauri UI** both work. Java + Rust language plugins, Spring + Lombok framework recognisers, Mermaid bean graph and package tree.
+> **Status:** Early MVP — the **MCP server** and a basic **Tauri UI** both work. Java + Rust language plugins, Spring + Lombok framework recognisers, Mermaid bean graph and package tree, plus an HTML browser that renders `.html` / `.xhtml` / `.jsp` files and embedded HTML snippets in a sandboxed iframe.
 
 ## Why
 
@@ -18,6 +18,15 @@ Modern AI-assisted development with CLI agents is great — until you want to *s
 - **Read-only** — no editing, no builds. Just an "architecture lens".
 - **MCP-bidirectional** — your LLM can say *"show class X with lines 42-58 highlighted"* and the viewer renders it. You can mark code regions and the selection flows back into the conversation.
 - **Plugin-based** — languages (Java, Kotlin, TypeScript, …), frameworks (Spring, Lombok, JSF, …) and visualisations (bean graph, package tree, C4, …) are all plugins.
+
+## GUI tabs
+
+The Tauri shell has four tabs (each disabled until a repository is open):
+
+- **Code** — module sidebar, class list, source viewer with stereotype filters, package drilldown.
+- **Diagrams** — Mermaid bean graph or package tree; click a node to drill in.
+- **MD** — every Markdown file in the repo, grouped by top-level directory, with rendered preview, mermaid blocks, and embedded images.
+- **HTML** — every `.html` / `.xhtml` / `.htm` / `.jsp` / `.vm` / `.ftl` file plus HTML snippets extracted from `.java` / `.kt` / `.groovy` / `.scala` string literals (Java text blocks supported). Toggle Rendered ↔ Source; Rendered uses a strict sandbox iframe (no JS, no network) so untrusted repo content stays inert.
 
 ## What works today
 
@@ -35,6 +44,8 @@ The Phase 1 MVP ships a **Rust MCP server** (`plaintext-ide-mcp`) that Claude Co
 | `list_changes_since` | Files changed since a given git ref. |
 | `show_diff` | Unified diff between two refs (or ref vs working tree). |
 | `show_diagram` | Mermaid bean graph (subgraphs per Maven module, colour-coded by stereotype) or package tree. |
+| `list_html` | List HTML / XHTML / JSP / Velocity / FreeMarker template files in the open repository. |
+| `list_html_snippets` | Scan source files (`.java`, `.kt`, `.groovy`, `.scala`, incl. Java text blocks) for HTML snippets in string literals — filtered to ≥2 tags so XML namespace declarations and short error strings drop out. |
 | `plugin_info` | List active language and framework plugins. |
 
 Active language plugins in Phase 1:
