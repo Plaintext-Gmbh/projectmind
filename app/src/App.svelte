@@ -78,9 +78,10 @@
     theme = theme === 'dark' ? 'light' : 'dark';
   }
 
-  // The Code tab falls back to "Files" when the repo has no parsed classes
-  // (e.g. a docs-only or office-style folder).
-  $: codeTabLabel = $repo && $repo.classes === 0 ? 'Files' : 'Code';
+  // The main browse tab is always called "Files" — the term covers parsed
+  // classes, plain assets (PDFs, images), and (after the chip refactor)
+  // markdown / HTML alike. "Modules" stays as the synonym for folders.
+  $: codeTabLabel = 'Files';
 
   let diagramKind: 'bean-graph' | 'package-tree' | 'folder-map' = 'bean-graph';
   let folderMapLayout: 'hierarchy' | 'solar' | 'td' = 'solar';
@@ -578,7 +579,7 @@
         </span>
         <span class="status">
           <span class="dot"></span>
-          {$repo.classes} classes • {$repo.modules} module{$repo.modules === 1 ? '' : 's'}
+          {$repo.classes} {$repo.classes === 1 ? 'file' : 'files'} • {$repo.modules} module{$repo.modules === 1 ? '' : 's'}
         </span>
       {:else}
         <span class="status">
@@ -591,7 +592,10 @@
       <button
         class:active={$viewMode === 'classes' ||
           $viewMode === 'pdf' ||
-          $viewMode === 'image'}
+          $viewMode === 'image' ||
+          $viewMode === 'md' ||
+          $viewMode === 'html' ||
+          $viewMode === 'file'}
         disabled={!$repo}
         on:click={() => {
           followingMcp.set(false);
@@ -610,32 +614,6 @@
       >
         Diagrams
       </button>
-      {#if !$repo || ($repo && $repo.markdown_count > 0)}
-        <button
-          class:active={$viewMode === 'md' || $viewMode === 'file'}
-          disabled={!$repo}
-          on:click={() => {
-            followingMcp.set(false);
-            viewMode.set('md');
-          }}
-          title="Browse markdown files in this repository"
-        >
-          MD
-        </button>
-      {/if}
-      {#if !$repo || ($repo && $repo.html_count > 0)}
-        <button
-          class:active={$viewMode === 'html'}
-          disabled={!$repo}
-          on:click={() => {
-            followingMcp.set(false);
-            viewMode.set('html');
-          }}
-          title="Browse HTML files and snippets in this repository"
-        >
-          HTML
-        </button>
-      {/if}
       {#if $walkthroughCursor}
         <button
           class:active={$viewMode === 'walkthrough'}
@@ -713,7 +691,7 @@
         </p>
       </div>
     </section>
-  {:else if $viewMode === 'classes' || $viewMode === 'pdf' || $viewMode === 'image'}
+  {:else if $viewMode === 'classes' || $viewMode === 'pdf' || $viewMode === 'image' || $viewMode === 'md' || $viewMode === 'html' || $viewMode === 'file'}
     <section class="layout">
       <ModuleSidebar />
       <div
@@ -727,110 +705,146 @@
         }}
         title="Drag to resize · double-click to reset"
       ></div>
-      <aside class="sidebar">
-        {#if $packageFilter !== null}
-          <div class="path-bar">
-            <span class="path-label">package</span>
-            <code class="path-value">{$packageFilter || '(default)'}</code>
-            <button class="path-clear" on:click={() => packageFilter.set(null)} title="Clear package filter">×</button>
-          </div>
-        {/if}
-        <div class="filter">
-          <button
-            class="chip"
-            class:active={$stereotypeFilter === null && $fileKindFilter === null}
-            on:click={() => setFilter(null)}
-          >
-            all <span class="count">{displayItems.length}</span>
-          </button>
-          {#each Object.entries($stereotypeCounts) as [name, count]}
+      {#if $viewMode === 'md'}
+        <div class="files-fullspan"><MarkdownIndex /></div>
+      {:else if $viewMode === 'html'}
+        <div class="files-fullspan"><HtmlIndex /></div>
+      {:else}
+        <aside class="sidebar">
+          {#if $packageFilter !== null}
+            <div class="path-bar">
+              <span class="path-label">package</span>
+              <code class="path-value">{$packageFilter || '(default)'}</code>
+              <button class="path-clear" on:click={() => packageFilter.set(null)} title="Clear package filter">×</button>
+            </div>
+          {/if}
+          <div class="filter">
             <button
-              class="chip {name}"
-              class:active={$stereotypeFilter === name}
-              on:click={() => setFilter(name)}
+              class="chip"
+              class:active={$stereotypeFilter === null && $fileKindFilter === null}
+              on:click={() => setFilter(null)}
             >
-              {name} <span class="count">{count}</span>
+              all <span class="count">{displayItems.length}</span>
             </button>
-          {/each}
-          {#each fileKindsPresent as kind (kind)}
-            <button
-              class="chip kind"
-              class:active={$fileKindFilter === kind}
-              on:click={() => setKindFilter(kind)}
-            >
-              {kind} <span class="count">{$filteredModuleFiles.filter((f) => f.kind === kind).length}</span>
-            </button>
-          {/each}
-        </div>
-        <ul class="class-list" role="listbox" aria-label="Classes and files">
-          {#each displayItems as item (item.kind === 'class' ? `class::${item.entry.module}::${item.entry.fqn}` : `file::${item.entry.abs}`)}
-            {#if item.kind === 'class'}
-              <li role="option" aria-selected={$selectedClass?.fqn === item.entry.fqn}>
-                <button
-                  type="button"
-                  class="class-row"
-                  class:selected={$selectedClass?.fqn === item.entry.fqn}
-                  on:click={() => handleSelect(item.entry)}
-                >
-                  <span class="class-name">{item.entry.name}</span>
-                  <span class="class-fqn">{item.entry.fqn}</span>
-                  <span class="stereotypes">
-                    {#each item.entry.stereotypes as s}
-                      <span class="badge {s}">{s}</span>
-                    {/each}
-                  </span>
-                </button>
-              </li>
-            {:else}
-              <li
-                role="option"
-                aria-selected={($viewMode === 'pdf' || $viewMode === 'image') &&
-                  $fileView?.path === item.entry.abs}
+            {#each Object.entries($stereotypeCounts) as [name, count]}
+              <button
+                class="chip {name}"
+                class:active={$stereotypeFilter === name}
+                on:click={() => setFilter(name)}
               >
-                <button
-                  type="button"
-                  class="class-row file-row"
-                  class:selected={($viewMode === 'pdf' || $viewMode === 'image') &&
-                    $fileView?.path === item.entry.abs}
-                  on:click={() => openModuleFile(item.entry)}
-                  title={item.entry.abs}
-                >
-                  <span class="class-name file-name">{item.entry.rel}</span>
-                  <span class="stereotypes">
-                    <span class="badge file-kind">{item.entry.kind}</span>
-                  </span>
-                </button>
-              </li>
+                {name} <span class="count">{count}</span>
+              </button>
+            {/each}
+            {#each fileKindsPresent as kind (kind)}
+              <button
+                class="chip kind"
+                class:active={$fileKindFilter === kind}
+                on:click={() => setKindFilter(kind)}
+              >
+                {kind} <span class="count">{$filteredModuleFiles.filter((f) => f.kind === kind).length}</span>
+              </button>
+            {/each}
+            {#if $repo && $repo.markdown_count > 0}
+              <button
+                class="chip md"
+                on:click={() => {
+                  followingMcp.set(false);
+                  viewMode.set('md');
+                }}
+                title="Browse markdown files in this repository"
+              >
+                md <span class="count">{$repo.markdown_count}</span>
+              </button>
             {/if}
-          {/each}
-        </ul>
-      </aside>
-      <div
-        class="resizer"
-        use:resizable={{
-          storageKey: 'projectmind.layout.code.col2',
-          cssVar: '--code-col-2',
-          min: 220,
-          max: 720,
-          initial: 360,
-        }}
-        title="Drag to resize · double-click to reset"
-      ></div>
-      <main class="viewer">
-        {#if $viewMode === 'pdf' && $fileView}
-          <PdfView path={$fileView.path} />
-        {:else if $viewMode === 'image' && $fileView}
-          <ImageView path={$fileView.path} />
-        {:else if $selectedClass}
-          <ClassViewer
-            klass={$selectedClass}
-            source={classSource}
-            meta={classMeta}
-          />
-        {:else}
-          <div class="placeholder">Select a class on the left.</div>
-        {/if}
-      </main>
+            {#if $repo && $repo.html_count > 0}
+              <button
+                class="chip html"
+                on:click={() => {
+                  followingMcp.set(false);
+                  viewMode.set('html');
+                }}
+                title="Browse HTML files and snippets in this repository"
+              >
+                html <span class="count">{$repo.html_count}</span>
+              </button>
+            {/if}
+          </div>
+          <ul class="class-list" role="listbox" aria-label="Files">
+            {#each displayItems as item (item.kind === 'class' ? `class::${item.entry.module}::${item.entry.fqn}` : `file::${item.entry.abs}`)}
+              {#if item.kind === 'class'}
+                <li role="option" aria-selected={$selectedClass?.fqn === item.entry.fqn}>
+                  <button
+                    type="button"
+                    class="class-row"
+                    class:selected={$selectedClass?.fqn === item.entry.fqn}
+                    on:click={() => handleSelect(item.entry)}
+                  >
+                    <span class="class-name">{item.entry.name}</span>
+                    <span class="class-fqn">{item.entry.fqn}</span>
+                    <span class="stereotypes">
+                      {#each item.entry.stereotypes as s}
+                        <span class="badge {s}">{s}</span>
+                      {/each}
+                    </span>
+                  </button>
+                </li>
+              {:else}
+                <li
+                  role="option"
+                  aria-selected={($viewMode === 'pdf' || $viewMode === 'image') &&
+                    $fileView?.path === item.entry.abs}
+                >
+                  <button
+                    type="button"
+                    class="class-row file-row"
+                    class:selected={($viewMode === 'pdf' || $viewMode === 'image') &&
+                      $fileView?.path === item.entry.abs}
+                    on:click={() => openModuleFile(item.entry)}
+                    title={item.entry.abs}
+                  >
+                    <span class="class-name file-name">{item.entry.rel}</span>
+                    <span class="stereotypes">
+                      <span class="badge file-kind">{item.entry.kind}</span>
+                    </span>
+                  </button>
+                </li>
+              {/if}
+            {/each}
+          </ul>
+        </aside>
+        <div
+          class="resizer"
+          use:resizable={{
+            storageKey: 'projectmind.layout.code.col2',
+            cssVar: '--code-col-2',
+            min: 220,
+            max: 720,
+            initial: 360,
+          }}
+          title="Drag to resize · double-click to reset"
+        ></div>
+        <main class="viewer">
+          {#if $viewMode === 'pdf' && $fileView}
+            <PdfView path={$fileView.path} />
+          {:else if $viewMode === 'image' && $fileView}
+            <ImageView path={$fileView.path} />
+          {:else if $viewMode === 'file' && $fileView}
+            <FileView
+              path={$fileView.path}
+              anchor={$fileView.anchor}
+              nonce={$fileView.nonce}
+            />
+          {:else if $selectedClass}
+            <ClassViewer
+              klass={$selectedClass}
+              source={classSource}
+              meta={classMeta}
+            />
+          {:else}
+            <div class="placeholder">Select a file on the left.</div>
+          {/if}
+        </main>
+      {/if}
     </section>
   {:else if $viewMode === 'diagram'}
     <section class="diagram-view">
@@ -856,22 +870,12 @@
       cursorStep={$walkthroughCursor.step}
       nonce={$walkthroughCursor.nonce}
     />
-  {:else if $viewMode === 'md'}
-    <MarkdownIndex />
-  {:else if $viewMode === 'html'}
-    <HtmlIndex />
-  {:else if $viewMode === 'file' && $fileView}
-    <FileView
-      path={$fileView.path}
-      anchor={$fileView.anchor}
-      nonce={$fileView.nonce}
-    />
   {:else if $viewMode === 'diff' && $diffViewRef}
     <DiffView reference={$diffViewRef.reference} to={$diffViewRef.to} />
   {:else}
     <section class="empty">
       <div class="welcome">
-        <p class="hint">No view selected. Pick Code, Diagrams or HTML above, or send an MCP intent.</p>
+        <p class="hint">No view selected. Pick Files or Diagrams above, or send an MCP intent.</p>
       </div>
     </section>
   {/if}
@@ -1129,6 +1133,22 @@
     overflow: hidden;
   }
 
+  /* When the Files tab hosts MD or HTML browsers (no class-list / viewer
+     split), the embedded component should span the second resizer + the
+     remaining three grid tracks so the right pane is one continuous
+     surface rather than a tiny 360px column. */
+  .files-fullspan {
+    grid-column: 3 / -1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .files-fullspan > :global(*) {
+    flex: 1;
+    min-height: 0;
+  }
+
   .resizer {
     background: transparent;
     cursor: col-resize;
@@ -1308,6 +1328,26 @@
     color: var(--fg-1);
     text-transform: uppercase;
     letter-spacing: 0.04em;
+  }
+
+  /* Markdown / HTML pills jump into a dedicated browser inside the same
+     Files tab. Subtly tinted so they stand apart from stereotype + kind
+     chips without screaming. */
+  .chip.md {
+    background: color-mix(in srgb, var(--accent-2) 18%, var(--bg-2));
+    color: var(--fg-0);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .chip.html {
+    background: color-mix(in srgb, var(--component) 22%, var(--bg-2));
+    color: var(--fg-0);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .chip.md:hover,
+  .chip.html:hover {
+    border-color: var(--accent-2);
   }
 
   .viewer {
