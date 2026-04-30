@@ -13,6 +13,7 @@
     stereotypeFilter,
     viewMode,
   } from '../lib/store';
+  import { t } from '../lib/i18n';
 
   export let kind: DiagramKind;
   export let folderLayout: 'hierarchy' | 'solar' | 'td' = 'solar';
@@ -472,7 +473,7 @@
     <span class="hint">Drag to pan • Shift + wheel to zoom</span>
   </div>
   {#if loading}
-    <div class="placeholder">Rendering diagram…</div>
+    <div class="placeholder">{$t('diagram.rendering')}</div>
   {:else if error}
     <div class="error">⚠ {error}</div>
     <pre>{mermaidSource}</pre>

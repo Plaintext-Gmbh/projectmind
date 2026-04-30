@@ -48,6 +48,7 @@
   import PdfView from './components/PdfView.svelte';
   import WalkthroughView from './components/WalkthroughView.svelte';
   import { resizable } from './lib/resizable';
+  import { t, currentLang, setLang } from './lib/i18n';
 
   type Theme = 'dark' | 'light';
   const BROWSER_STATE_POLL_MS = 500;
@@ -78,10 +79,15 @@
     theme = theme === 'dark' ? 'light' : 'dark';
   }
 
-  // The main browse tab is always called "Files" — the term covers parsed
-  // classes, plain assets (PDFs, images), and (after the chip refactor)
-  // markdown / HTML alike. "Modules" stays as the synonym for folders.
-  $: codeTabLabel = 'Files';
+  // The main browse tab is always labelled with the i18n entry — the term
+  // covers parsed classes, plain assets (PDFs, images), and (after the
+  // chip refactor) markdown / HTML alike. "Modules" stays as the synonym
+  // for folders.
+  $: codeTabLabel = $t('nav.files');
+
+  function toggleLang() {
+    setLang($currentLang === 'de' ? 'en' : 'de');
+  }
 
   let diagramKind: 'bean-graph' | 'package-tree' | 'folder-map' = 'bean-graph';
   let folderMapLayout: 'hierarchy' | 'solar' | 'td' = 'solar';
@@ -579,12 +585,17 @@
         </span>
         <span class="status">
           <span class="dot"></span>
-          {$repo.classes} {$repo.classes === 1 ? 'file' : 'files'} • {$repo.modules} module{$repo.modules === 1 ? '' : 's'}
+          {$t('status.repoCount', {
+            files: $repo.classes,
+            filesUnit: $t($repo.classes === 1 ? 'status.files.one' : 'status.files.other'),
+            modules: $repo.modules,
+            modulesUnit: $t($repo.modules === 1 ? 'status.modules.one' : 'status.modules.other'),
+          })}
         </span>
       {:else}
         <span class="status">
           <span class="dot dim"></span>
-          no repository
+          {$t('status.noRepo')}
         </span>
       {/if}
     </div>
@@ -612,37 +623,45 @@
           viewMode.set('diagram');
         }}
       >
-        Diagrams
+        {$t('nav.diagrams')}
       </button>
       {#if $walkthroughCursor}
         <button
           class:active={$viewMode === 'walkthrough'}
           class="walkthrough-btn"
           on:click={() => viewMode.set('walkthrough')}
-          title="Resume the active walk-through"
+          title={$t('nav.walkthrough')}
         >
-          ▶ Walk-through
+          ▶ {$t('nav.walkthrough')}
         </button>
       {/if}
       {#if $viewMode === 'diff'}
-        <button class="active">Diff</button>
+        <button class="active">{$t('nav.diff')}</button>
       {/if}
       {#if $followingMcp}
-        <span class="follow" title="GUI is following an MCP-issued view intent. Click any tab to continue manually.">
-          following MCP
+        <span class="follow" title={$t('nav.followingMcp.title')}>
+          {$t('nav.followingMcp')}
         </span>
       {/if}
       {#if browserMode}
-        <button on:click={forgetBrowserToken} title="Forget the browser access token">Token</button>
+        <button on:click={forgetBrowserToken} title={$t('nav.token')}>{$t('nav.token')}</button>
       {/if}
       <button on:click={pickAndOpen} disabled={loading}>
-        {loading ? '…' : 'Open repo'}
+        {loading ? $t('status.loading') : $t('nav.openRepo')}
+      </button>
+      <button
+        class="lang-toggle"
+        on:click={toggleLang}
+        title={$t('nav.langToggle')}
+        aria-label={$t('nav.langToggle')}
+      >
+        {$currentLang === 'de' ? 'EN' : 'DE'}
       </button>
       <button
         class="theme-toggle"
         on:click={toggleTheme}
-        title="Switch to {theme === 'dark' ? 'light' : 'dark'} mode"
-        aria-label="Toggle theme"
+        title={theme === 'dark' ? $t('nav.themeToggle.toLight') : $t('nav.themeToggle.toDark')}
+        aria-label={theme === 'dark' ? $t('nav.themeToggle.toLight') : $t('nav.themeToggle.toDark')}
       >
         {theme === 'dark' ? '☀' : '☾'}
       </button>
@@ -661,32 +680,32 @@
     <section class="empty">
       <form class="token-panel" on:submit|preventDefault={useBrowserToken}>
         <img class="welcome-logo" src="/logo.png" alt="ProjectMind" />
-        <h1>ProjectMind</h1>
-        <p class="claim">LAN browser access</p>
-        <label for="browser-token">Access token</label>
+        <h1>{$t('welcome.title')}</h1>
+        <p class="claim">{$t('browserMode.banner')}</p>
+        <label for="browser-token">{$t('browserMode.tokenLabel')}</label>
         <input
           id="browser-token"
           bind:value={tokenInput}
           autocomplete="off"
           spellcheck="false"
-          placeholder="Paste the token from the LLM CLI"
+          placeholder={$t('browserMode.tokenLabel')}
         />
-        <button type="submit">Connect</button>
+        <button type="submit">{$t('browserMode.tokenSubmit')}</button>
       </form>
     </section>
   {:else if !$repo}
     <section class="empty">
       <div class="welcome">
         <img class="welcome-logo" src="/logo.png" alt="ProjectMind" />
-        <h1>ProjectMind</h1>
-        <p class="claim">Your project, explained by AI.</p>
-        <p class="by">by Plaintext</p>
-        <button on:click={pickAndOpen}>Open a repository to begin</button>
+        <h1>{$t('welcome.title')}</h1>
+        <p class="claim">{$t('welcome.tagline')}</p>
+        <p class="by">{$t('welcome.by')}</p>
+        <button on:click={pickAndOpen}>{$t('welcome.openButton')}</button>
         <p class="hint">
           {#if browserMode}
-            Enter an absolute path on the ProjectMind host, or open one from the LLM CLI.
+            {$t('welcome.hint.browser')}
           {:else}
-            Or use the <code>projectmind-mcp</code> server with your favourite LLM CLI — see the README.
+            {$t('welcome.hint.tauri')}
           {/if}
         </p>
       </div>
@@ -713,9 +732,9 @@
         <aside class="sidebar">
           {#if $packageFilter !== null}
             <div class="path-bar">
-              <span class="path-label">package</span>
+              <span class="path-label">{$t('files.package.label')}</span>
               <code class="path-value">{$packageFilter || '(default)'}</code>
-              <button class="path-clear" on:click={() => packageFilter.set(null)} title="Clear package filter">×</button>
+              <button class="path-clear" on:click={() => packageFilter.set(null)} title={$t('files.package.clear')}>×</button>
             </div>
           {/if}
           <div class="filter">
@@ -724,7 +743,7 @@
               class:active={$stereotypeFilter === null && $fileKindFilter === null}
               on:click={() => setFilter(null)}
             >
-              all <span class="count">{displayItems.length}</span>
+              {$t('files.filter.all')} <span class="count">{displayItems.length}</span>
             </button>
             {#each Object.entries($stereotypeCounts) as [name, count]}
               <button
@@ -751,7 +770,7 @@
                   followingMcp.set(false);
                   viewMode.set('md');
                 }}
-                title="Browse markdown files in this repository"
+                title={$t('files.filter.md.title')}
               >
                 md <span class="count">{$repo.markdown_count}</span>
               </button>
@@ -763,13 +782,13 @@
                   followingMcp.set(false);
                   viewMode.set('html');
                 }}
-                title="Browse HTML files and snippets in this repository"
+                title={$t('files.filter.html.title')}
               >
                 html <span class="count">{$repo.html_count}</span>
               </button>
             {/if}
           </div>
-          <ul class="class-list" role="listbox" aria-label="Files">
+          <ul class="class-list" role="listbox" aria-label={$t('files.aria.list')}>
             {#each displayItems as item (item.kind === 'class' ? `class::${item.entry.module}::${item.entry.fqn}` : `file::${item.entry.abs}`)}
               {#if item.kind === 'class'}
                 <li role="option" aria-selected={$selectedClass?.fqn === item.entry.fqn}>
@@ -841,7 +860,7 @@
               meta={classMeta}
             />
           {:else}
-            <div class="placeholder">Select a file on the left.</div>
+            <div class="placeholder">{$t('files.placeholder')}</div>
           {/if}
         </main>
       {/if}
@@ -851,16 +870,16 @@
       <div class="diagram-tabs">
         {#if $repo.classes > 0}
           <button class:active={diagramKind === 'bean-graph'} on:click={() => (diagramKind = 'bean-graph')}>
-            Bean graph
+            {$t('diagram.beanGraph')}
           </button>
           <button class:active={diagramKind === 'package-tree'} on:click={() => (diagramKind = 'package-tree')}>
-            Package tree
+            {$t('diagram.packageTree')}
           </button>
         {/if}
         <button class:active={diagramKind === 'folder-map'} on:click={() => (diagramKind = 'folder-map')}>
-          Folder map
+          {$t('diagram.folderMap')}
         </button>
-        <span class="diagram-hint">Click a node to drill into it</span>
+        <span class="diagram-hint">{$t('diagram.hint')}</span>
       </div>
       <DiagramView kind={diagramKind} folderLayout={folderMapLayout} />
     </section>
@@ -875,7 +894,7 @@
   {:else}
     <section class="empty">
       <div class="welcome">
-        <p class="hint">No view selected. Pick Files or Diagrams above, or send an MCP intent.</p>
+        <p class="hint">{$t('welcome.empty')}</p>
       </div>
     </section>
   {/if}
@@ -884,7 +903,7 @@
     <div class="drop-overlay" aria-hidden="true">
       <div class="drop-overlay-inner">
         <div class="drop-overlay-icon">⤓</div>
-        <div class="drop-overlay-text">Drop to open as repository</div>
+        <div class="drop-overlay-text">{$t('drop.overlay')}</div>
       </div>
     </div>
   {/if}
@@ -1033,6 +1052,16 @@
     padding: 6px 0;
     text-align: center;
     font-size: 15px;
+    line-height: 1;
+  }
+
+  .lang-toggle {
+    width: 36px;
+    padding: 6px 0;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
     line-height: 1;
   }
 

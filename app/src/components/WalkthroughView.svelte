@@ -34,6 +34,7 @@
   import DiffView from './DiffView.svelte';
   import { readZoom, writeZoom, clampZoom, wheelDelta } from '../lib/shiftWheelZoom';
   import { openUrl } from '../lib/openUrl';
+  import { t } from '../lib/i18n';
 
   export let cursorId: string;
   export let cursorStep: number;
@@ -299,8 +300,8 @@
   // typed a specific question, ship it inline so the LLM has full context
   // without having to poll walkthrough_feedback first.
   $: cliHint = lastQuestion
-    ? `projectmind nochmal: „${lastQuestion}" — bitte als fokussierte Folge-Tour beantworten (walkthrough_start mit nur den relevanten Steps)`
-    : 'projectmind walkthrough_feedback prüfen und Folge-Tour starten';
+    ? `projectmind followup: "${lastQuestion}" — please answer as a focused follow-up tour (walkthrough_start with only the relevant steps)`
+    : 'projectmind walkthrough_feedback check and start follow-up tour';
   let cliCopied = false;
   async function copyCli() {
     try {
@@ -562,44 +563,41 @@
   <section class="state-card">
     <div class="card">
       <div class="spinner"></div>
-      <h2>Lade Tour…</h2>
-      <p>Hole die Schritte vom MCP-Server.</p>
+      <h2>{$t('tour.loading')}</h2>
+      <p>{$t('tour.loading.hint')}</p>
     </div>
   </section>
 {:else if !body}
   <section class="state-card">
     <div class="card">
-      <h2>Keine aktive Tour</h2>
-      <p>Bitte deine KI, eine Tour zu starten via <code>walkthrough_start</code>.</p>
+      <h2>{$t('tour.empty.title')}</h2>
+      <p>{$t('tour.empty.hint')}</p>
     </div>
   </section>
 {:else if waitingForFollowup}
   <section class="state-card">
     <div class="card waiting">
       <div class="spinner"></div>
-      <h2>Die KI bereitet eine Antwort vor</h2>
+      <h2>{$t('tour.waiting.title')}</h2>
       {#if lastQuestion}
         <blockquote class="user-question">
-          <span class="quote-label">Deine Frage</span>
+          <span class="quote-label">{$t('tour.waiting.yourQuestion')}</span>
           <span class="quote-text">{lastQuestion}</span>
         </blockquote>
       {/if}
-      <p>Tippe in deiner KI-CLI:</p>
+      <p>{$t('tour.waiting.cli.hint')}</p>
       <div class="cli-hint">
         <code>{cliHint}</code>
         <button class="btn btn-ghost copy-btn" on:click={copyCli}>
-          {cliCopied ? '✓ kopiert' : 'kopieren'}
+          {cliCopied ? $t('tour.copied') : $t('tour.copy')}
         </button>
       </div>
-      <p class="meta">
-        Sobald die KI <code>walkthrough_start</code> erneut ruft, springt diese Ansicht
-        automatisch in die Folge-Tour.
-      </p>
+      <p class="meta">{$t('tour.waiting.followup')}</p>
       <div class="state-actions">
         <button class="btn btn-secondary" on:click={dismissWaiting}>
-          Doch alleine weitermachen
+          {$t('tour.waiting.dismiss')}
         </button>
-        <button class="btn btn-ghost" on:click={closeTour}>Tour beenden</button>
+        <button class="btn btn-ghost" on:click={closeTour}>{$t('tour.waiting.close')}</button>
       </div>
     </div>
   </section>
@@ -607,10 +605,10 @@
   <section class="state-card">
     <div class="card finished">
       <div class="check">✓</div>
-      <h2>Tour abgeschlossen</h2>
-      <p><strong>{body.title}</strong> — {body.steps.length} Schritte durchgegangen.</p>
+      <h2>{$t('tour.finished.title')}</h2>
+      <p>{$t('tour.finished.summary', { title: body.title, count: body.steps.length })}</p>
       <div class="state-actions">
-        <button class="btn btn-primary big" on:click={closeTour}>Schliessen</button>
+        <button class="btn btn-primary big" on:click={closeTour}>{$t('tour.finished.close')}</button>
         <button
           class="btn btn-secondary"
           on:click={() => {
@@ -618,7 +616,7 @@
             void goTo(0);
           }}
         >
-          Erneut durchgehen
+          {$t('tour.finished.replay')}
         </button>
       </div>
     </div>
@@ -658,24 +656,29 @@
         {/each}
       </ol>
       <footer class="side-foot">
-        <button class="nav-btn" on:click={prev} disabled={cursorStep === 0}>← Prev</button>
-        <button class="nav-btn" on:click={next} disabled={cursorStep >= total - 1}>Next →</button>
+        <button class="nav-btn" on:click={prev} disabled={cursorStep === 0}>{$t('tour.nav.prev')}</button>
+        <button class="nav-btn" on:click={next} disabled={cursorStep >= total - 1}>{$t('tour.nav.next')}</button>
       </footer>
     </aside>
 
     <main class="main">
       {#if step}
         <header class="step-head">
-          <div class="step-pos">Step {cursorStep + 1} of {total}{isLastStep ? ' (letzter)' : ''}</div>
+          <div class="step-pos">
+            {$t(isLastStep ? 'tour.step.positionLast' : 'tour.step.position', {
+              current: cursorStep + 1,
+              total,
+            })}
+          </div>
           <h1 class="step-h">{step.title}</h1>
           {#if step.target.kind !== 'note'}
             <div class="step-target-hint">
               {#if step.target.kind === 'class'}
-                Class: <code>{step.target.fqn}</code>
+                {$t('tour.target.class')}: <code>{step.target.fqn}</code>
               {:else if step.target.kind === 'file'}
-                File: <code>{basename(step.target.path)}</code>
+                {$t('tour.target.file')}: <code>{basename(step.target.path)}</code>
               {:else if step.target.kind === 'diff'}
-                Diff: <code>{step.target.reference}{step.target.to ? `..${step.target.to}` : ' → working tree'}</code>
+                {$t('tour.target.diff')}: <code>{step.target.reference}{step.target.to ? `..${step.target.to}` : ' → working tree'}</code>
               {/if}
             </div>
           {/if}
@@ -691,7 +694,7 @@
               </button>
             </div>
             {#if overrideLoading}
-              <div class="loading">Lade Inhalt…</div>
+              <div class="loading">{$t('tour.body.loading')}</div>
             {:else if overrideError}
               <div class="error">⚠ {overrideError}</div>
             {:else}
@@ -703,7 +706,7 @@
 </span>{/each}</code></pre>
             {/if}
           {:else if targetLoading}
-            <div class="loading">Lade Inhalt…</div>
+            <div class="loading">{$t('tour.body.loading')}</div>
           {:else if targetError}
             <div class="error">⚠ {targetError}</div>
           {:else if step.target.kind === 'class' && classEntry && classMeta}
@@ -731,7 +734,7 @@
           <article class="narration" bind:this={narrationEl} on:click={onNarrationClick} role="presentation">
             <header class="narration-head">
               <span class="narration-icon">📖</span>
-              <span class="narration-label">Erklärung der KI</span>
+              <span class="narration-label">{$t('tour.narration.label')}</span>
             </header>
             <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
             <div class="narration-body" on:click={onNarrationClick} style="font-size: {detailZoom}em;">
@@ -744,20 +747,20 @@
           {#if feedbackPrompt}
             <div class="feedback-form">
               <label for="wt-feedback-input" class="feedback-label">
-                Was soll die KI genauer beschreiben? (optional)
+                {$t('tour.feedback.label')}
               </label>
               <textarea
                 id="wt-feedback-input"
                 bind:value={feedbackText}
-                placeholder={'z.B. „Die Highlight-Zeilen 12–18 sind mir noch unklar."'}
+                placeholder={$t('tour.feedback.placeholder')}
                 rows="3"
               ></textarea>
               <div class="feedback-actions">
                 <button class="btn btn-secondary" on:click={cancelMore} disabled={feedbackSubmitting}>
-                  Abbrechen
+                  {$t('tour.feedback.cancel')}
                 </button>
                 <button class="btn btn-primary" on:click={submitMore} disabled={feedbackSubmitting}>
-                  {feedbackSubmitting ? '…' : 'Senden'}
+                  {feedbackSubmitting ? '…' : $t('tour.feedback.send')}
                 </button>
               </div>
             </div>
@@ -767,14 +770,14 @@
               on:click={understood}
               disabled={feedbackSubmitting || bodyLoading}
             >
-              {feedbackSubmitting ? '…' : isLastStep ? '✓ Verstanden — Tour beenden' : '✓ Verstanden'}
+              {feedbackSubmitting ? '…' : (isLastStep ? $t('tour.button.understoodLast') : $t('tour.button.understood'))}
             </button>
             <button
               class="btn btn-secondary big"
               on:click={askMore}
               disabled={feedbackSubmitting || bodyLoading}
             >
-              ? Bitte genauer beschreiben
+              {$t('tour.button.askMore')}
             </button>
           {/if}
         </footer>
