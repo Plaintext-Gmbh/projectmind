@@ -31,6 +31,9 @@
   let bodyLoading = true;
   let lastLoadedId: string | null = null;
   let lastNonce = -1;
+  /// DOM ref to the code/diff/file viewer container — used so links in the
+  /// narration can scroll to specific source lines via [text](#L42) anchors.
+  let targetEl: HTMLDivElement | null = null;
 
   // Per-target loaded data, recomputed when the active step changes.
   let classEntry: ClassEntry | null = null;
@@ -273,6 +276,37 @@
     ? marked.parse(step.narration, { gfm: true, breaks: false })
     : '';
 
+  /// Intercept clicks on links in the narration. Anchors of the form
+  /// `#L42` or `#L42-58` jump to the matching `data-line-no` element inside
+  /// the code/file/diff viewer above and pulse it briefly. Anything else
+  /// falls through to the browser default.
+  function onNarrationClick(ev: MouseEvent) {
+    const a = (ev.target as HTMLElement | null)?.closest?.('a');
+    if (!a) return;
+    const href = a.getAttribute('href') ?? '';
+    const m = /^#L(\d+)(?:[-–](\d+))?$/.exec(href);
+    if (!m) return;
+    ev.preventDefault();
+    const from = Number(m[1]);
+    const to = m[2] ? Number(m[2]) : from;
+    scrollTargetToLine(from, to);
+  }
+
+  function scrollTargetToLine(from: number, to: number) {
+    if (!targetEl) return;
+    const root = targetEl;
+    const first = root.querySelector<HTMLElement>(`[data-line-no="${from}"]`);
+    if (!first) return;
+    first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Pulse the whole requested range so multi-line refs are obvious.
+    for (let n = from; n <= to; n++) {
+      const el = root.querySelector<HTMLElement>(`[data-line-no="${n}"]`);
+      if (!el) continue;
+      el.classList.add('flash');
+      setTimeout(() => el.classList.remove('flash'), 1400);
+    }
+  }
+
   // Keyboard shortcuts: ←/→ to navigate.
   function onKey(ev: KeyboardEvent) {
     if (feedbackPrompt || waitingForFollowup || tourFinished) return;
@@ -416,7 +450,7 @@
           {/if}
         </header>
 
-        <div class="target">
+        <div class="target" bind:this={targetEl}>
           {#if targetLoading}
             <div class="loading">Lade Inhalt…</div>
           {:else if targetError}
@@ -433,6 +467,7 @@
           {:else if step.target.kind === 'file'}
             <pre class="plain"><code>{#each plainSource.split('\n') as line, i (i)}{@const lineNo = i + 1}<span
               class="line"
+              data-line-no={lineNo}
               class:wt-highlight={plainHighlight.some((r) => lineNo >= r.from && lineNo <= r.to)}
             ><span class="lineno">{lineNo}</span><span class="content">{line}</span>
 </span>{/each}</code></pre>
@@ -447,7 +482,8 @@
               <span class="narration-icon">📖</span>
               <span class="narration-label">Erklärung der KI</span>
             </header>
-            <div class="narration-body">{@html narrationHtml}</div>
+            <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
+            <div class="narration-body" on:click={onNarrationClick}>{@html narrationHtml}</div>
           </article>
         {/if}
 
@@ -801,6 +837,11 @@
   .target .plain .line {
     display: block;
     padding: 0 12px;
+    scroll-margin-top: 12px;
+  }
+  .target :global(.line.flash) {
+    background: color-mix(in srgb, var(--accent-2) 35%, transparent);
+    transition: background 1s ease;
   }
   .target .plain .lineno {
     display: inline-block;

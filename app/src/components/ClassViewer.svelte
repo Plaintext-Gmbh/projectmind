@@ -81,6 +81,7 @@
 
   <pre class="source"><code>{#each lines as line, i (i)}{@const lineNo = i + 1}<span
         class="line"
+        data-line-no={lineNo}
         class:highlight={highlightRanges.length === 0 &&
           lineNo >= defaultFrom &&
           lineNo <= defaultTo}
@@ -93,6 +94,10 @@
   .root {
     padding: 16px 20px;
     height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
   }
 
   .header {
@@ -101,6 +106,7 @@
     justify-content: space-between;
     gap: 16px;
     margin-bottom: 12px;
+    flex-shrink: 0;
   }
 
   h2 {
@@ -138,12 +144,20 @@
     font-size: 12.5px;
     line-height: 1.55;
     margin: 0;
-    overflow-x: auto;
+    overflow: auto;
+    flex: 1;
+    min-height: 0;
   }
 
   .line {
     display: block;
     padding: 0 12px;
+    scroll-margin-top: 12px;
+  }
+
+  .line.flash {
+    background: color-mix(in srgb, var(--accent-2) 35%, transparent);
+    transition: background 1s ease;
   }
 
   .line.highlight {
