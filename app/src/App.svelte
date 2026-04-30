@@ -37,18 +37,29 @@
     setBrowserToken,
   } from './lib/api';
   import type { ClassEntry, ModuleEntry, ModuleFile, UiState } from './lib/api';
+  // Eagerly imported — small, almost-always rendered:
   import ClassViewer from './components/ClassViewer.svelte';
-  import DiagramView from './components/DiagramView.svelte';
-  import DiffView from './components/DiffView.svelte';
-  import FileView from './components/FileView.svelte';
-  import HtmlIndex from './components/HtmlIndex.svelte';
-  import ImageView from './components/ImageView.svelte';
-  import MarkdownIndex from './components/MarkdownIndex.svelte';
   import ModuleSidebar from './components/ModuleSidebar.svelte';
+  import ImageView from './components/ImageView.svelte';
   import PdfView from './components/PdfView.svelte';
-  import WalkthroughView from './components/WalkthroughView.svelte';
+  import DiffView from './components/DiffView.svelte';
+  // Heavy components — pulled in dynamically the first time the user
+  // visits the matching tab. mermaid (~640 KB) and marked (~40 KB) ride
+  // along with DiagramView / FileView / WalkthroughView etc., so keeping
+  // those imports lazy keeps the initial bundle under 200 KB.
   import { resizable } from './lib/resizable';
   import { t, currentLang, setLang } from './lib/i18n';
+  import { loadComponent } from './lib/lazyLoad';
+  const lazyDiagramView = () =>
+    loadComponent('DiagramView', () => import('./components/DiagramView.svelte'));
+  const lazyFileView = () =>
+    loadComponent('FileView', () => import('./components/FileView.svelte'));
+  const lazyHtmlIndex = () =>
+    loadComponent('HtmlIndex', () => import('./components/HtmlIndex.svelte'));
+  const lazyMarkdownIndex = () =>
+    loadComponent('MarkdownIndex', () => import('./components/MarkdownIndex.svelte'));
+  const lazyWalkthroughView = () =>
+    loadComponent('WalkthroughView', () => import('./components/WalkthroughView.svelte'));
 
   type Theme = 'dark' | 'light';
   const BROWSER_STATE_POLL_MS = 500;
@@ -738,9 +749,17 @@
         title="Drag to resize · double-click to reset"
       ></div>
       {#if $viewMode === 'md'}
-        <div class="files-fullspan"><MarkdownIndex /></div>
+        <div class="files-fullspan">
+          {#await lazyMarkdownIndex() then mod}
+            <svelte:component this={mod.default} />
+          {/await}
+        </div>
       {:else if $viewMode === 'html'}
-        <div class="files-fullspan"><HtmlIndex /></div>
+        <div class="files-fullspan">
+          {#await lazyHtmlIndex() then mod}
+            <svelte:component this={mod.default} />
+          {/await}
+        </div>
       {:else}
         <aside class="sidebar">
           {#if $packageFilter !== null}
@@ -861,11 +880,14 @@
           {:else if $viewMode === 'image' && $fileView}
             <ImageView path={$fileView.path} />
           {:else if $viewMode === 'file' && $fileView}
-            <FileView
-              path={$fileView.path}
-              anchor={$fileView.anchor}
-              nonce={$fileView.nonce}
-            />
+            {#await lazyFileView() then mod}
+              <svelte:component
+                this={mod.default}
+                path={$fileView.path}
+                anchor={$fileView.anchor}
+                nonce={$fileView.nonce}
+              />
+            {/await}
           {:else if $selectedClass}
             <ClassViewer
               klass={$selectedClass}
@@ -888,14 +910,19 @@
         {/each}
         <span class="diagram-hint">{$t('diagram.hint')}</span>
       </div>
-      <DiagramView kind={diagramKind} folderLayout={folderMapLayout} />
+      {#await lazyDiagramView() then mod}
+        <svelte:component this={mod.default} kind={diagramKind} folderLayout={folderMapLayout} />
+      {/await}
     </section>
   {:else if $viewMode === 'walkthrough' && $walkthroughCursor}
-    <WalkthroughView
-      cursorId={$walkthroughCursor.id}
-      cursorStep={$walkthroughCursor.step}
-      nonce={$walkthroughCursor.nonce}
-    />
+    {#await lazyWalkthroughView() then mod}
+      <svelte:component
+        this={mod.default}
+        cursorId={$walkthroughCursor.id}
+        cursorStep={$walkthroughCursor.step}
+        nonce={$walkthroughCursor.nonce}
+      />
+    {/await}
   {:else if $viewMode === 'diff' && $diffViewRef}
     <DiffView reference={$diffViewRef.reference} to={$diffViewRef.to} />
   {:else}
