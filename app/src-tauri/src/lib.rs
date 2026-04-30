@@ -72,6 +72,11 @@ pub struct RepoSummary {
     /// Total HTML/XHTML/JSP/template files plus extracted snippets. The GUI
     /// hides the HTML tab when this is zero.
     pub html_count: usize,
+    /// Diagram kinds available for the active plugin set + repo content.
+    /// The GUI iterates this to render Diagram-tab buttons dynamically
+    /// instead of hard-coding the bean-graph / package-tree / folder-map
+    /// triple.
+    pub available_diagrams: Vec<String>,
 }
 
 /// One class entry exposed to the UI.
@@ -115,6 +120,7 @@ fn open_repo(path: String, state: State<'_, Arc<AppState>>) -> Result<RepoSummar
     let markdown_count = files::list_markdown_files(&repo.root).len();
     let html_count =
         html::list_html_files(&repo.root).len() + html::find_html_snippets(&repo.root).len();
+    let available_diagrams = state.engine.available_diagrams(&repo);
     let summary = RepoSummary {
         root: repo.root.clone(),
         modules: repo.modules.len(),
@@ -123,6 +129,7 @@ fn open_repo(path: String, state: State<'_, Arc<AppState>>) -> Result<RepoSummar
         framework_plugins: state.engine.framework_ids(),
         markdown_count,
         html_count,
+        available_diagrams,
     };
     let root = repo.root.clone();
     *state.repo.write() = Some(repo);

@@ -569,6 +569,9 @@ pub struct RepoSummary {
     pub markdown_count: usize,
     /// HTML file/snippet count.
     pub html_count: usize,
+    /// Diagram kinds available for this repo + plugin set. The browser UI
+    /// uses this to render Diagram-tab buttons dynamically.
+    pub available_diagrams: Vec<String>,
 }
 
 /// One class entry exposed to the browser UI.
@@ -626,6 +629,7 @@ fn open_repo_locked(state: &mut HostState, path: &Path) -> anyhow::Result<RepoSu
     let markdown_count = files::list_markdown_files(&repo.root).len();
     let html_count =
         html::list_html_files(&repo.root).len() + html::find_html_snippets(&repo.root).len();
+    let available_diagrams = state.engine.available_diagrams(&repo);
     let summary = RepoSummary {
         root: repo.root.clone(),
         modules: repo.modules.len(),
@@ -634,6 +638,7 @@ fn open_repo_locked(state: &mut HostState, path: &Path) -> anyhow::Result<RepoSu
         framework_plugins: state.engine.framework_ids(),
         markdown_count,
         html_count,
+        available_diagrams,
     };
     state.repo_root = Some(repo.root.clone());
     state::write(UiState {

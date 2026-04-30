@@ -115,8 +115,21 @@
   // Whenever selectedClass changes (from sidebar click *or* a diagram drilldown)
   // load the source for the right-hand viewer.
   let lastLoadedFqn: string | null = null;
-  $: if ($repo?.classes === 0 && (diagramKind === 'bean-graph' || diagramKind === 'package-tree')) {
-    diagramKind = 'folder-map';
+  // If the active diagram kind isn't in the new repo's available_diagrams
+  // (e.g. switching from a Java repo to a docs-only repo would orphan the
+  // bean-graph), fall back to the first available kind. folder-map is
+  // always present so this never fails.
+  $: if ($repo && !$repo.available_diagrams.includes(diagramKind)) {
+    diagramKind = ($repo.available_diagrams[0] ?? 'folder-map') as typeof diagramKind;
+  }
+
+  function diagramLabel(kind: string): string {
+    switch (kind) {
+      case 'bean-graph': return $t('diagram.beanGraph');
+      case 'package-tree': return $t('diagram.packageTree');
+      case 'folder-map': return $t('diagram.folderMap');
+      default: return kind; // unknown plugin-contributed diagram — show id
+    }
   }
   $: void loadSourceFor($selectedClass);
 
@@ -868,17 +881,11 @@
   {:else if $viewMode === 'diagram'}
     <section class="diagram-view">
       <div class="diagram-tabs">
-        {#if $repo.classes > 0}
-          <button class:active={diagramKind === 'bean-graph'} on:click={() => (diagramKind = 'bean-graph')}>
-            {$t('diagram.beanGraph')}
+        {#each $repo.available_diagrams as d (d)}
+          <button class:active={diagramKind === d} on:click={() => (diagramKind = d as typeof diagramKind)}>
+            {diagramLabel(d)}
           </button>
-          <button class:active={diagramKind === 'package-tree'} on:click={() => (diagramKind = 'package-tree')}>
-            {$t('diagram.packageTree')}
-          </button>
-        {/if}
-        <button class:active={diagramKind === 'folder-map'} on:click={() => (diagramKind = 'folder-map')}>
-          {$t('diagram.folderMap')}
-        </button>
+        {/each}
         <span class="diagram-hint">{$t('diagram.hint')}</span>
       </div>
       <DiagramView kind={diagramKind} folderLayout={folderMapLayout} />

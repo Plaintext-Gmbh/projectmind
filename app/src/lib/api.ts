@@ -87,6 +87,10 @@ export interface RepoSummary {
   framework_plugins: string[];
   markdown_count: number;
   html_count: number;
+  /// Diagram kinds available for this repo + plugin set (e.g. "bean-graph",
+  /// "package-tree", "folder-map"). Returned by the backend so the UI can
+  /// render the Diagram-tab buttons dynamically.
+  available_diagrams: string[];
 }
 
 export interface ChangedFile {
