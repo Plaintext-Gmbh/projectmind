@@ -163,8 +163,8 @@ cmd_build() {
 
 cmd_mcp_release() {
     echo "→ release-build MCP server"
-    cargo build --release --bin plaintext-ide-mcp
-    echo "✓ binary at target/release/plaintext-ide-mcp"
+    cargo build --release --bin projectmind-mcp
+    echo "✓ binary at target/release/projectmind-mcp"
 }
 
 cmd_ci() {
