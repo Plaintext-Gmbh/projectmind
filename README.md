@@ -15,6 +15,31 @@ that speaks the **Model Context Protocol (MCP)**.
 
 > **Status:** Phase 1 MVP — the **MCP server** and the **Tauri UI** both work. Java + Rust language plugins, Spring + Lombok framework recognisers, Mermaid bean graph + package tree + folder map, Markdown browser, HTML browser (renders `.html` / `.xhtml` / `.jsp` files and embedded HTML snippets in a sandboxed iframe), walkthrough mode and bidirectional MCP sync between LLM and GUI.
 
+## Quickstart
+
+Install the desktop app + MCP server with one line. The script picks the
+right pre-built bundle for your OS / arch, no build toolchain required.
+
+**macOS / Linux:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Plaintext-Gmbh/projectmind/master/scripts/install.sh | sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/Plaintext-Gmbh/projectmind/master/scripts/install.ps1 | iex
+```
+
+The desktop app lands in `/Applications` (macOS), `~/.local/share/projectmind`
+(Linux), or `%LOCALAPPDATA%\Programs\ProjectMind` (Windows). The MCP server
+binary is installed alongside on your `PATH` so any LLM CLI can launch it.
+
+Re-running the script upgrades to the newest release. Pin a specific version
+with `PM_VERSION=v1.2.3 …`. Skip components with `PM_NO_APP=1` or
+`PM_NO_MCP=1` (Bash) / `$env:PM_NO_APP="1"` (PowerShell).
+
 ## Why
 
 Modern AI-assisted development with CLI agents is great — until you want to *see* what just changed, *visualise* how the architecture is evolving, or *drill into* the structure without firing up a heavy IDE.

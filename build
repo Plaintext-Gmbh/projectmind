@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local build & release driver for plaintext-ide.
+# Local build & release driver for projectmind.
 #
 # This is a Rust + Tauri project (not Java/Maven), so the deploy-to-NAS half of
 # the plaintext-scripts numeric DSL doesn't apply. The numbers we DO support
@@ -11,13 +11,19 @@
 #   ./build 3          MINOR release (x.X.0): bump versions, tag, push
 #   ./build 4          PATCH release (x.x.X): bump versions, tag, push
 #   ./build 7          run all CI checks locally (fmt + clippy + tests)
+#   ./build dist       build local distributable bundles (Mac universal app +
+#                      packaged tar.gz; Linux/Windows: builds whatever the host
+#                      can produce — cross-compile is best left to CI)
 #   ./build mcp        release-build only the MCP server binary
 #   ./build h | help   show this help
 #
 # Numbers 5/6/56 (deploy DEV / PROD on the NAS) are intentionally absent —
-# plaintext-ide is a desktop app released as binaries via GitHub Actions when
+# projectmind is a desktop app released as binaries via GitHub Actions when
 # you push a tag. Pushing a v* tag automatically triggers .github/workflows/
-# release.yml and uploads Mac+Linux artefacts.
+# release.yml and uploads Mac+Linux+Windows artefacts. The `./build dist`
+# command produces the SAME artefacts locally (for the host platform) so a
+# release does not strictly require GitHub Actions — useful when you want to
+# hand someone a build before tagging, or you're offline.
 
 set -euo pipefail
 
@@ -167,6 +173,74 @@ cmd_mcp_release() {
     echo "✓ binary at target/release/projectmind-mcp"
 }
 
+# Detect host OS / arch and emit { target_triple, asset_suffix } so the dist
+# command produces the same artefact names as the GitHub Actions matrix.
+detect_host_target() {
+    local kernel arch
+    kernel="$(uname -s)"
+    arch="$(uname -m)"
+    case "$kernel" in
+        Darwin)
+            case "$arch" in
+                arm64)  echo "aarch64-apple-darwin macos-arm64" ;;
+                x86_64) echo "x86_64-apple-darwin macos-x86_64" ;;
+                *)      echo "unknown-darwin-${arch} macos-${arch}" ;;
+            esac
+            ;;
+        Linux)
+            case "$arch" in
+                x86_64)  echo "x86_64-unknown-linux-gnu linux-x86_64" ;;
+                aarch64) echo "aarch64-unknown-linux-gnu linux-arm64" ;;
+                *)       echo "unknown-linux-${arch} linux-${arch}" ;;
+            esac
+            ;;
+        MINGW*|MSYS*|CYGWIN*)
+            echo "x86_64-pc-windows-msvc windows-x86_64"
+            ;;
+        *)
+            echo "unknown-${kernel,,}-${arch} ${kernel,,}-${arch}"
+            ;;
+    esac
+}
+
+cmd_dist() {
+    local pair host_target asset_suffix
+    pair="$(detect_host_target)"
+    host_target="${pair% *}"
+    asset_suffix="${pair#* }"
+
+    echo "→ host: ${host_target} (asset suffix: ${asset_suffix})"
+
+    # Make sure the toolchain target is installed (rustup is available on
+    # most setups; if not, fall back to default cargo and hope the host
+    # already has it).
+    if command -v rustup >/dev/null 2>&1; then
+        rustup target add "$host_target" >/dev/null 2>&1 || true
+    fi
+
+    # On macOS, prefer a universal binary so a single .dmg works on both
+    # Apple Silicon and Intel. Tauri's `--target universal-apple-darwin`
+    # handles the lipo dance.
+    if [[ "$host_target" == *-apple-darwin ]]; then
+        if rustup target list --installed 2>/dev/null | grep -q "x86_64-apple-darwin"; then
+            host_target="universal-apple-darwin"
+            asset_suffix="macos-universal"
+            echo "→ Apple Silicon + Intel toolchains both present → building universal binary"
+        else
+            echo "→ Intel toolchain not installed (rustup target add x86_64-apple-darwin to enable universal builds)"
+        fi
+    fi
+
+    "$ROOT_DIR/scripts/ci.sh" app-build "$host_target"
+    "$ROOT_DIR/scripts/ci.sh" app-package "$host_target" "$asset_suffix"
+
+    local archive="$ROOT_DIR/projectmind-app-${asset_suffix}.tar.gz"
+    if [[ -f "$archive" ]]; then
+        echo "✓ distributable: $archive"
+        echo "✓ checksum:      ${archive}.sha256"
+    fi
+}
+
 cmd_ci() {
     "$ROOT_DIR/scripts/ci.sh" all
 }
@@ -206,6 +280,7 @@ case "${1:-help}" in
     3)             cmd_release minor ;;
     4)             cmd_release patch ;;
     7)             cmd_ci ;;
+    dist)          cmd_dist ;;
     mcp)           cmd_mcp_release ;;
     h|help|-h|--help) usage ;;
     *)

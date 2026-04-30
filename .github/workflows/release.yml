@@ -11,9 +11,13 @@ on:
 permissions:
   contents: read
 
+# Two parallel build matrices: the standalone MCP server binary (small, useful
+# in isolation for LLM CLIs that just want stdio JSON-RPC) and the Tauri
+# desktop app (a full bundle: .dmg / .deb+.AppImage / .msi). Both publish
+# their artefacts to the same GitHub Release at the end.
 jobs:
-  build:
-    name: Build ${{ matrix.target }}
+  mcp:
+    name: MCP server / ${{ matrix.asset_suffix }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -23,16 +27,16 @@ jobs:
         include:
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            artifact_name: projectmind-mcp
             asset_suffix: linux-x86_64
           - os: macos-14
             target: aarch64-apple-darwin
-            artifact_name: projectmind-mcp
             asset_suffix: macos-arm64
           - os: macos-13
             target: x86_64-apple-darwin
-            artifact_name: projectmind-mcp
             asset_suffix: macos-x86_64
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            asset_suffix: windows-x86_64
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -46,23 +50,91 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
 
       - name: Build release MCP binary
+        shell: bash
         run: ./scripts/ci.sh release-build ${{ matrix.target }}
 
       - name: Package
+        shell: bash
         run: ./scripts/ci.sh release-package ${{ matrix.target }} ${{ matrix.asset_suffix }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: ${{ matrix.artifact_name }}-${{ matrix.asset_suffix }}
+          name: projectmind-mcp-${{ matrix.asset_suffix }}
           path: |
-            ${{ matrix.artifact_name }}-${{ matrix.asset_suffix }}.tar.gz
-            ${{ matrix.artifact_name }}-${{ matrix.asset_suffix }}.tar.gz.sha256
+            projectmind-mcp-${{ matrix.asset_suffix }}.tar.gz
+            projectmind-mcp-${{ matrix.asset_suffix }}.tar.gz.sha256
+          retention-days: 30
+
+  app:
+    name: Desktop app / ${{ matrix.asset_suffix }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS universal binary covers both Apple Silicon and Intel in
+          # one bundle so we only need one Mac runner.
+          - os: macos-14
+            target: universal-apple-darwin
+            extra_targets: x86_64-apple-darwin
+            asset_suffix: macos-universal
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            asset_suffix: linux-x86_64
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            asset_suffix: windows-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}${{ matrix.extra_targets && format(',{0}', matrix.extra_targets) || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: app-${{ matrix.asset_suffix }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install Linux Tauri build deps
+        if: runner.os == 'Linux'
+        shell: bash
+        run: ./scripts/ci.sh install-deps
+
+      - name: Install npm deps
+        shell: bash
+        working-directory: app
+        run: npm ci || npm install
+
+      - name: Build app bundle
+        shell: bash
+        run: ./scripts/ci.sh app-build ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: ./scripts/ci.sh app-package ${{ matrix.target }} ${{ matrix.asset_suffix }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: projectmind-app-${{ matrix.asset_suffix }}
+          path: |
+            projectmind-app-${{ matrix.asset_suffix }}.tar.gz
+            projectmind-app-${{ matrix.asset_suffix }}.tar.gz.sha256
           retention-days: 30
 
   release:
     name: Publish GitHub release
-    needs: build
+    needs: [mcp, app]
     runs-on: ubuntu-22.04
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
