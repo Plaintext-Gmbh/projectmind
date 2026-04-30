@@ -2,6 +2,7 @@
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
   import { onMount, onDestroy } from 'svelte';
   import { listen } from '@tauri-apps/api/event';
+  import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { get } from 'svelte/store';
   import {
     repo,
@@ -92,6 +93,14 @@
   let unlistenState: (() => void) | null = null;
   let statePoll: ReturnType<typeof setInterval> | null = null;
   let lastSeq = 0;
+  // Drag-and-drop state. `dragOver` toggles the full-window overlay; in
+  // browser mode `browserDropHint` flashes a transient inline notice telling
+  // the user the desktop app supports the gesture but the browser can't see
+  // absolute paths.
+  let dragOver = false;
+  let browserDropHint: string | null = null;
+  let browserDropHintTimer: ReturnType<typeof setTimeout> | null = null;
+  let unlistenDragDrop: (() => void) | null = null;
   /// True while we're applying an MCP-driven state change. Prevents the
   /// resulting load() from re-publishing and triggering an event loop.
   let applyingExternal = false;
@@ -371,6 +380,113 @@
     }
   }
 
+  // ----- Drag-and-drop ------------------------------------------------------
+
+  function dirname(p: string): string {
+    // Strip a trailing slash (so `/foo/bar/` → `/foo/bar` → `/foo`) before
+    // looking for the separator. Works for both POSIX and Windows-style
+    // paths since Tauri returns forward slashes on POSIX and backslashes on
+    // Windows; we honour both.
+    const trimmed = p.replace(/[\\/]+$/, '');
+    const idx = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+    if (idx === -1) return trimmed;
+    if (idx === 0) return trimmed.slice(0, 1); // root: "/"
+    return trimmed.slice(0, idx);
+  }
+
+  function extOf(p: string): string {
+    const base = p.replace(/[\\/]+$/, '');
+    const slash = Math.max(base.lastIndexOf('/'), base.lastIndexOf('\\'));
+    const name = slash === -1 ? base : base.slice(slash + 1);
+    const dot = name.lastIndexOf('.');
+    if (dot <= 0) return '';
+    return name.slice(dot + 1).toLowerCase();
+  }
+
+  function viewModeForExt(ext: string): 'file' | 'pdf' | 'image' | null {
+    if (ext === 'md' || ext === 'markdown' || ext === 'mdx') return 'file';
+    if (ext === 'pdf') return 'pdf';
+    if (ext === 'png' || ext === 'jpg' || ext === 'jpeg' || ext === 'webp' || ext === 'gif') {
+      return 'image';
+    }
+    return null;
+  }
+
+  /// Open the repo for a dropped OS path. If the path is a file, route to
+  /// the matching content view (markdown / pdf / image). For directories or
+  /// unrecognised extensions, leave the default Code-tab view.
+  ///
+  /// `isDirectory` is only known reliably under Tauri (we'd need a backend
+  /// stat for browsers, but browser-mode never reaches this path). On the
+  /// desktop side we infer directory-ness from the absence of an extension —
+  /// good enough for the common drop targets (Finder folders, single files).
+  async function handleDroppedPath(absPath: string, isDirectory: boolean): Promise<void> {
+    const repoPath = isDirectory ? absPath : dirname(absPath);
+    if (!repoPath) {
+      errorMessage.set(`Cannot derive repository directory from: ${absPath}`);
+      return;
+    }
+    followingMcp.set(false);
+    await load(repoPath);
+    if (get(errorMessage)) return; // load() already surfaced a message
+    if (isDirectory) {
+      viewMode.set('classes');
+      return;
+    }
+    const ext = extOf(absPath);
+    const target = viewModeForExt(ext);
+    if (target === null) {
+      // Source files / unknown extensions land on the Code tab.
+      viewMode.set('classes');
+      return;
+    }
+    fileView.update((cur) => ({
+      path: absPath,
+      anchor: null,
+      nonce: (cur?.nonce ?? 0) + 1,
+    }));
+    viewMode.set(target);
+  }
+
+  function flashBrowserDropHint(message: string) {
+    browserDropHint = message;
+    if (browserDropHintTimer) clearTimeout(browserDropHintTimer);
+    browserDropHintTimer = setTimeout(() => {
+      browserDropHint = null;
+      browserDropHintTimer = null;
+    }, 6000);
+  }
+
+  // Browser-mode handlers — registered as DOM listeners on `window`.
+  // We can't read absolute paths in browsers (the File API hides them), so we
+  // intercept the drop, prevent the default navigation, and surface a hint.
+  function onBrowserDragOver(ev: DragEvent) {
+    if (!ev.dataTransfer) return;
+    const types = Array.from(ev.dataTransfer.types ?? []);
+    if (!types.includes('Files')) return;
+    ev.preventDefault();
+    dragOver = true;
+  }
+
+  function onBrowserDragLeave(ev: DragEvent) {
+    // `dragleave` fires on every child node we cross. Only clear the overlay
+    // when the cursor genuinely left the window — relatedTarget is null in
+    // that case in Chromium/WebKit.
+    if (ev.relatedTarget !== null) return;
+    dragOver = false;
+  }
+
+  function onBrowserDrop(ev: DragEvent) {
+    if (!ev.dataTransfer) return;
+    const types = Array.from(ev.dataTransfer.types ?? []);
+    if (!types.includes('Files')) return;
+    ev.preventDefault();
+    dragOver = false;
+    flashBrowserDropHint(
+      "Drag-and-drop opens a repo only in the desktop app — in browser mode, paste the absolute path into 'Open repo'.",
+    );
+  }
+
   onMount(async () => {
     browserMode = !isTauriRuntime();
     if (browserMode && !browserToken()) {
@@ -394,6 +510,26 @@
       unlistenState = await listen<UiState>('state-changed', (ev) => {
         void applyState(ev.payload);
       });
+      // Register Tauri 2 webview-level drag-drop. Reports absolute paths
+      // (which the browser DOM API hides) and fires enter/over/drop/leave.
+      unlistenDragDrop = await getCurrentWebview().onDragDropEvent((event) => {
+        const p = event.payload;
+        if (p.type === 'enter' || p.type === 'over') {
+          dragOver = true;
+        } else if (p.type === 'leave') {
+          dragOver = false;
+        } else if (p.type === 'drop') {
+          dragOver = false;
+          const paths = p.paths ?? [];
+          if (paths.length === 0) return;
+          const first = paths[0];
+          // Heuristic: if the path has no extension, treat it as a directory.
+          // The OS sends absolute paths for both files and folders; on macOS
+          // a folder name without a `.something` suffix is the typical case.
+          const looksLikeDir = extOf(first) === '';
+          void handleDroppedPath(first, looksLikeDir);
+        }
+      });
     } else {
       statePoll = setInterval(() => {
         void currentState()
@@ -405,12 +541,28 @@
             errorMessage.set(String(err));
           });
       }, BROWSER_STATE_POLL_MS);
+      // Browser-mode visual + hint. We can't get absolute paths here, so
+      // the goal is just: prevent the browser's default file-navigation,
+      // mirror the same drag-over visual the desktop app shows, and tell
+      // the user how to actually open a repo.
+      window.addEventListener('dragenter', onBrowserDragOver);
+      window.addEventListener('dragover', onBrowserDragOver);
+      window.addEventListener('dragleave', onBrowserDragLeave);
+      window.addEventListener('drop', onBrowserDrop);
     }
   });
 
   onDestroy(() => {
     unlistenState?.();
+    unlistenDragDrop?.();
     if (statePoll) clearInterval(statePoll);
+    if (browserDropHintTimer) clearTimeout(browserDropHintTimer);
+    if (browserMode) {
+      window.removeEventListener('dragenter', onBrowserDragOver);
+      window.removeEventListener('dragover', onBrowserDragOver);
+      window.removeEventListener('dragleave', onBrowserDragLeave);
+      window.removeEventListener('drop', onBrowserDrop);
+    }
   });
 </script>
 
@@ -521,6 +673,10 @@
 
   {#if $errorMessage}
     <div class="error">⚠ {$errorMessage}</div>
+  {/if}
+
+  {#if browserDropHint}
+    <div class="drop-hint" role="status">{browserDropHint}</div>
   {/if}
 
   {#if browserMode && !browserAuthorized}
@@ -718,6 +874,15 @@
         <p class="hint">No view selected. Pick Code, Diagrams or HTML above, or send an MCP intent.</p>
       </div>
     </section>
+  {/if}
+
+  {#if dragOver}
+    <div class="drop-overlay" aria-hidden="true">
+      <div class="drop-overlay-inner">
+        <div class="drop-overlay-icon">⤓</div>
+        <div class="drop-overlay-text">Drop to open as repository</div>
+      </div>
+    </div>
   {/if}
 </main>
 
@@ -1180,5 +1345,67 @@
     margin-left: auto;
     font-size: 11px;
     color: var(--fg-2);
+  }
+
+  /* ----- Drag-and-drop ---------------------------------------------------- */
+
+  /* Full-window overlay shown while a drag is over the app. `pointer-events:
+     none` keeps the underlying UI clickable when no drag is in progress
+     (the overlay only renders when {#if dragOver}, but keeping it
+     non-interactive is also useful for screen-reader / focus traps). */
+  .drop-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--accent-2) 12%, transparent);
+    border: 3px dashed var(--accent-2);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-2) 50%, transparent);
+    backdrop-filter: blur(2px);
+    animation: drop-overlay-fade 120ms ease-out;
+  }
+
+  @keyframes drop-overlay-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .drop-overlay-inner {
+    text-align: center;
+    padding: 28px 36px;
+    background: color-mix(in srgb, var(--bg-1) 92%, transparent);
+    border: 1px solid var(--accent-2);
+    border-radius: 12px;
+    box-shadow: 0 18px 48px color-mix(in srgb, #000 40%, transparent);
+  }
+
+  .drop-overlay-icon {
+    font-size: 36px;
+    line-height: 1;
+    color: var(--accent-2);
+    margin-bottom: 8px;
+  }
+
+  .drop-overlay-text {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--fg-0);
+  }
+
+  /* Browser-mode hint that flashes after a (futile) drop so the user knows
+     why nothing happened and where to go next. */
+  .drop-hint {
+    background: color-mix(in srgb, var(--accent-2) 18%, var(--bg-1));
+    color: var(--fg-0);
+    padding: 8px 16px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--accent-2);
   }
 </style>
