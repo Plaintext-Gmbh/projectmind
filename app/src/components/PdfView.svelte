@@ -8,25 +8,16 @@
   /// browser-mode token check applies.
   export let path: string;
 
-  // Shift + wheel zoom for the embedded PDF. Same `zoom:` CSS pattern as
-  // HtmlIndex's iframe — the native PDF viewer re-renders crisply at the
-  // scaled size, so it doesn't go pixelated like a transform: scale would.
-  //
-  // Wrinkle: native <embed type="application/pdf"> captures wheel events
-  // inside the plugin process and our window listener never sees them.
-  // We layer a transparent overlay on top that becomes pointer-events:auto
-  // only while Shift is held, intercepting the wheel before the plugin.
+  /// Shift + wheel zoom for the embedded PDF. Same `zoom:` CSS pattern as
+  /// HtmlIndex's iframe — the native PDF viewer re-renders crisply at the
+  /// scaled size, so it doesn't go pixelated like a transform: scale would.
+  ///
+  /// Wrinkle: native <embed type="application/pdf"> captures wheel and
+  /// pointer events inside the plugin process and our window listener never
+  /// sees them. We layer an always-on overlay on top that captures wheel +
+  /// pointer events; pan and zoom both go through the overlay so the gesture
+  /// works regardless of where the cursor sits inside the page.
   const { zoom, action: zoomAction } = createShiftWheelZoom('projectmind.pdfview.zoom');
-  let shiftHeld = false;
-  function onKeyDown(ev: KeyboardEvent) {
-    if (ev.key === 'Shift') shiftHeld = true;
-  }
-  function onKeyUp(ev: KeyboardEvent) {
-    if (ev.key === 'Shift') shiftHeld = false;
-  }
-  function clearShift() {
-    shiftHeld = false;
-  }
 
   let url = '';
   /// Set when `fileAssetUrl` returns an `URL.createObjectURL(...)` blob — we
@@ -37,6 +28,11 @@
   let error: string | null = null;
   let loading = true;
   let loadToken = 0;
+
+  let wrapEl: HTMLDivElement | null = null;
+  let dragging = false;
+  let dragLastX = 0;
+  let dragLastY = 0;
 
   $: if (path) void load(path);
 
@@ -67,18 +63,84 @@
     ownedUrl = null;
   }
 
+  /// Overlay wheel: shift+wheel is handled by the parent zoom action via
+  /// the shared `createShiftWheelZoom` (it preventDefaults inside the same
+  /// element tree). For non-shift wheel events we translate the deltas into
+  /// container scroll, so vertical/horizontal panning works even though the
+  /// underlying <embed> would normally swallow the event.
+  function onOverlayWheel(ev: WheelEvent) {
+    if (ev.shiftKey) return; // zoom action handles this
+    if (!wrapEl) return;
+    if (ev.deltaY === 0 && ev.deltaX === 0) return;
+    ev.preventDefault();
+    wrapEl.scrollTop += ev.deltaY;
+    wrapEl.scrollLeft += ev.deltaX;
+  }
+
+  function onPointerDown(ev: PointerEvent) {
+    if (ev.button !== 0) return; // left button only
+    if (!wrapEl) return;
+    dragging = true;
+    dragLastX = ev.clientX;
+    dragLastY = ev.clientY;
+    (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
+    ev.preventDefault();
+  }
+
+  function onPointerMove(ev: PointerEvent) {
+    if (!dragging || !wrapEl) return;
+    const dx = ev.clientX - dragLastX;
+    const dy = ev.clientY - dragLastY;
+    dragLastX = ev.clientX;
+    dragLastY = ev.clientY;
+    wrapEl.scrollLeft -= dx;
+    wrapEl.scrollTop -= dy;
+  }
+
+  function onPointerUp(ev: PointerEvent) {
+    if (!dragging) return;
+    dragging = false;
+    try {
+      (ev.currentTarget as HTMLElement).releasePointerCapture(ev.pointerId);
+    } catch {
+      // ignore
+    }
+  }
+
+  function onKeyDown(ev: KeyboardEvent) {
+    if (!wrapEl) return;
+    // Ignore when the user is typing somewhere.
+    const tag = (ev.target as HTMLElement | null)?.tagName?.toLowerCase();
+    if (tag === 'input' || tag === 'textarea') return;
+    const step = ev.shiftKey ? 200 : 60;
+    let used = true;
+    switch (ev.key) {
+      case 'ArrowUp':    wrapEl.scrollTop  -= step; break;
+      case 'ArrowDown':  wrapEl.scrollTop  += step; break;
+      case 'ArrowLeft':  wrapEl.scrollLeft -= step; break;
+      case 'ArrowRight': wrapEl.scrollLeft += step; break;
+      case 'PageUp':     wrapEl.scrollTop  -= wrapEl.clientHeight * 0.9; break;
+      case 'PageDown':   wrapEl.scrollTop  += wrapEl.clientHeight * 0.9; break;
+      case 'Home':       wrapEl.scrollTop = 0; break;
+      case 'End':        wrapEl.scrollTop = wrapEl.scrollHeight; break;
+      default: used = false;
+    }
+    if (used) ev.preventDefault();
+  }
+
+  /// Reset zoom to 100% — handy after the PDF gets unwieldy.
+  function resetZoom() {
+    zoom.set(1);
+  }
+
   onMount(() => {
     if (path) void load(path);
     window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    window.addEventListener('blur', clearShift);
   });
 
   onDestroy(() => {
     releaseUrl();
     window.removeEventListener('keydown', onKeyDown);
-    window.removeEventListener('keyup', onKeyUp);
-    window.removeEventListener('blur', clearShift);
   });
 </script>
 
@@ -87,16 +149,28 @@
     <span class="kind">pdf</span>
     <code class="path" title={path}>{path}</code>
     <span class="zoom-readout">{Math.round($zoom * 100)}%</span>
-    <span class="zoom-hint">Shift + scroll to zoom</span>
+    <button class="zoom-reset" type="button" on:click={resetZoom} title="Reset zoom">100%</button>
+    <span class="zoom-hint">Shift+scroll = zoom · drag/arrows = pan</span>
   </header>
   {#if loading}
     <div class="status">Loading…</div>
   {:else if error}
     <div class="error">⚠ {error}</div>
   {:else if url}
-    <div class="pdf-wrap">
-      <embed type="application/pdf" src={url} class="pdf" style="zoom: {$zoom};" />
-      <div class="wheel-catcher" class:active={shiftHeld} aria-hidden="true"></div>
+    <div class="pdf-stack">
+      <div class="pdf-wrap" bind:this={wrapEl}>
+        <embed type="application/pdf" src={url} class="pdf" style="zoom: {$zoom};" />
+      </div>
+      <div
+        class="pan-overlay"
+        class:dragging
+        role="presentation"
+        on:wheel|nonpassive={onOverlayWheel}
+        on:pointerdown={onPointerDown}
+        on:pointermove={onPointerMove}
+        on:pointerup={onPointerUp}
+        on:pointercancel={onPointerUp}
+      ></div>
     </div>
   {/if}
 </section>
@@ -138,23 +212,30 @@
     white-space: nowrap;
   }
 
-  .pdf-wrap {
-    flex: 1;
-    overflow: auto;
-    background: var(--bg-0);
+  .pdf-stack {
     position: relative;
+    flex: 1;
+    overflow: hidden;
   }
 
-  .wheel-catcher {
+  .pdf-wrap {
     position: absolute;
     inset: 0;
-    pointer-events: none;
-    background: transparent;
+    overflow: auto;
+    background: var(--bg-0);
   }
 
-  .wheel-catcher.active {
-    pointer-events: auto;
-    cursor: zoom-in;
+  .pan-overlay {
+    position: absolute;
+    inset: 0;
+    background: transparent;
+    cursor: grab;
+    /* Stays anchored to the visible viewport — does not scroll with the
+       PDF — so wheel/drag gestures are caught wherever the cursor sits. */
+  }
+
+  .pan-overlay.dragging {
+    cursor: grabbing;
   }
 
   .pdf {
@@ -171,6 +252,24 @@
     font-size: 11px;
     color: var(--fg-2);
     margin-left: auto;
+    font-variant-numeric: tabular-nums;
+    min-width: 3.2em;
+    text-align: right;
+  }
+
+  .zoom-reset {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg-1);
+    background: var(--bg-2);
+    border: 1px solid var(--bg-3);
+    border-radius: 3px;
+    padding: 2px 6px;
+    cursor: pointer;
+  }
+  .zoom-reset:hover {
+    background: var(--bg-3);
+    color: var(--fg-0);
   }
 
   .zoom-hint {
