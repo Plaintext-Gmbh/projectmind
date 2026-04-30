@@ -9,11 +9,14 @@
     modules,
     selectedClass,
     stereotypeFilter,
+    fileKindFilter,
     moduleFilter,
     packageFilter,
     errorMessage,
     filteredClasses,
     stereotypeCounts,
+    moduleFilesByModule,
+    filteredModuleFiles,
     viewMode,
     fileView,
     walkthroughCursor,
@@ -101,10 +104,9 @@
   }
   $: void loadSourceFor($selectedClass);
 
-  // PDFs / images that live inside the currently-filtered module. The list is
-  // reloaded whenever the module filter changes — when no module is picked we
-  // show nothing (the list is per-module by design).
-  let moduleFiles: ModuleFile[] = [];
+  // PDFs / images that live inside each module. The map is reloaded whenever
+  // the module filter changes (or new modules arrive); the right-pane list
+  // and per-module counters subscribe to the derived stores in store.ts.
   let moduleFilesLoadedFor: string | null = null;
   // Re-run on either change: a different filter, OR new modules arriving
   // (the "all modules" path needs the populated $modules list).
@@ -118,24 +120,72 @@
     if (moduleFilesLoadedFor === token) return;
     moduleFilesLoadedFor = token;
     try {
-      let items: ModuleFile[];
+      let map: Record<string, ModuleFile[]>;
       if (moduleId) {
-        items = await listModuleFiles(moduleId);
+        const items = await listModuleFiles(moduleId);
+        map = { [moduleId]: items };
       } else if (mods.length === 0) {
-        items = [];
+        map = {};
       } else {
         // "All modules" filter — fan out across every module and merge.
         const lists = await Promise.all(mods.map((m) => listModuleFiles(m.id)));
-        items = lists.flat();
+        map = {};
+        mods.forEach((m, i) => {
+          map[m.id] = lists[i];
+        });
       }
       // Race guard: ignore the result if the user switched while we were fetching.
-      if (moduleFilesLoadedFor === token) moduleFiles = items;
+      if (moduleFilesLoadedFor === token) moduleFilesByModule.set(map);
     } catch (err) {
       // Don't blow up the whole Code tab — non-fatal, just hide the section.
       console.warn('list_module_files failed:', err);
-      if (moduleFilesLoadedFor === token) moduleFiles = [];
+      if (moduleFilesLoadedFor === token) moduleFilesByModule.set({});
     }
   }
+
+  // Discriminated row type for the mixed Code-tab list. Either a parsed
+  // class or a non-source file (PDF / image) sourced from list_module_files.
+  type DisplayItem =
+    | { kind: 'class'; entry: ClassEntry }
+    | { kind: 'file'; entry: ModuleFile };
+
+  // Distinct kinds present in the visible files — drives the filter pills
+  // shown next to the stereotype pills. Sorted for stable UI ordering.
+  $: fileKindsPresent = (() => {
+    const set = new Set<string>();
+    for (const f of $filteredModuleFiles) set.add(f.kind);
+    return Array.from(set).sort();
+  })();
+
+  // Mixed list rendered on the right: classes + files, filtered by the
+  // active filter axis (stereotype, file-kind, module).
+  //
+  //  - fileKindFilter set → only files of that kind, no classes.
+  //  - stereotypeFilter set → only classes with that stereotype, no files.
+  //  - otherwise → classes (already module/package-filtered) + files for
+  //    the same module scope, classes first then files (each block sorted).
+  $: displayItems = (() => {
+    const out: DisplayItem[] = [];
+    if ($fileKindFilter !== null) {
+      const files = $filteredModuleFiles
+        .filter((f) => f.kind === $fileKindFilter)
+        .slice()
+        .sort((a, b) => a.rel.localeCompare(b.rel));
+      for (const f of files) out.push({ kind: 'file', entry: f });
+      return out;
+    }
+    if ($stereotypeFilter !== null) {
+      for (const c of $filteredClasses) out.push({ kind: 'class', entry: c });
+      return out;
+    }
+    // No file/stereotype filter — classes first (filteredClasses already
+    // honours moduleFilter + packageFilter), then module files.
+    const sortedClasses = $filteredClasses.slice().sort((a, b) => a.fqn.localeCompare(b.fqn));
+    for (const c of sortedClasses) out.push({ kind: 'class', entry: c });
+    const sortedFiles = $filteredModuleFiles.slice().sort((a, b) => a.rel.localeCompare(b.rel));
+    for (const f of sortedFiles) out.push({ kind: 'file', entry: f });
+    return out;
+  })();
 
   function openModuleFile(f: ModuleFile) {
     fileView.update((cur) => ({
@@ -218,6 +268,7 @@
       selectedClass.set(null);
       moduleFilter.set(null);
       stereotypeFilter.set(null);
+      fileKindFilter.set(null);
       packageFilter.set(null);
       classSource = '';
     } catch (err) {
@@ -236,7 +287,19 @@
   }
 
   function setFilter(s: string | null) {
+    if (s === null) {
+      // "all" — clear both filter axes.
+      stereotypeFilter.set(null);
+      fileKindFilter.set(null);
+      return;
+    }
+    fileKindFilter.set(null);
     stereotypeFilter.update((cur) => (cur === s ? null : s));
+  }
+
+  function setKindFilter(k: string) {
+    stereotypeFilter.set(null);
+    fileKindFilter.update((cur) => (cur === k ? null : k));
   }
 
   // ----- MCP↔GUI sync: listen for state changes, apply intents -----------
@@ -517,8 +580,12 @@
           </div>
         {/if}
         <div class="filter">
-          <button class="chip" class:active={$stereotypeFilter === null} on:click={() => setFilter(null)}>
-            all <span class="count">{$filteredClasses.length}</span>
+          <button
+            class="chip"
+            class:active={$stereotypeFilter === null && $fileKindFilter === null}
+            on:click={() => setFilter(null)}
+          >
+            all <span class="count">{displayItems.length}</span>
           </button>
           {#each Object.entries($stereotypeCounts) as [name, count]}
             <button
@@ -529,55 +596,58 @@
               {name} <span class="count">{count}</span>
             </button>
           {/each}
+          {#each fileKindsPresent as kind (kind)}
+            <button
+              class="chip kind"
+              class:active={$fileKindFilter === kind}
+              on:click={() => setKindFilter(kind)}
+            >
+              {kind} <span class="count">{$filteredModuleFiles.filter((f) => f.kind === kind).length}</span>
+            </button>
+          {/each}
         </div>
-        <ul class="class-list" role="listbox" aria-label="Classes">
-          {#each $filteredClasses as c (`${c.module}::${c.fqn}`)}
-            <li role="option" aria-selected={$selectedClass?.fqn === c.fqn}>
-              <button
-                type="button"
-                class="class-row"
-                class:selected={$selectedClass?.fqn === c.fqn}
-                on:click={() => handleSelect(c)}
+        <ul class="class-list" role="listbox" aria-label="Classes and files">
+          {#each displayItems as item (item.kind === 'class' ? `class::${item.entry.module}::${item.entry.fqn}` : `file::${item.entry.abs}`)}
+            {#if item.kind === 'class'}
+              <li role="option" aria-selected={$selectedClass?.fqn === item.entry.fqn}>
+                <button
+                  type="button"
+                  class="class-row"
+                  class:selected={$selectedClass?.fqn === item.entry.fqn}
+                  on:click={() => handleSelect(item.entry)}
+                >
+                  <span class="class-name">{item.entry.name}</span>
+                  <span class="class-fqn">{item.entry.fqn}</span>
+                  <span class="stereotypes">
+                    {#each item.entry.stereotypes as s}
+                      <span class="badge {s}">{s}</span>
+                    {/each}
+                  </span>
+                </button>
+              </li>
+            {:else}
+              <li
+                role="option"
+                aria-selected={($viewMode === 'pdf' || $viewMode === 'image') &&
+                  $fileView?.path === item.entry.abs}
               >
-                <span class="class-name">{c.name}</span>
-                <span class="class-fqn">{c.fqn}</span>
-                <span class="stereotypes">
-                  {#each c.stereotypes as s}
-                    <span class="badge {s}">{s}</span>
-                  {/each}
-                </span>
-              </button>
-            </li>
+                <button
+                  type="button"
+                  class="class-row file-row"
+                  class:selected={($viewMode === 'pdf' || $viewMode === 'image') &&
+                    $fileView?.path === item.entry.abs}
+                  on:click={() => openModuleFile(item.entry)}
+                  title={item.entry.abs}
+                >
+                  <span class="class-name file-name">{item.entry.rel}</span>
+                  <span class="stereotypes">
+                    <span class="badge file-kind">{item.entry.kind}</span>
+                  </span>
+                </button>
+              </li>
+            {/if}
           {/each}
         </ul>
-        {#if moduleFiles.length > 0}
-          <div class="files-section">
-            <div class="files-heading">
-              Dateien <span class="files-count">{moduleFiles.length}</span>
-            </div>
-            <ul class="file-list" role="listbox" aria-label="Module files">
-              {#each moduleFiles as f (f.abs)}
-                <li
-                  role="option"
-                  aria-selected={($viewMode === 'pdf' || $viewMode === 'image') &&
-                    $fileView?.path === f.abs}
-                >
-                  <button
-                    type="button"
-                    class="file-row"
-                    class:selected={($viewMode === 'pdf' || $viewMode === 'image') &&
-                      $fileView?.path === f.abs}
-                    on:click={() => openModuleFile(f)}
-                    title={f.abs}
-                  >
-                    <span class="file-name">{f.rel}</span>
-                    <span class="file-kind">{f.kind}</span>
-                  </button>
-                </li>
-              {/each}
-            </ul>
-          </div>
-        {/if}
       </aside>
       <div
         class="resizer"
@@ -1043,102 +1113,36 @@
     margin-top: 2px;
   }
 
-  .files-section {
-    border-top: 1px solid var(--bg-3);
-    background: var(--bg-1);
-    flex-shrink: 0;
-    max-height: 40%;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .files-heading {
-    padding: 6px 12px;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--fg-2);
-    font-weight: 600;
-    background: var(--bg-2);
-    border-bottom: 1px solid var(--bg-3);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .files-count {
-    color: var(--fg-2);
-    font-family: var(--mono);
-    font-size: 11px;
-    font-weight: 400;
-    background: var(--bg-1);
-    border-radius: 10px;
-    padding: 1px 6px;
-  }
-
-  .file-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    overflow-y: auto;
-    flex: 1;
-  }
-
-  .file-list li {
-    border-bottom: 1px solid var(--bg-2);
-  }
-
-  .file-row {
-    width: 100%;
-    padding: 6px 12px;
-    background: transparent;
-    border: 0;
-    border-left: 3px solid transparent;
-    color: inherit;
-    text-align: left;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 6px;
-    font: inherit;
-  }
-
-  .file-row:hover {
-    background: var(--bg-2);
-  }
-
-  .file-row:focus-visible {
-    outline: 2px solid var(--accent-2);
-    outline-offset: -2px;
-  }
-
-  .file-row.selected {
-    background: color-mix(in srgb, var(--accent-2) 18%, var(--bg-1));
-    border-left-color: var(--accent-2);
-  }
-
-  .file-name {
+  /* File rows reuse the class-row layout but are visually distinguishable
+     by the monospaced label and the extension badge in the stereotypes
+     slot. The .badge.file-kind variant mirrors the muted-grey look used
+     for unrecognised stereotype names. */
+  .class-row.file-row .class-name.file-name {
     font-family: var(--mono);
     font-size: 12px;
+    font-weight: 500;
     color: var(--fg-1);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    flex: 1;
   }
 
-  .file-kind {
-    font-size: 10px;
+  .badge.file-kind {
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    padding: 1px 6px;
     background: var(--bg-2);
-    border-radius: 3px;
     color: var(--fg-2);
     font-family: var(--mono);
-    flex-shrink: 0;
+  }
+
+  /* File-kind filter pill sits next to the stereotype chips. Distinct
+     muted background so it reads as "non-stereotype" without competing
+     with the coloured stereotype chips. */
+  .chip.kind {
+    background: var(--bg-2);
+    color: var(--fg-1);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
 
   .viewer {
