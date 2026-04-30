@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { modules, moduleFilter } from '../lib/store';
+  import { modules, moduleFilter, fileCountByModule, moduleFilesByModule } from '../lib/store';
 
   function setModule(id: string | null) {
     moduleFilter.update((cur) => (cur === id ? null : id));
@@ -9,6 +9,14 @@
     const idx = id.lastIndexOf(':');
     return idx >= 0 ? id.slice(idx + 1) : id;
   }
+
+  // Total non-source files across all modules — used for the "All modules"
+  // badge fallback when the project has no parsed classes.
+  $: totalFiles = Object.values($moduleFilesByModule).reduce(
+    (acc, files) => acc + files.length,
+    0,
+  );
+  $: totalClasses = $modules.reduce((acc, m) => acc + m.classes, 0);
 </script>
 
 <aside>
@@ -21,7 +29,7 @@
       <button on:click={() => setModule(null)}>
         <span class="name">All modules</span>
         <span class="badge total">
-          {$modules.reduce((acc, m) => acc + m.classes, 0)}
+          {totalClasses || totalFiles || 0}
         </span>
       </button>
     </li>
@@ -29,7 +37,7 @@
       <li class:active={$moduleFilter === m.id}>
         <button on:click={() => setModule(m.id)}>
           <span class="name">{shortName(m.id)}</span>
-          <span class="badge">{m.classes}</span>
+          <span class="badge">{m.classes || $fileCountByModule[m.id] || 0}</span>
         </button>
       </li>
     {/each}
