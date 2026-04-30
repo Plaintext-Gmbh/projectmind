@@ -37,6 +37,14 @@ pub trait LanguagePlugin: Send + Sync {
     /// implementation should populate the module's classes; module-level metadata (id, name) is
     /// filled in by the caller.
     fn parse_file(&self, file: &Path, source: &str, module: &mut Module) -> Result<()>;
+
+    /// Diagram kinds this language can contribute. Languages with a hierarchical
+    /// namespace (Java packages, Rust modules, Python dotted modules, …) should
+    /// return `&["package-tree"]`. Default empty so loadable plugins don't have
+    /// to know about specific diagram ids.
+    fn provided_diagrams(&self) -> &[&'static str] {
+        &[]
+    }
 }
 
 /// A plugin that enriches one or more languages with framework-specific information.
@@ -52,6 +60,13 @@ pub trait FrameworkPlugin: Send + Sync {
 
     /// Compute relations across the module's classes (e.g. bean injection edges).
     fn relations(&self, module: &Module) -> Vec<Relation>;
+
+    /// Diagram kinds this framework contributes. `framework-spring` returns
+    /// `&["bean-graph"]`; a future `framework-junit` could return
+    /// `&["test-coverage"]`. Default empty.
+    fn provided_diagrams(&self) -> &[&'static str] {
+        &[]
+    }
 }
 
 /// A plugin that renders a payload into a UI component.

@@ -83,6 +83,10 @@ impl FrameworkPlugin for SpringPlugin {
         }
         out
     }
+
+    fn provided_diagrams(&self) -> &[&'static str] {
+        &["bean-graph"]
+    }
 }
 
 fn attach_stereotype(class: &mut Class) {
