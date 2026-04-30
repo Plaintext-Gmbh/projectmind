@@ -20,11 +20,20 @@
     ClassEntry,
     FeedbackEvent,
   } from '../lib/api';
-  import { errorMessage, repo, viewMode, walkthroughCursor } from '../lib/store';
+  import {
+    errorMessage,
+    repo,
+    viewMode,
+    walkthroughCursor,
+    selectedClass,
+    fileView,
+    diffViewRef,
+  } from '../lib/store';
   import ClassViewer from './ClassViewer.svelte';
   import FileView from './FileView.svelte';
   import DiffView from './DiffView.svelte';
   import { readZoom, writeZoom, clampZoom, wheelDelta } from '../lib/shiftWheelZoom';
+  import { openUrl } from '../lib/openUrl';
 
   export let cursorId: string;
   export let cursorStep: number;
@@ -425,6 +434,89 @@
     else setDetailZoom(detailZoom - ZOOM_STEP);
   }
 
+  /// Click-handler for `<a>` tags inside the narration body. The LLM may
+  /// embed three kinds of links in its markdown:
+  ///
+  ///   - `https://…` / `http://…` / `mailto:…` → open in system browser
+  ///   - `#anchor` → leave the browser default in place (smooth scroll)
+  ///   - `pm:class:com.example.Foo` → open the class viewer
+  ///   - `pm:file:/abs/path/Foo.java` (optionally `#L10-L20`) → open file
+  ///   - `pm:diff:refA..refB` → open diff viewer
+  ///
+  /// Anything else is preventDefaulted (no accidental navigation away from
+  /// the app shell) and logged to the console.
+  function onNarrationClick(ev: MouseEvent) {
+    let node: HTMLElement | null = ev.target as HTMLElement | null;
+    while (node && node !== narrationEl) {
+      if (node.tagName === 'A') break;
+      node = node.parentElement;
+    }
+    if (!node || node.tagName !== 'A') return;
+    const href = (node as HTMLAnchorElement).getAttribute('href') ?? '';
+    if (!href || href.startsWith('#')) return; // let browser handle anchors
+    if (/^(https?:|mailto:)/i.test(href)) {
+      ev.preventDefault();
+      void openUrl(href);
+      return;
+    }
+    if (href.startsWith('pm:')) {
+      ev.preventDefault();
+      handlePmLink(href);
+      return;
+    }
+    // Unknown scheme — refuse to navigate away.
+    ev.preventDefault();
+    console.warn('walkthrough: unsupported link scheme', href);
+  }
+
+  function handlePmLink(href: string) {
+    // Strip "pm:" prefix.
+    const rest = href.slice(3);
+    if (rest.startsWith('class:') || rest.startsWith('class/')) {
+      const fqn = rest.slice(6);
+      if (!fqn) return;
+      // Best-effort: synthesise a ClassEntry stub. The Code tab fills the
+      // rest in via showClass once the user lands there.
+      const stub: ClassEntry = {
+        fqn,
+        name: fqn.split('.').pop() ?? fqn,
+        file: '',
+        stereotypes: [],
+        kind: '',
+        module: '',
+      };
+      selectedClass.set(stub);
+      viewMode.set('classes');
+      return;
+    }
+    if (rest.startsWith('file:') || rest.startsWith('file/')) {
+      const tail = rest.slice(5);
+      const [path, anchor] = splitAnchor(tail);
+      if (!path) return;
+      fileView.set({ path, anchor, nonce: Date.now() });
+      viewMode.set('file');
+      return;
+    }
+    if (rest.startsWith('diff:') || rest.startsWith('diff/')) {
+      const spec = rest.slice(5);
+      const m = spec.match(/^([^.]+)\.\.([^.]+)$/);
+      if (m) {
+        diffViewRef.set({ reference: m[1], to: m[2] });
+      } else {
+        diffViewRef.set({ reference: spec, to: null });
+      }
+      viewMode.set('diff');
+      return;
+    }
+    console.warn('walkthrough: unrecognised pm: link', href);
+  }
+
+  function splitAnchor(s: string): [string, string | null] {
+    const i = s.indexOf('#');
+    if (i === -1) return [s, null];
+    return [s.slice(0, i), s.slice(i + 1) || null];
+  }
+
   function feedbackKey(e: FeedbackEvent): string {
     return `${e.walkthrough_id}:${e.step}:${e.kind}:${e.ts}`;
   }
@@ -636,7 +728,7 @@
         </div>
 
         {#if narrationHtml}
-          <article class="narration" bind:this={narrationEl}>
+          <article class="narration" bind:this={narrationEl} on:click={onNarrationClick} role="presentation">
             <header class="narration-head">
               <span class="narration-icon">📖</span>
               <span class="narration-label">Erklärung der KI</span>
@@ -1109,6 +1201,28 @@
   .narration-body :global(em) { color: var(--fg-1); }
   .narration-body :global(ul),
   .narration-body :global(ol) { padding-left: 1.5em; }
+  .narration-body :global(a) {
+    color: var(--accent-2);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--accent-2) 50%, transparent);
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+  .narration-body :global(a:hover) {
+    text-decoration-color: var(--accent-2);
+  }
+  .narration-body :global(a[href^='pm:']) {
+    /* Internal jump-to-code links — show with a tiny chevron prefix so the
+       user can tell them apart from external URLs. */
+    background: color-mix(in srgb, var(--accent-2) 12%, transparent);
+    padding: 0 4px;
+    border-radius: 3px;
+    text-decoration: none;
+  }
+  .narration-body :global(a[href^='pm:'])::before {
+    content: '↪ ';
+    opacity: 0.75;
+  }
 
   .actions {
     display: flex;

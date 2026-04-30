@@ -35,6 +35,7 @@ use projectmind_lang_java::JavaPlugin;
 use projectmind_lang_rust::RustPlugin;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
+use tauri_plugin_opener::OpenerExt;
 
 /// Application state shared across Tauri command handlers.
 #[derive(Debug)]
@@ -355,6 +356,21 @@ fn end_walkthrough() -> Result<(), String> {
     Ok(())
 }
 
+/// Open an external URL in the user's default browser. The narration
+/// in walk-through tours often contains GitHub / docs links; we route
+/// those through `tauri-plugin-opener` so they don't accidentally
+/// navigate the embedded webview away from the app shell.
+#[tauri::command]
+fn open_external(app: AppHandle, url: String) -> Result<(), String> {
+    let trimmed = url.trim();
+    if !(trimmed.starts_with("http://") || trimmed.starts_with("https://") || trimmed.starts_with("mailto:")) {
+        return Err(format!("refusing to open non-http(s)/mailto url: {trimmed}"));
+    }
+    app.opener()
+        .open_url(trimmed, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 /// Move the active tour's pointer (manual sidebar click). Publishes a
 /// new `UiState` so the LLM can observe where the user navigated to.
 #[tauri::command]
@@ -564,6 +580,7 @@ pub fn run() {
             walkthrough_request_more,
             set_walkthrough_step,
             end_walkthrough,
+            open_external,
         ])
         .setup(|app| {
             spawn_state_watcher(app.handle().clone());
