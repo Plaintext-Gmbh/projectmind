@@ -1,11 +1,17 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { fileAssetUrl } from '../lib/api';
+  import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
 
   /// Absolute filesystem path of the PDF to render. The viewer pulls bytes
   /// through the same `read_file_bytes` plumbing used by images, so the
   /// browser-mode token check applies.
   export let path: string;
+
+  // Shift + wheel zoom for the embedded PDF. Same `zoom:` CSS pattern as
+  // HtmlIndex's iframe — the native PDF viewer re-renders crisply at the
+  // scaled size, so it doesn't go pixelated like a transform: scale would.
+  const { zoom, action: zoomAction } = createShiftWheelZoom('projectmind.pdfview.zoom');
 
   let url = '';
   /// Set when `fileAssetUrl` returns an `URL.createObjectURL(...)` blob — we
@@ -55,17 +61,21 @@
   });
 </script>
 
-<section class="root">
+<section class="root" use:zoomAction>
   <header class="bar">
     <span class="kind">pdf</span>
     <code class="path" title={path}>{path}</code>
+    <span class="zoom-readout">{Math.round($zoom * 100)}%</span>
+    <span class="zoom-hint">Shift + scroll to zoom</span>
   </header>
   {#if loading}
     <div class="status">Loading…</div>
   {:else if error}
     <div class="error">⚠ {error}</div>
   {:else if url}
-    <embed type="application/pdf" src={url} class="pdf" />
+    <div class="pdf-wrap">
+      <embed type="application/pdf" src={url} class="pdf" style="zoom: {$zoom};" />
+    </div>
   {/if}
 </section>
 
@@ -106,12 +116,32 @@
     white-space: nowrap;
   }
 
-  .pdf {
+  .pdf-wrap {
     flex: 1;
+    overflow: auto;
+    background: var(--bg-0);
+  }
+
+  .pdf {
+    display: block;
     width: 100%;
     height: 100%;
+    min-height: 100%;
     border: 0;
     background: var(--bg-0);
+  }
+
+  .zoom-readout {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg-2);
+    margin-left: auto;
+  }
+
+  .zoom-hint {
+    font-size: 11px;
+    color: var(--fg-2);
+    opacity: 0.7;
   }
 
   .status,
