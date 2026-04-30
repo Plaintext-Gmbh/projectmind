@@ -11,7 +11,22 @@
   // Shift + wheel zoom for the embedded PDF. Same `zoom:` CSS pattern as
   // HtmlIndex's iframe — the native PDF viewer re-renders crisply at the
   // scaled size, so it doesn't go pixelated like a transform: scale would.
+  //
+  // Wrinkle: native <embed type="application/pdf"> captures wheel events
+  // inside the plugin process and our window listener never sees them.
+  // We layer a transparent overlay on top that becomes pointer-events:auto
+  // only while Shift is held, intercepting the wheel before the plugin.
   const { zoom, action: zoomAction } = createShiftWheelZoom('projectmind.pdfview.zoom');
+  let shiftHeld = false;
+  function onKeyDown(ev: KeyboardEvent) {
+    if (ev.key === 'Shift') shiftHeld = true;
+  }
+  function onKeyUp(ev: KeyboardEvent) {
+    if (ev.key === 'Shift') shiftHeld = false;
+  }
+  function clearShift() {
+    shiftHeld = false;
+  }
 
   let url = '';
   /// Set when `fileAssetUrl` returns an `URL.createObjectURL(...)` blob — we
@@ -54,10 +69,16 @@
 
   onMount(() => {
     if (path) void load(path);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', clearShift);
   });
 
   onDestroy(() => {
     releaseUrl();
+    window.removeEventListener('keydown', onKeyDown);
+    window.removeEventListener('keyup', onKeyUp);
+    window.removeEventListener('blur', clearShift);
   });
 </script>
 
@@ -75,6 +96,7 @@
   {:else if url}
     <div class="pdf-wrap">
       <embed type="application/pdf" src={url} class="pdf" style="zoom: {$zoom};" />
+      <div class="wheel-catcher" class:active={shiftHeld} aria-hidden="true"></div>
     </div>
   {/if}
 </section>
@@ -120,6 +142,19 @@
     flex: 1;
     overflow: auto;
     background: var(--bg-0);
+    position: relative;
+  }
+
+  .wheel-catcher {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: transparent;
+  }
+
+  .wheel-catcher.active {
+    pointer-events: auto;
+    cursor: zoom-in;
   }
 
   .pdf {
