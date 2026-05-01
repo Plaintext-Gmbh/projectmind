@@ -34,16 +34,18 @@ export default defineConfig(async () => ({
     // Files tab load without paying the mermaid tax.
     rollupOptions: {
       output: {
-        manualChunks: {
-          mermaid: ['mermaid'],
-          marked: ['marked'],
+        manualChunks(id) {
+          if (id.includes('/node_modules/mermaid/')) return 'mermaid';
+          if (id.includes('/node_modules/marked/')) return 'marked';
+          return undefined;
         },
       },
     },
     // Tauri targets a known modern engine (system webview); we don't need
     // ES2015 transpilation.
     target: 'es2022',
-    // Squelch the 500 KB warning — we already split the heavyweights.
-    chunkSizeWarningLimit: 1000,
+    // Squelch the default warning — mermaid is intentionally isolated in its
+    // own lazy chunk.
+    chunkSizeWarningLimit: 3000,
   },
 }));

@@ -6,6 +6,7 @@
   } from '../lib/api';
   import type { HtmlFile, HtmlSnippet } from '../lib/api';
   import { repo } from '../lib/store';
+  import { t } from '../lib/i18n';
   import { resizable } from '../lib/resizable';
   import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
 
@@ -214,28 +215,28 @@
 <section class="root">
   <header class="bar">
     <div class="title-block">
-      <h2>HTML</h2>
+      <h2>{$t('html.title')}</h2>
       {#if $repo}
         <span class="subtitle">
-          {files.length} files · {snippets.length} snippets in {$repo.root}
+          {$t('html.summary', { files: files.length, snippets: snippets.length, root: $repo.root })}
         </span>
       {:else}
-        <span class="subtitle">no repository open</span>
+        <span class="subtitle">{$t('markdown.noRepositoryOpen')}</span>
       {/if}
     </div>
     <div class="tabs">
       <button class:active={tab === 'files'} on:click={() => (tab = 'files')}>
-        Files <span class="count">{filteredFiles.length}</span>
+        {$t('html.files')} <span class="count">{filteredFiles.length}</span>
       </button>
       <button class:active={tab === 'snippets'} on:click={() => (tab = 'snippets')}>
-        Snippets <span class="count">{filteredSnippets.length}</span>
+        {$t('html.snippets')} <span class="count">{filteredSnippets.length}</span>
       </button>
     </div>
     <input
       type="text"
       class="search"
       bind:value={query}
-      placeholder="Search path or content…"
+      placeholder={$t('html.searchPlaceholder')}
       autocomplete="off"
       spellcheck="false"
       disabled={!$repo}
@@ -245,18 +246,18 @@
   <div class="layout">
     <aside class="sidebar">
       {#if !$repo}
-        <div class="empty">Open a repository to see HTML files and snippets.</div>
+        <div class="empty">{$t('html.openRepo')}</div>
       {:else if loading}
-        <div class="empty">Scanning…</div>
+        <div class="empty">{$t('markdown.scanning')}</div>
       {:else if error}
         <div class="error">⚠ {error}</div>
       {:else if tab === 'files'}
         {#if filteredFiles.length === 0}
-          <div class="empty">{files.length === 0 ? 'No HTML/XHTML/JSP files found.' : 'No matches.'}</div>
+          <div class="empty">{files.length === 0 ? $t('html.noFiles') : $t('html.noMatches')}</div>
         {:else}
           {#each groupedFiles as [dir, entries] (dir)}
             <section class="group">
-              <h3 class="group-title">{dir === '·' ? '(root)' : dir}</h3>
+              <h3 class="group-title">{dir === '·' ? $t('markdown.root') : dir}</h3>
               <ul class="list">
                 {#each entries as f (f.abs)}
                   <li>
@@ -280,7 +281,7 @@
           {/each}
         {/if}
       {:else if filteredSnippets.length === 0}
-        <div class="empty">{snippets.length === 0 ? 'No HTML snippets found in source files.' : 'No matches.'}</div>
+        <div class="empty">{snippets.length === 0 ? $t('html.noSnippets') : $t('html.noMatches')}</div>
       {:else}
         {#each groupedSnippets as [rel, entries] (rel)}
           <section class="group">
@@ -294,10 +295,10 @@
                     class:selected={selectedKey === `${s.abs}:${s.line}`}
                     on:click={() => openSnippet(s)}
                   >
-                    <span class="item-title">line {s.line}</span>
+                    <span class="item-title">{$t('html.line', { line: s.line })}</span>
                     <span class="item-meta">
                       <span class="kind">{s.lang}</span>
-                      <span class="size">{s.tag_count} tags</span>
+                      <span class="size">{$t('html.tags', { count: s.tag_count })}</span>
                     </span>
                     <span class="item-preview">{snippetPreview(s.content)}</span>
                   </button>
@@ -318,12 +319,12 @@
         max: 720,
         initial: 360,
       }}
-      title="Drag to resize · double-click to reset"
+      title={$t('app.resizeTitle')}
     ></div>
 
     <main class="viewer" use:zoomAction>
       {#if !selectedFile && !selectedSnippet}
-        <div class="placeholder">Select a file or snippet on the left.</div>
+        <div class="placeholder">{$t('html.select')}</div>
       {:else}
         <div class="viewer-bar">
           <div class="viewer-title">
@@ -332,35 +333,35 @@
               <span class="vt-meta">{selectedFile.kind} · {fmtSize(selectedFile.size)}</span>
             {:else if selectedSnippet}
               <span class="vt-name">{selectedSnippet.rel}:{selectedSnippet.line}</span>
-              <span class="vt-meta">{selectedSnippet.lang} snippet · {selectedSnippet.tag_count} tags</span>
+              <span class="vt-meta">{$t('html.snippetMeta', { lang: selectedSnippet.lang, count: selectedSnippet.tag_count })}</span>
             {/if}
           </div>
           <div class="mode-tabs">
             <button
               class:active={renderMode === 'rendered'}
               disabled={!isRenderable()}
-              title={isRenderable() ? '' : 'This file type is not rendered as HTML'}
+              title={isRenderable() ? '' : $t('html.notRendered')}
               on:click={() => (renderMode = 'rendered')}
             >
-              Rendered
+              {$t('html.rendered')}
             </button>
             <button
               class:active={renderMode === 'source'}
               on:click={() => (renderMode = 'source')}
             >
-              Source
+              {$t('html.source')}
             </button>
           </div>
         </div>
         <div class="viewer-body">
           {#if detailLoading}
-            <div class="empty">Loading…</div>
+            <div class="empty">{$t('html.loading')}</div>
           {:else if detailError}
             <div class="error">⚠ {detailError}</div>
           {:else if renderMode === 'rendered' && isRenderable()}
             <iframe
               class="render-frame"
-              title="HTML preview"
+              title={$t('html.previewTitle')}
               sandbox=""
               src={iframeSrc}
               style="zoom: {$zoom};"

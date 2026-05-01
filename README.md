@@ -209,7 +209,14 @@ The agent will pick the right tool calls from the list above.
 
 ### Pre-built binary
 
-When a `v*.*.*` tag is pushed, GitHub Actions publishes a release with `projectmind-mcp` binaries for **Linux x86_64**, **macOS arm64** and **macOS x86_64** (each as a `.tar.gz` plus a `.sha256`). Until the first tag is cut, build from source as shown above.
+The latest release on the
+[Releases page](https://github.com/Plaintext-Gmbh/projectmind/releases/latest)
+ships `projectmind-mcp` for **Linux x86_64** and **macOS arm64** (each as
+a `.tar.gz` plus a `.sha256`). macOS x86_64 is built when a runner is
+available. New releases are produced by either pushing a `v*.*.*` tag
+or running the **Auto-Release** workflow manually from the Actions tab
+(it bumps the version, opens a PR, merges, tags, and publishes in one
+shot).
 
 ## Tests / development
 

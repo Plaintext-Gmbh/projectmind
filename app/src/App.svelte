@@ -48,7 +48,7 @@
   // along with DiagramView / FileView / WalkthroughView etc., so keeping
   // those imports lazy keeps the initial bundle under 200 KB.
   import { resizable } from './lib/resizable';
-  import { t, currentLang, setLang } from './lib/i18n';
+  import { t, currentLang, languages } from './lib/i18n';
   import { loadComponent } from './lib/lazyLoad';
   const lazyDiagramView = () =>
     loadComponent('DiagramView', () => import('./components/DiagramView.svelte'));
@@ -95,10 +95,6 @@
   // chip refactor) markdown / HTML alike. "Modules" stays as the synonym
   // for folders.
   $: codeTabLabel = $t('nav.files');
-
-  function toggleLang() {
-    setLang($currentLang === 'de' ? 'en' : 'de');
-  }
 
   let diagramKind: 'bean-graph' | 'package-tree' | 'folder-map' = 'bean-graph';
   let folderMapLayout: 'hierarchy' | 'solar' | 'td' = 'solar';
@@ -673,14 +669,16 @@
       <button on:click={pickAndOpen} disabled={loading}>
         {loading ? $t('status.loading') : $t('nav.openRepo')}
       </button>
-      <button
+      <select
         class="lang-toggle"
-        on:click={toggleLang}
+        bind:value={$currentLang}
         title={$t('nav.langToggle')}
         aria-label={$t('nav.langToggle')}
       >
-        {$currentLang === 'de' ? 'EN' : 'DE'}
-      </button>
+        {#each languages as lang (lang.code)}
+          <option value={lang.code}>{lang.label}</option>
+        {/each}
+      </select>
       <button
         class="theme-toggle"
         on:click={toggleTheme}
@@ -1179,13 +1177,6 @@
     margin-top: 32px;
     color: var(--fg-2);
     font-size: 12px;
-  }
-
-  .welcome code {
-    font-family: var(--mono);
-    background: var(--bg-2);
-    padding: 1px 6px;
-    border-radius: 3px;
   }
 
   .layout {

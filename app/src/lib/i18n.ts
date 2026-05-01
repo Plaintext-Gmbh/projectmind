@@ -11,30 +11,45 @@
 ///     // template:   {$t('nav.files')}
 ///     // imperative: setLang('de');
 ///
-/// Translation files live in `src/i18n/{en,de}.json`. A missing key falls
+/// Translation files live in `src/i18n/{en,de,fr,it,es}.json`. A missing key falls
 /// back to English; if the English entry is also missing, the key itself
 /// is returned so dev-time misses are visible rather than silent.
 
 import { derived, writable, type Readable } from 'svelte/store';
 import en from '../i18n/en.json';
 import de from '../i18n/de.json';
+import fr from '../i18n/fr.json';
+import it from '../i18n/it.json';
+import es from '../i18n/es.json';
 
-export type Lang = 'en' | 'de';
+export type Lang = 'en' | 'de' | 'fr' | 'it' | 'es';
 
 const STORAGE_KEY = 'projectmind.lang';
 
-const dictionaries: Record<Lang, Record<string, string>> = { en, de };
+const dictionaries: Record<Lang, Record<string, string>> = { en, de, fr, it, es };
+
+export const languages: Array<{ code: Lang; label: string }> = [
+  { code: 'en', label: 'EN' },
+  { code: 'de', label: 'DE' },
+  { code: 'fr', label: 'FR' },
+  { code: 'it', label: 'IT' },
+  { code: 'es', label: 'ES' },
+];
+
+function isLang(value: string | null): value is Lang {
+  return value === 'en' || value === 'de' || value === 'fr' || value === 'it' || value === 'es';
+}
 
 function detectInitialLang(): Lang {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === 'en' || saved === 'de') return saved;
+    if (isLang(saved)) return saved;
   } catch {
     // localStorage unavailable
   }
   if (typeof navigator !== 'undefined') {
-    const nav = navigator.language?.toLowerCase() ?? '';
-    if (nav.startsWith('de')) return 'de';
+    const nav = navigator.language?.split('-')[0].toLowerCase() ?? '';
+    if (isLang(nav)) return nav;
   }
   return 'en';
 }
