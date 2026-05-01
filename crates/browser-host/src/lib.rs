@@ -953,7 +953,10 @@ mod tests {
         let req = parse_request(Cursor::new(raw)).expect("parse ok");
         assert_eq!(req.method, "GET");
         assert_eq!(req.target, "/api/foo");
-        assert_eq!(req.headers.get("host").map(String::as_str), Some("localhost"));
+        assert_eq!(
+            req.headers.get("host").map(String::as_str),
+            Some("localhost")
+        );
         assert!(req.body.is_empty());
     }
 
@@ -1000,9 +1003,7 @@ mod tests {
     #[test]
     fn parse_request_oversized_content_length_is_too_large() {
         let too_big = MAX_BODY_BYTES + 1;
-        let raw = format!(
-            "POST /api/foo HTTP/1.1\r\nContent-Length: {too_big}\r\n\r\n"
-        );
+        let raw = format!("POST /api/foo HTTP/1.1\r\nContent-Length: {too_big}\r\n\r\n");
         let err = parse_request(Cursor::new(raw.into_bytes())).expect_err("must fail");
         match err {
             ParseError::PayloadTooLarge => {}
@@ -1039,9 +1040,7 @@ mod tests {
     fn parse_request_header_bytes_over_cap_is_too_large() {
         // Build a request whose headers alone exceed MAX_HEADER_BYTES.
         let big_value = "a".repeat(MAX_HEADER_BYTES + 1);
-        let raw = format!(
-            "GET /api/foo HTTP/1.1\r\nX-Big: {big_value}\r\n\r\n"
-        );
+        let raw = format!("GET /api/foo HTTP/1.1\r\nX-Big: {big_value}\r\n\r\n");
         let err = parse_request(Cursor::new(raw.into_bytes())).expect_err("must fail");
         match err {
             ParseError::PayloadTooLarge => {}
@@ -1089,10 +1088,7 @@ mod tests {
     fn split_target_decodes_encoded_params() {
         let (path, query) = split_target("/api/x?path=%2Ftmp%2Ffoo+bar");
         assert_eq!(path, "/api/x");
-        assert_eq!(
-            query.get("path").map(String::as_str),
-            Some("/tmp/foo bar")
-        );
+        assert_eq!(query.get("path").map(String::as_str), Some("/tmp/foo bar"));
     }
 
     #[test]
@@ -1136,7 +1132,10 @@ mod tests {
 
     #[test]
     fn content_type_known_extensions() {
-        assert_eq!(content_type(Path::new("a.html")), "text/html; charset=utf-8");
+        assert_eq!(
+            content_type(Path::new("a.html")),
+            "text/html; charset=utf-8"
+        );
         assert_eq!(
             content_type(Path::new("a.js")),
             "text/javascript; charset=utf-8"
@@ -1150,14 +1149,8 @@ mod tests {
 
     #[test]
     fn content_type_unknown_extension_is_octet_stream() {
-        assert_eq!(
-            content_type(Path::new("a.xyz")),
-            "application/octet-stream"
-        );
-        assert_eq!(
-            content_type(Path::new("noext")),
-            "application/octet-stream"
-        );
+        assert_eq!(content_type(Path::new("a.xyz")), "application/octet-stream");
+        assert_eq!(content_type(Path::new("noext")), "application/octet-stream");
     }
 
     // ----- authorized -----
