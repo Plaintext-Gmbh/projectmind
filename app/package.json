@@ -33,5 +33,10 @@
     "@tauri-apps/plugin-dialog": "^2.0.0",
     "marked": "^18.0.2",
     "mermaid": "^11.0.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "uuid": "^14.0.0"
+    }
   }
 }
