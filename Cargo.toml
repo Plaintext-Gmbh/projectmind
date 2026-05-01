@@ -62,7 +62,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Code parsing
 tree-sitter      = "0.22"
-tree-sitter-java = "0.21"
+tree-sitter-java = "0.23"
 tree-sitter-rust = "0.21"
 
 # Repository
