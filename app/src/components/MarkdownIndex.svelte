@@ -2,11 +2,8 @@
   import { searchMarkdown } from '../lib/api';
   import type { MarkdownFile, MarkdownHit } from '../lib/api';
   import { repo, fileView, viewMode } from '../lib/store';
-<<<<<<< HEAD
   import { t } from '../lib/i18n';
-=======
   import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
->>>>>>> 81a01d1... refactor(ui): consolidate shift+wheel zoom into one helper
 
   let hits: MarkdownHit[] = [];
   let loadedFor: string | null = null;

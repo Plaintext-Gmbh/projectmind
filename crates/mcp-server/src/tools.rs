@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 
 use projectmind_browser_host::{self as browser_host, BrowserHostConfig};
+use projectmind_core::file_access;
 use projectmind_core::state::{self, UiState, ViewIntent};
 use projectmind_core::walkthrough::{self as wt, Walkthrough, WalkthroughStep};
 use projectmind_core::files;
@@ -859,9 +860,18 @@ fn view_file(args: Value) -> DispatchResult {
         )));
     }
     let prev = state::read().ok().flatten().unwrap_or_default();
+    // Scope file viewing to the currently-open repo. Without an open repo we
+    // refuse the call; with one, file_access canonicalises the path and
+    // rejects anything that escapes the repo root.
+    let repo_root = prev
+        .repo_root
+        .clone()
+        .ok_or_else(|| DispatchError::invalid_params("view_file: no repository open"))?;
+    let path = file_access::canonical_file_in_repo(&repo_root, &path)
+        .map_err(|e| DispatchError::invalid_params(format!("view_file: {e}")))?;
     let anchor = args.anchor.clone();
     publish_state(UiState {
-        repo_root: prev.repo_root,
+        repo_root: Some(repo_root),
         view: ViewIntent::File {
             path: path.clone(),
             anchor: anchor.clone(),

@@ -1,10 +1,7 @@
 <script lang="ts">
   import { showDiff } from '../lib/api';
-<<<<<<< HEAD
   import { t } from '../lib/i18n';
-=======
   import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
->>>>>>> 81a01d1... refactor(ui): consolidate shift+wheel zoom into one helper
 
   export let reference: string;
   export let to: string | null = null;

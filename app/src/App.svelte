@@ -48,7 +48,7 @@
   // along with DiagramView / FileView / WalkthroughView etc., so keeping
   // those imports lazy keeps the initial bundle under 200 KB.
   import { resizable } from './lib/resizable';
-  import { t, currentLang, setLang } from './lib/i18n';
+  import { t, language, setLanguage, languages } from './lib/i18n';
   import { loadComponent } from './lib/lazyLoad';
   const lazyDiagramView = () =>
     loadComponent('DiagramView', () => import('./components/DiagramView.svelte'));
@@ -97,7 +97,11 @@
   $: codeTabLabel = $t('nav.files');
 
   function toggleLang() {
-    setLang($currentLang === 'de' ? 'en' : 'de');
+    // Cycle through the configured languages (codex's i18n module ships
+    // five). Wrap to the first one once we hit the end.
+    const codes = languages.map((l) => l.code);
+    const idx = codes.indexOf($language);
+    setLanguage(codes[(idx + 1) % codes.length]);
   }
 
   let diagramKind: 'bean-graph' | 'package-tree' | 'folder-map' = 'bean-graph';
@@ -679,7 +683,7 @@
         title={$t('nav.langToggle')}
         aria-label={$t('nav.langToggle')}
       >
-        {$currentLang === 'de' ? 'EN' : 'DE'}
+        {$language.toUpperCase()}
       </button>
       <button
         class="theme-toggle"
