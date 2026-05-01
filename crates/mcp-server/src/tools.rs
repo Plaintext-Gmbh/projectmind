@@ -400,8 +400,8 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "walkthrough_clear" => walkthrough_clear_handler(),
         "walkthrough_feedback" => walkthrough_feedback(parsed.arguments),
         "open_browser_repo" => open_browser_repo(state, parsed.arguments).await,
-        "browser_status" => browser_status(),
-        "stop_browser" => stop_browser(),
+        "browser_status" => Ok(browser_status()),
+        "stop_browser" => Ok(stop_browser()),
         other => Err(DispatchError::invalid_params(format!(
             "unknown tool: {other}"
         ))),
@@ -1120,15 +1120,15 @@ async fn open_browser_repo(state: &Mutex<ServerState>, args: Value) -> DispatchR
     ))
 }
 
-fn browser_status() -> DispatchResult {
-    Ok(text_result(
+fn browser_status() -> Value {
+    text_result(
         serde_json::to_string_pretty(&browser_host::status()).unwrap_or_else(|_| "null".into()),
-    ))
+    )
 }
 
-fn stop_browser() -> DispatchResult {
+fn stop_browser() -> Value {
     browser_host::stop();
-    Ok(text_result(json!({"ok": true}).to_string()))
+    text_result(json!({"ok": true}).to_string())
 }
 
 fn locate_web_dist() -> anyhow::Result<PathBuf> {

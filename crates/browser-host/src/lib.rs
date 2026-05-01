@@ -10,6 +10,7 @@
 #![warn(missing_docs)]
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::path::{Path, PathBuf};
@@ -886,7 +887,11 @@ fn content_type(path: &Path) -> &'static str {
 fn generate_token() -> String {
     let mut buf = [0_u8; 32];
     rand::thread_rng().fill_bytes(&mut buf);
-    buf.iter().map(|b| format!("{b:02x}")).collect()
+    buf.iter()
+        .fold(String::with_capacity(buf.len() * 2), |mut out, b| {
+            let _ = write!(out, "{b:02x}");
+            out
+        })
 }
 
 fn access_urls(port: u16, token: &str) -> Vec<String> {
