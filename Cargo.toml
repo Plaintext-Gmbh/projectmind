@@ -80,7 +80,7 @@ regex = "1"
 nucleo-matcher = "0.3"
 
 # Filesystem
-dirs   = "5"
+dirs   = "6"
 notify = "8"
 
 # CLI
