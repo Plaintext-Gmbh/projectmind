@@ -141,7 +141,9 @@
     border-radius: var(--radius-md);
     padding: 12px 0;
     font-family: var(--mono);
-    font-size: 12.5px;
+    /* `em`, not `px`, so the .root `font-size: {zoom}em` actually scales
+       the source code on shift+wheel. 0.78em ≈ 12.5px at the 16px base. */
+    font-size: 0.78em;
     line-height: 1.55;
     margin: 0;
     overflow: auto;
