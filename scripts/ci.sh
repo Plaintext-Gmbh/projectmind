@@ -75,7 +75,7 @@ cmd_release_smoke() {
     cmd_release_build
     local bin="target/release/projectmind-mcp"
     local tmp
-    tmp="$(mktemp -t projectmind-smoke)"
+    tmp="$(mktemp -t projectmind-smoke.XXXXXX)"
     trap 'rm -f "$tmp"' RETURN
 
     # Pipe stays open until the server reads EOF and exits cleanly. Using `grep -q` in
