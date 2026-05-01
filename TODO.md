@@ -35,27 +35,22 @@ list** in the Code tab — the Rust function is generic enough to crib.
 
 ## Medium features (half a day each)
 
-### Internationalisation (DE + EN)
-**Effort:** M-L
+### ~~Internationalisation (EN, DE, FR, IT, ES)~~ ✅ done
 
-Make every user-facing string switchable. Plug-in friendly so future
-language packs can be added without code changes.
+Core UI strings are switchable across English, German, French, Italian and
+Spanish via a small Svelte store and JSON dictionaries.
 
-- Pick a tiny i18n lib for Svelte (e.g.
-  [`svelte-i18n`](https://github.com/kaisermann/svelte-i18n)) or roll a
-  100-line store-based translator (we have very few strings).
-- Translation files live in `app/src/i18n/{en,de}.json` — plain key → string.
-- Default language follows `navigator.language`; user override stored in
+- Translation files live in `app/src/i18n/{en,de,fr,it,es}.json`.
+- Default language follows `navigator.language`; user override is stored in
   `localStorage` (`projectmind.lang`).
-- Add a small language switcher to the header next to the theme toggle
-  (`☀ / ☾` already there → add `EN / DE`).
-- Translate: nav labels (Code / Diagrams / MD / HTML / Open repo /
-  Walk-through), the welcome screen, error toasts, viewer placeholders,
-  the HTML/MD search placeholders.
+- The header includes an `EN / DE / FR / IT / ES` switcher next to the theme
+  toggle.
+- Translated: nav labels, the welcome screen, viewer placeholders, diagram
+  controls, module sidebar, diff status, Markdown search/list UI, HTML
+  search/list/preview UI and Markdown file viewer controls.
 - Plug-in story: a third-party plugin should be able to ship its own
   `i18n/<lang>.json` shard that gets merged at load time. Phase 2 work
-  (after dynamic plugin loading lands) — for now, just have core ship the
-  two languages.
+  (after dynamic plugin loading lands).
 
 ## Larger features (1+ day)
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { modules, moduleFilter } from '../lib/store';
+  import { t } from '../lib/i18n';
 
   function setModule(id: string | null) {
     moduleFilter.update((cur) => (cur === id ? null : id));
@@ -13,13 +14,13 @@
 
 <aside>
   <header>
-    <h3>Modules</h3>
+    <h3>{$t('modules.title')}</h3>
     <span class="count">{$modules.length}</span>
   </header>
   <ul>
     <li class:active={$moduleFilter === null}>
       <button on:click={() => setModule(null)}>
-        <span class="name">All modules</span>
+        <span class="name">{$t('modules.all')}</span>
         <span class="badge total">
           {$modules.reduce((acc, m) => acc + m.classes, 0)}
         </span>

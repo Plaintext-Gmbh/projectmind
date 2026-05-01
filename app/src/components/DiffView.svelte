@@ -1,5 +1,6 @@
 <script lang="ts">
   import { showDiff } from '../lib/api';
+  import { t } from '../lib/i18n';
 
   export let reference: string;
   export let to: string | null = null;
@@ -49,17 +50,17 @@
 
 <section class="root">
   <header class="bar">
-    <span class="kind">diff</span>
+    <span class="kind">{$t('diff.kind')}</span>
     <code class="ref">{reference}</code>
     <span class="arrow">→</span>
-    <code class="ref">{to ?? 'working tree'}</code>
+    <code class="ref">{to ?? $t('diff.workingTree')}</code>
   </header>
   {#if loading}
-    <div class="status">Computing diff…</div>
+    <div class="status">{$t('diff.computing')}</div>
   {:else if error}
     <div class="error">⚠ {error}</div>
   {:else if lines.length === 0}
-    <div class="status">No changes.</div>
+    <div class="status">{$t('diff.noChanges')}</div>
   {:else}
     <pre class="diff"><!--
    --><!-- prettier-ignore -->{#each lines as l, i (i)}<span class="line {l.kind}">{l.text || ' '}</span>
