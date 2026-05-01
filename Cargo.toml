@@ -68,7 +68,7 @@ tree-sitter-rust = "0.24"
 # Repository
 ignore = "0.4"
 walkdir = "2"
-git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2"] }
+git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
 
 # XML (for Maven pom.xml parsing)
 quick-xml = "0.39"
