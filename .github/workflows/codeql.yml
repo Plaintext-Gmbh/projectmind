@@ -1,0 +1,76 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    # Weekly re-scan to catch newly discovered patterns in the latest CodeQL
+    # query packs even when the source is quiet.
+    - cron: '37 4 * * 1'
+
+jobs:
+  analyze:
+    name: Analyze ${{ matrix.language }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      security-events: write
+      packages: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+            os: ubuntu-22.04
+          - language: rust
+            os: ubuntu-22.04
+          - language: actions
+            os: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+
+      # Rust + JS/TS need autobuild so CodeQL can extract semantic info.
+      # Frontend autobuild needs the SPA built (same generate_context!()
+      # constraint as the regular CI workflow).
+      - name: Install pnpm
+        if: matrix.language == 'javascript-typescript' || matrix.language == 'rust'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        if: matrix.language == 'javascript-typescript' || matrix.language == 'rust'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Build frontend
+        if: matrix.language == 'javascript-typescript' || matrix.language == 'rust'
+        working-directory: app
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Install Linux Tauri deps
+        if: matrix.language == 'rust'
+        run: ./scripts/ci.sh install-deps
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}
