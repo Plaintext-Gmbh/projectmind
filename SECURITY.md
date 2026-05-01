@@ -2,20 +2,31 @@
 
 ## Supported Versions
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
+ProjectMind is in active early development. We support the latest minor
+release line with security patches; older lines are not backported.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+| 0.2.x   | :white_check_mark: |
+| < 0.2   | :x:                |
 
 ## Reporting a Vulnerability
 
-Use this section to tell people how to report a vulnerability.
+If you believe you've found a security issue in ProjectMind, please **do
+not open a public issue**. Instead, send an email to
+[info@plaintext.ch](mailto:info@plaintext.ch) with:
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+- A description of the issue
+- Steps to reproduce, ideally with a minimal proof of concept
+- The affected ProjectMind version (or commit SHA)
+- Your assessment of impact
+
+We aim to acknowledge reports within **3 working days** and to ship a
+fix or workaround within **30 days** for confirmed issues. If we accept
+the report, we will credit you in the release notes unless you prefer
+to remain anonymous. If we decline (e.g. out of scope, intended
+behaviour, third-party dependency), we will explain why.
+
+GitHub's
+[private vulnerability reporting](https://github.com/Plaintext-Gmbh/projectmind/security/advisories/new)
+is also enabled if you'd rather use that channel.
