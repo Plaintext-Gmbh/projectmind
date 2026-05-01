@@ -9,8 +9,9 @@
 ProjectMind uses AI-ready project maps to explain software architecture,
 classes, modules and relationships in a way humans and coding agents can
 navigate. It's a lightweight, **read-only** architecture browser for source
-code that pairs bidirectionally with LLM-driven coding agents (Claude Code,
-etc.) via the **Model Context Protocol (MCP)**.
+code that pairs bidirectionally with LLM-driven coding agents — Claude Code,
+ChatGPT / OpenAI Codex, Gemini CLI, Cursor, and any other frontier model
+that speaks the **Model Context Protocol (MCP)**.
 
 > **Status:** Phase 1 MVP — the **MCP server** and the **Tauri UI** both work. Java + Rust language plugins, Spring + Lombok framework recognisers, Mermaid bean graph + package tree + folder map, Markdown browser, HTML browser (renders `.html` / `.xhtml` / `.jsp` files and embedded HTML snippets in a sandboxed iframe), walkthrough mode and bidirectional MCP sync between LLM and GUI.
 
@@ -36,7 +37,9 @@ The Tauri shell has four tabs (each disabled until a repository is open):
 
 ## What works today
 
-The Phase 1 MVP ships a **Rust MCP server** (`projectmind-mcp`) that Claude Code can connect to. It implements:
+The Phase 1 MVP ships a **Rust MCP server** (`projectmind-mcp`) that any
+MCP-aware client — Claude Code, ChatGPT, Gemini CLI, Cursor, or your own
+custom agent — can connect to. It implements:
 
 | Tool | What it does |
 |---|---|
@@ -68,7 +71,8 @@ Smoke-tested against real codebases: a 21-module Spring Boot Maven monorepo pars
 
 ## Build the MCP server (Ubuntu / Debian)
 
-This is the path you want for **using `projectmind` from Claude Code on Ubuntu** — no GUI required.
+This is the path you want for **using `projectmind` from any MCP-aware
+agent (Claude Code, ChatGPT, Gemini CLI, …) on Ubuntu** — no GUI required.
 
 The repo ships an installer for the impatient:
 
@@ -146,9 +150,13 @@ Run the app in dev mode (live-reload):
 cd app && pnpm tauri dev
 ```
 
-## Use with Claude Code
+## Use with an MCP-aware agent
 
-Add to your project's `.mcp.json` (or your global Claude Code config):
+ProjectMind speaks the **Model Context Protocol (MCP)**, so any frontier
+LLM client that supports MCP can drive it: Claude Code, ChatGPT desktop,
+Gemini CLI, Cursor, Continue, or your own scripted agent. Add the server
+to whichever config the client uses (e.g. `.mcp.json` for Claude Code,
+`mcp_settings.json` for Cursor):
 
 ```json
 {
@@ -164,7 +172,7 @@ Add to your project's `.mcp.json` (or your global Claude Code config):
 }
 ```
 
-Restart Claude Code. From a session, you can then ask things like:
+Restart the client. From a session, you can then ask things like:
 
 - *"Open the repo at `/home/me/projects/my-spring-app` and tell me how many services and controllers there are per module."*
 - *"Find any class containing `Auszahl` and outline the most relevant one."*
