@@ -12,7 +12,7 @@ navigate. It's a lightweight, **read-only** architecture browser for source
 code that pairs bidirectionally with LLM-driven coding agents (Claude Code,
 etc.) via the **Model Context Protocol (MCP)**.
 
-> **Status:** Early MVP — the **MCP server** and a basic **Tauri UI** both work. Java + Rust language plugins, Spring + Lombok framework recognisers, Mermaid bean graph and package tree, plus an HTML browser that renders `.html` / `.xhtml` / `.jsp` files and embedded HTML snippets in a sandboxed iframe.
+> **Status:** Phase 1 MVP — the **MCP server** and the **Tauri UI** both work. Java + Rust language plugins, Spring + Lombok framework recognisers, Mermaid bean graph + package tree + folder map, Markdown browser, HTML browser (renders `.html` / `.xhtml` / `.jsp` files and embedded HTML snippets in a sandboxed iframe), walkthrough mode and bidirectional MCP sync between LLM and GUI.
 
 ## Why
 
@@ -166,7 +166,7 @@ Add to your project's `.mcp.json` (or your global Claude Code config):
 
 Restart Claude Code. From a session, you can then ask things like:
 
-- *"Open the repo at `/home/me/codeplain/plaintext-app` and tell me how many services and controllers there are per module."*
+- *"Open the repo at `/home/me/projects/my-spring-app` and tell me how many services and controllers there are per module."*
 - *"Find any class containing `Auszahl` and outline the most relevant one."*
 - *"Show me the `UserService` class — highlight lines 80-95."*
 - *"Which files changed since HEAD~5? Group them by module."*
@@ -228,8 +228,8 @@ See [`docs/plan/`](docs/plan/) for the full design notes:
 
 ## Roadmap
 
-- **Phase 1 (in progress):** MCP server with Java + Spring + Lombok plugins, package tree, bean graph, pom dependency graph, diff view, Markdown viewer, core MCP tools.
-- **Phase 2:** Tauri shell with a graphical browser, annotation round-trip, draw.io embed, Confluence MCP bridge.
+- **Phase 1 (done):** MCP server with Java + Spring + Lombok plugins, Rust plugin, package tree, bean graph, folder map, diff view, Markdown + HTML browsers, walkthrough mode, core MCP tools, Tauri shell with bidirectional MCP sync.
+- **Phase 2 (in progress):** Annotation round-trip, draw.io embed, Confluence MCP bridge, dynamic plugin loading from `./plugins/`.
 - **Phase 3:** Plugin marketplace, more languages, JSF / PrimeFaces preview, C4 diagram generator.
 
 ## Contributing
