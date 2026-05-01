@@ -111,7 +111,13 @@ fn parse_pom(path: &Path) -> std::io::Result<ParsedPom> {
                 path_stack.pop();
             }
             Ok(Event::Text(t)) => {
-                let text = t.unescape().unwrap_or_default().to_string();
+                // quick-xml 0.39 removed BytesText::unescape(); decode bytes
+                // to a string and run the entity unescaper from the escape
+                // module. Preserves the prior "decoded + unescaped" behavior.
+                let decoded = t.decode().unwrap_or_default();
+                let text = quick_xml::escape::unescape(&decoded)
+                    .unwrap_or_default()
+                    .to_string();
                 let depth = path_stack.len();
                 let leaf = path_stack.last().map_or("", String::as_str);
                 let parent = if depth >= 2 {
