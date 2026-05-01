@@ -38,6 +38,13 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           queries: security-and-quality
+          # Skip generated / vendored / 3rd-party JS so CodeQL doesn't flag
+          # findings in minified Mermaid bundles or in dist/ build output.
+          config: |
+            paths-ignore:
+              - app/dist/**
+              - app/node_modules/**
+              - target/**
 
       # Rust + JS/TS need autobuild so CodeQL can extract semantic info.
       # Frontend autobuild needs the SPA built (same generate_context!()

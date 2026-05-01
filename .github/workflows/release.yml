@@ -6,10 +6,17 @@ on:
       - 'v*.*.*'
   workflow_dispatch:
 
+# Default to read-only. The release-publish job re-elevates to
+# `contents: write` to upload assets — see below.
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
