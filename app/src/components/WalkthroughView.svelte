@@ -325,12 +325,14 @@
   ///   `<path>#L42` / `<path>#L42-58` → load that file in the target pane and
   ///                                    scroll to the line. Path may be repo-
   ///                                    relative or absolute. `file:` prefix
-  ///                                    is also accepted. http(s):// URLs
-  ///                                    fall through to the browser default.
+  ///                                    is also accepted.
+  ///   `pm:*` links                   → switch ProjectMind views.
+  ///   http(s)/mailto URLs             → open externally via Tauri opener.
   function onNarrationClick(ev: MouseEvent) {
     const a = (ev.target as HTMLElement | null)?.closest?.('a');
     if (!a) return;
     const href = a.getAttribute('href') ?? '';
+    if (!href) return;
 
     const sameFile = /^#L(\d+)(?:[-–](\d+))?$/.exec(href);
     if (sameFile) {
@@ -341,8 +343,19 @@
       return;
     }
 
-    // External URLs → browser default.
-    if (/^[a-z]+:\/\//i.test(href)) return;
+    if (href.startsWith('#')) return;
+
+    if (/^(https?:|mailto:)/i.test(href)) {
+      ev.preventDefault();
+      void openUrl(href);
+      return;
+    }
+
+    if (href.startsWith('pm:')) {
+      ev.preventDefault();
+      handlePmLink(href);
+      return;
+    }
 
     const crossFile = /^([^#]+)#L(\d+)(?:[-–](\d+))?$/.exec(href);
     if (crossFile) {
@@ -351,7 +364,11 @@
       const from = Number(crossFile[2]);
       const to = crossFile[3] ? Number(crossFile[3]) : from;
       void openCrossFile(path, from, to);
+      return;
     }
+
+    ev.preventDefault();
+    console.warn('walkthrough: unsupported link scheme', href);
   }
 
   function scrollTargetToLine(from: number, to: number) {
@@ -433,41 +450,6 @@
     ev.preventDefault();
     if (delta < 0) setDetailZoom(detailZoom + ZOOM_STEP);
     else setDetailZoom(detailZoom - ZOOM_STEP);
-  }
-
-  /// Click-handler for `<a>` tags inside the narration body. The LLM may
-  /// embed three kinds of links in its markdown:
-  ///
-  ///   - `https://…` / `http://…` / `mailto:…` → open in system browser
-  ///   - `#anchor` → leave the browser default in place (smooth scroll)
-  ///   - `pm:class:com.example.Foo` → open the class viewer
-  ///   - `pm:file:/abs/path/Foo.java` (optionally `#L10-L20`) → open file
-  ///   - `pm:diff:refA..refB` → open diff viewer
-  ///
-  /// Anything else is preventDefaulted (no accidental navigation away from
-  /// the app shell) and logged to the console.
-  function onNarrationClick(ev: MouseEvent) {
-    let node: HTMLElement | null = ev.target as HTMLElement | null;
-    while (node && node !== narrationEl) {
-      if (node.tagName === 'A') break;
-      node = node.parentElement;
-    }
-    if (!node || node.tagName !== 'A') return;
-    const href = (node as HTMLAnchorElement).getAttribute('href') ?? '';
-    if (!href || href.startsWith('#')) return; // let browser handle anchors
-    if (/^(https?:|mailto:)/i.test(href)) {
-      ev.preventDefault();
-      void openUrl(href);
-      return;
-    }
-    if (href.startsWith('pm:')) {
-      ev.preventDefault();
-      handlePmLink(href);
-      return;
-    }
-    // Unknown scheme — refuse to navigate away.
-    ev.preventDefault();
-    console.warn('walkthrough: unsupported link scheme', href);
   }
 
   function handlePmLink(href: string) {
@@ -731,7 +713,7 @@
         </div>
 
         {#if narrationHtml}
-          <article class="narration" bind:this={narrationEl} on:click={onNarrationClick} role="presentation">
+          <article class="narration" bind:this={narrationEl}>
             <header class="narration-head">
               <span class="narration-icon">📖</span>
               <span class="narration-label">{$t('tour.narration.label')}</span>
