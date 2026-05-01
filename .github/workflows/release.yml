@@ -6,14 +6,19 @@ on:
       - 'v*.*.*'
   workflow_dispatch:
 
-# Default to read-only. The release-publish job re-elevates to
-# `contents: write` to upload assets — see below.
+# Default to read-only. The publish job re-elevates to `contents: write`
+# to upload assets — see below.
 permissions:
   contents: read
 
+# Two parallel matrices that publish into the same GitHub Release at the end:
+#  * `mcp` — the standalone MCP server binary, useful for any LLM CLI that
+#    just wants stdio JSON-RPC. Multiple OS/arch slices.
+#  * `app` — the Tauri desktop bundle (.dmg/.app on macOS, .deb/.AppImage on
+#    Linux, .msi/.exe on Windows). One slice per host platform.
 jobs:
-  build:
-    name: Build ${{ matrix.target }}
+  mcp:
+    name: MCP server / ${{ matrix.asset_suffix }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -23,15 +28,12 @@ jobs:
         include:
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            artifact_name: projectmind-mcp
             asset_suffix: linux-x86_64
           - os: macos-14
             target: aarch64-apple-darwin
-            artifact_name: projectmind-mcp
             asset_suffix: macos-arm64
           - os: macos-13
             target: x86_64-apple-darwin
-            artifact_name: projectmind-mcp
             asset_suffix: macos-x86_64
 
     steps:
@@ -46,23 +48,100 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
 
       - name: Build release MCP binary
+        shell: bash
         run: ./scripts/ci.sh release-build ${{ matrix.target }}
 
       - name: Package
+        shell: bash
         run: ./scripts/ci.sh release-package ${{ matrix.target }} ${{ matrix.asset_suffix }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: ${{ matrix.artifact_name }}-${{ matrix.asset_suffix }}
+          name: projectmind-mcp-${{ matrix.asset_suffix }}
           path: |
-            ${{ matrix.artifact_name }}-${{ matrix.asset_suffix }}.tar.gz
-            ${{ matrix.artifact_name }}-${{ matrix.asset_suffix }}.tar.gz.sha256
+            projectmind-mcp-${{ matrix.asset_suffix }}.tar.gz
+            projectmind-mcp-${{ matrix.asset_suffix }}.tar.gz.sha256
+          retention-days: 30
+
+  app:
+    name: Desktop app / ${{ matrix.asset_suffix }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS universal binary covers both Apple Silicon and Intel in
+          # one bundle so we only need one Mac runner. The `extra_targets`
+          # hack tells rust-toolchain to add the second arch.
+          - os: macos-14
+            target: universal-apple-darwin
+            extra_targets: x86_64-apple-darwin
+            asset_suffix: macos-universal
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            asset_suffix: linux-x86_64
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            asset_suffix: windows-x86_64
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}${{ matrix.extra_targets && format(',{0}', matrix.extra_targets) || '' }}
+
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          key: app-${{ matrix.asset_suffix }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Install Linux Tauri build deps
+        if: runner.os == 'Linux'
+        shell: bash
+        run: ./scripts/ci.sh install-deps
+
+      - name: Install JS deps
+        shell: bash
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Build app bundle
+        shell: bash
+        run: ./scripts/ci.sh app-build ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: ./scripts/ci.sh app-package ${{ matrix.target }} ${{ matrix.asset_suffix }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: projectmind-app-${{ matrix.asset_suffix }}
+          path: |
+            projectmind-app-${{ matrix.asset_suffix }}.tar.gz
+            projectmind-app-${{ matrix.asset_suffix }}.tar.gz.sha256
           retention-days: 30
 
   release:
     name: Publish GitHub release
-    needs: build
+    needs: [mcp, app]
     runs-on: ubuntu-22.04
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:

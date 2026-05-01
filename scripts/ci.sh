@@ -31,9 +31,29 @@ Commands:
   release-build [<target>]    cargo build --release --bin projectmind-mcp [--target <target>]
   release-smoke               release-build + stdio JSON-RPC ping against the binary
   release-package <target> <suffix>
-                              tar.gz + sha256 packaging for the release workflow
+                              tar.gz + sha256 packaging for the MCP server binary
+  app-build [<target>]        Build the Tauri desktop app bundle for the host
+                              platform (.app/.dmg on macOS, .deb/.AppImage on
+                              Linux, .msi/.exe on Windows). Optional Rust
+                              target triple for cross-arch builds (e.g.
+                              universal-apple-darwin).
+  app-package <target> <suffix>
+                              Collect every Tauri bundle artefact under
+                              target/<target>/release/bundle into
+                              projectmind-app-<suffix>.tar.gz + .sha256.
   all                         check + test
 EOF
+}
+
+# Cross-platform sha256 helper. macOS has shasum, Linux has sha256sum,
+# Windows runners under Git Bash have either depending on the runner image.
+sha256() {
+    local file="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$file"
+    else
+        shasum -a 256 "$file"
+    fi
 }
 
 cmd_check() {
@@ -115,8 +135,68 @@ cmd_release_package() {
     tar czf "$archive" \
         -C "$(dirname "$bin_path")" "$(basename "$bin_path")" \
         -C "$ROOT_DIR" LICENSE README.md
-    shasum -a 256 "$archive" > "$archive.sha256"
+    sha256 "$archive" > "$archive.sha256"
     echo "release-package: $archive ($(wc -c <"$archive") bytes)"
+}
+
+cmd_app_build() {
+    local target="${1:-}"
+    cd "$ROOT_DIR/app"
+    if [[ ! -d node_modules ]]; then
+        echo "app-build: installing js deps (first run)"
+        pnpm install --frozen-lockfile
+    fi
+    if [[ -n "$target" ]]; then
+        echo "app-build: tauri build --target $target"
+        pnpm tauri build --target "$target"
+    else
+        echo "app-build: tauri build (host target)"
+        pnpm tauri build
+    fi
+    cd "$ROOT_DIR"
+}
+
+cmd_app_package() {
+    local target="${1:?target triple required, e.g. aarch64-apple-darwin}"
+    local suffix="${2:?asset suffix required, e.g. macos-arm64}"
+    local archive="projectmind-app-${suffix}.tar.gz"
+    local bundle_dir="target/${target}/release/bundle"
+
+    if [[ ! -d "$bundle_dir" ]]; then
+        echo "app-package: missing $bundle_dir — run app-build first" >&2
+        exit 1
+    fi
+
+    # Tauri scatters bundle artefacts across format-specific subdirs
+    # (bundle/dmg/, bundle/macos/, bundle/deb/, bundle/appimage/, bundle/msi/,
+    # bundle/nsis/). Pick whatever distributable formats actually got produced
+    # and pack them plus LICENSE + README into one archive — keeps the workflow
+    # simple: ONE artefact per target, asset_suffix telling Mac/Linux/Win apart.
+    local bundles=()
+    while IFS= read -r f; do
+        bundles+=("$f")
+    done < <(find "$bundle_dir" -type f \
+        \( -name "*.dmg" -o -name "*.app.tar.gz" -o -name "*.deb" \
+           -o -name "*.AppImage" -o -name "*.msi" -o -name "*.exe" \) \
+        2>/dev/null | sort)
+
+    if [[ ${#bundles[@]} -eq 0 ]]; then
+        echo "app-package: no bundle artefacts found under $bundle_dir" >&2
+        find "$bundle_dir" -maxdepth 3 -type f >&2 || true
+        exit 1
+    fi
+
+    # `tar -C <dir> file` requires file as a relative path inside <dir>.
+    # Build a flat archive: every bundle artefact at the archive root.
+    local args=()
+    for f in "${bundles[@]}"; do
+        args+=( -C "$(dirname "$f")" "$(basename "$f")" )
+    done
+    tar czf "$archive" "${args[@]}" -C "$ROOT_DIR" LICENSE README.md
+    sha256 "$archive" > "$archive.sha256"
+    local size_h
+    size_h="$(du -h "$archive" | cut -f1)"
+    echo "app-package: $archive ($size_h, ${#bundles[@]} bundle file(s))"
 }
 
 case "${1:-}" in
@@ -126,6 +206,8 @@ case "${1:-}" in
     release-build)   shift; cmd_release_build "$@" ;;
     release-smoke)   shift; cmd_release_smoke "$@" ;;
     release-package) shift; cmd_release_package "$@" ;;
+    app-build)       shift; cmd_app_build "$@" ;;
+    app-package)     shift; cmd_app_package "$@" ;;
     all)             cmd_check; cmd_test ;;
     -h|--help|help|"") usage ;;
     *) echo "unknown command: $1" >&2; usage; exit 2 ;;
