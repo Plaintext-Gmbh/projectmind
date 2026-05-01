@@ -15,6 +15,7 @@
 pub mod cargo;
 pub mod diagram;
 pub mod engine;
+pub mod file_access;
 pub mod files;
 pub mod git;
 pub mod heartbeat;

@@ -221,6 +221,35 @@ fn show_diagram_bean_graph_returns_mermaid() {
     assert!(mermaid.starts_with("flowchart LR\n"));
 }
 
+#[test]
+fn view_file_rejects_paths_outside_open_repo() {
+    let tmp = TempRepo::create_with_java_class();
+    let outside = TempRepo::create_with_text_file("secret.txt", "secret");
+    let mut s = Server::spawn();
+    let repo_path = tmp.root.to_string_lossy().into_owned();
+    s.call(&format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"open_repo","arguments":{{"path":"{repo_path}"}}}}}}"#
+    ));
+
+    let outside_path = outside
+        .root
+        .join("secret.txt")
+        .to_string_lossy()
+        .into_owned();
+    let resp = s.call(&format!(
+        r#"{{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{{"name":"view_file","arguments":{{"path":"{outside_path}"}}}}}}"#
+    ));
+
+    assert_eq!(resp["error"]["code"], -32602);
+    assert!(
+        resp["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("outside repository"),
+        "unexpected response: {resp}"
+    );
+}
+
 // ----- helpers -----
 
 struct TempRepo {
@@ -266,6 +295,14 @@ impl TempRepo {
             "package demo;\npublic class Sample {\n    private int counter;\n    public void doIt() {}\n}\n",
         )
         .unwrap();
+        Self { root }
+    }
+
+    fn create_with_text_file(name: &str, contents: &str) -> Self {
+        let root =
+            std::env::temp_dir().join(format!("projectmind-it-{}-{}", std::process::id(), uniq()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(name), contents).unwrap();
         Self { root }
     }
 }

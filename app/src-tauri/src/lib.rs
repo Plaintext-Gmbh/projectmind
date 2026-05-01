@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
+use projectmind_core::file_access;
 use projectmind_core::files::{self, MarkdownFile, MarkdownHit};
 use projectmind_core::git::{self, ChangedFile};
 use projectmind_core::heartbeat;
@@ -253,23 +254,20 @@ fn show_diagram(kind: String, state: State<'_, Arc<AppState>>) -> Result<String,
     }
 }
 
-/// Read an arbitrary file as UTF-8 text. Used by the file viewer for `view_file`
+const FILE_VIEW_LIMIT_BYTES: u64 = 10_000_000;
+
+/// Read a repo-scoped UTF-8 text file. Used by the file viewer for `view_file`
 /// intents (markdown, plain source, etc.). Capped at 10 MB to keep the view
-/// responsive — large binaries are not the target.
+/// responsive; paths outside the opened repository are rejected.
 #[tauri::command]
-fn read_file_text(path: String) -> Result<String, String> {
+fn read_file_text(path: String, state: State<'_, Arc<AppState>>) -> Result<String, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
     let p = std::path::Path::new(&path);
-    if !p.is_absolute() {
-        return Err(format!("path must be absolute: {path}"));
-    }
-    let bytes = std::fs::read(p).map_err(|e| format!("read {path}: {e}"))?;
-    if bytes.len() > 10_000_000 {
-        return Err(format!(
-            "file too large ({} bytes; limit 10 MB)",
-            bytes.len()
-        ));
-    }
-    String::from_utf8(bytes).map_err(|e| format!("invalid UTF-8 in {path}: {e}"))
+    file_access::read_text_file_in_repo(&repo.root, p, FILE_VIEW_LIMIT_BYTES)
+        .map_err(|e| e.to_string())
 }
 
 /// Return the unified diff between two refs (or `ref` vs working tree). Used
