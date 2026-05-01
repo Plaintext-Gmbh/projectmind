@@ -25,10 +25,10 @@ Schema (`crates/core/src/state.rs`):
 ```jsonc
 {
   "version": 1,
-  "repo_root": "/Users/mad/codeplain/plaintext-app",
+  "repo_root": "/path/to/repo",
   "view": {
     "kind": "classes",                  // or "diagram" | "diff" | "file"
-    "selected_fqn": "ch.plaintext.UserService"
+    "selected_fqn": "com.example.UserService"
   },
   "seq": 42                              // monotonic; bumped on every write
 }
@@ -160,12 +160,12 @@ already a parseable line stream.
 With Claude Code wired to `projectmind-mcp`:
 
 ```
-You: Open /Users/mad/codeplain/plaintext-app, then show me UserService.
-LLM: → open_repo  → view_class("ch.plaintext.UserService")
-GUI: jumps to plaintext-app, switches to classes view, opens UserService.
+You: Open ~/projects/example-app, then show me UserService.
+LLM: → open_repo  → view_class("com.example.UserService")
+GUI: jumps to example-app, switches to classes view, opens UserService.
 
 You: Show me the README.
-LLM: → view_file("/…/plaintext-app/README.md")
+LLM: → view_file("/…/example-app/README.md")
 GUI: switches to file view, renders markdown with embedded mermaid.
 
 You: What did I change since main?
