@@ -61,7 +61,7 @@ pub(crate) fn parse(file: &Path, source: &str, module: &mut Module) -> Result<()
 fn build_tree(source: &str) -> Result<Tree> {
     let mut parser = Parser::new();
     parser
-        .set_language(&tree_sitter_rust::language())
+        .set_language(&tree_sitter_rust::LANGUAGE.into())
         .map_err(|e| projectmind_plugin_api::Error::Parse(e.to_string()))?;
     parser
         .parse(source, None)
