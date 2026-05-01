@@ -1118,12 +1118,18 @@ async fn open_browser_repo(state: &Mutex<ServerState>, args: Value) -> DispatchR
     ))
 }
 
+// Both helpers are infallible — they always return a `text_result(...)`.
+// Clippy's `unnecessary_wraps` would flag the `-> DispatchResult` return type,
+// but the dispatch table expects every tool fn to return `DispatchResult`,
+// so suppress the lint locally rather than diverging from the call shape.
+#[allow(clippy::unnecessary_wraps)]
 fn browser_status() -> DispatchResult {
     Ok(text_result(
         serde_json::to_string_pretty(&browser_host::status()).unwrap_or_else(|_| "null".into()),
     ))
 }
 
+#[allow(clippy::unnecessary_wraps)]
 fn stop_browser() -> DispatchResult {
     browser_host::stop();
     Ok(text_result(json!({"ok": true}).to_string()))

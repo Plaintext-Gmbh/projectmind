@@ -884,9 +884,14 @@ fn content_type(path: &Path) -> &'static str {
 }
 
 fn generate_token() -> String {
+    use std::fmt::Write;
     let mut buf = [0_u8; 32];
     rand::thread_rng().fill_bytes(&mut buf);
-    buf.iter().map(|b| format!("{b:02x}")).collect()
+    let mut s = String::with_capacity(buf.len() * 2);
+    for b in &buf {
+        let _ = write!(s, "{b:02x}");
+    }
+    s
 }
 
 fn access_urls(port: u16, token: &str) -> Vec<String> {
