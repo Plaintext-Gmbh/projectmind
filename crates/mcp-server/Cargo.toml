@@ -20,10 +20,10 @@ projectmind-plugin-api = { workspace = true }
 projectmind-core       = { workspace = true }
 
 # Local plugins linked statically for Phase 1
-projectmind-lang-java         = { path = "../../plugins/lang-java", version = "0.1.0" }
-projectmind-lang-rust         = { path = "../../plugins/lang-rust", version = "0.1.0" }
-projectmind-framework-spring  = { path = "../../plugins/framework-spring", version = "0.1.0" }
-projectmind-framework-lombok  = { path = "../../plugins/framework-lombok", version = "0.1.0" }
+projectmind-lang-java         = { path = "../../plugins/lang-java", version = "0.2.0" }
+projectmind-lang-rust         = { path = "../../plugins/lang-rust", version = "0.2.0" }
+projectmind-framework-spring  = { path = "../../plugins/framework-spring", version = "0.2.0" }
+projectmind-framework-lombok  = { path = "../../plugins/framework-lombok", version = "0.2.0" }
 
 anyhow      = { workspace = true }
 clap        = { workspace = true }
