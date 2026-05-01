@@ -10,10 +10,17 @@ env:
   RUSTFLAGS: -D warnings
   RUST_BACKTRACE: 1
 
+# Workflow runs only ever read the repo and write to the cache — no need
+# for GITHUB_TOKEN write scopes anywhere here.
+permissions:
+  contents: read
+
 jobs:
   rust:
     name: Rust ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -64,6 +71,8 @@ jobs:
     name: Release build (Linux)
     runs-on: ubuntu-22.04
     needs: rust
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
