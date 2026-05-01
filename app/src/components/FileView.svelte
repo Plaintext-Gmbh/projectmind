@@ -6,6 +6,7 @@
   import { readFileText, listMarkdownFiles } from '../lib/api';
   import type { MarkdownFile } from '../lib/api';
   import { repo, fileView } from '../lib/store';
+  import { t } from '../lib/i18n';
 
   export let path: string;
   /// Optional heading slug to scroll to after rendering. If a slug doesn't
@@ -415,7 +416,7 @@
 
 <section class="root">
   <header class="bar">
-    <span class="kind">{isMarkdown(path) ? 'markdown' : 'file'}</span>
+    <span class="kind">{isMarkdown(path) ? $t('file.markdown') : $t('file.file')}</span>
     <code class="path" title={path}>{path}</code>
     <div class="spacer"></div>
     {#if mdFiles.length > 0}
@@ -425,10 +426,10 @@
           class="picker-trigger"
           class:active={pickerOpen}
           on:click={togglePicker}
-          title="Open another markdown file in this project"
+          title={$t('file.openAnother')}
         >
           <span class="picker-icon">📄</span>
-          Files
+          {$t('file.files')}
           <span class="picker-count">{mdFiles.length}</span>
           <span class="picker-caret">▾</span>
         </button>
@@ -440,12 +441,12 @@
               on:keydown={onPickerKeydown}
               type="text"
               class="picker-search"
-              placeholder="Search markdown files…"
+              placeholder={$t('file.searchMarkdown')}
               autocomplete="off"
               spellcheck="false"
             />
             {#if pickerFiltered.length === 0}
-              <div class="picker-empty">No matches</div>
+              <div class="picker-empty">{$t('file.noMatches')}</div>
             {:else}
               <ul class="picker-list">
                 {#each pickerFiltered as f, i (f.abs)}
@@ -467,29 +468,29 @@
               </ul>
             {/if}
             <div class="picker-foot">
-              {pickerFiltered.length} / {mdFiles.length} • ↑↓ navigate • Enter open • Esc close
+              {$t('file.pickerFoot', { filtered: pickerFiltered.length, total: mdFiles.length })}
             </div>
           </div>
         {/if}
       </div>
     {/if}
-    <div class="zoom" title="Zoom: Cmd/Ctrl + / − / 0">
-      <button class="zoom-btn" on:click={zoomOut} aria-label="Zoom out">−</button>
-      <button class="zoom-pct" on:click={zoomReset} aria-label="Reset zoom"
+    <div class="zoom" title={$t('file.zoomTitle')}>
+      <button class="zoom-btn" on:click={zoomOut} aria-label={$t('file.zoomOut')}>−</button>
+      <button class="zoom-pct" on:click={zoomReset} aria-label={$t('file.zoomReset')}
         >{Math.round(zoom * 100)}%</button
       >
-      <button class="zoom-btn" on:click={zoomIn} aria-label="Zoom in">+</button>
+      <button class="zoom-btn" on:click={zoomIn} aria-label={$t('file.zoomIn')}>+</button>
     </div>
   </header>
   {#if loading}
-    <div class="status">Loading…</div>
+    <div class="status">{$t('html.loading')}</div>
   {:else if error}
     <div class="error">⚠ {error}</div>
   {:else}
     <div class="layout" class:has-toc={toc.length > 0}>
       {#if toc.length > 0}
-        <aside class="toc" aria-label="Table of contents">
-          <div class="toc-title">On this page</div>
+        <aside class="toc" aria-label={$t('file.tocLabel')}>
+          <div class="toc-title">{$t('file.tocTitle')}</div>
           <ul>
             {#each toc as t (t.id)}
               <li class="lvl-{t.level}" class:active={activeHeadingId === t.id}>

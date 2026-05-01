@@ -36,6 +36,7 @@
   import MarkdownIndex from './components/MarkdownIndex.svelte';
   import ModuleSidebar from './components/ModuleSidebar.svelte';
   import WalkthroughView from './components/WalkthroughView.svelte';
+  import { language, languages, t } from './lib/i18n';
   import { resizable } from './lib/resizable';
 
   type Theme = 'dark' | 'light';
@@ -68,7 +69,7 @@
 
   // The Code tab falls back to "Files" when the repo has no parsed classes
   // (e.g. a docs-only or office-style folder).
-  $: codeTabLabel = $repo && $repo.classes === 0 ? 'Files' : 'Code';
+  $: codeTabLabel = $repo && $repo.classes === 0 ? $t('nav.files') : $t('nav.code');
 
   let diagramKind: 'bean-graph' | 'package-tree' = 'bean-graph';
   let classSource = '';
@@ -239,12 +240,12 @@
         </span>
         <span class="status">
           <span class="dot"></span>
-          {$repo.classes} classes • {$repo.modules} module{$repo.modules === 1 ? '' : 's'}
+          {$t('app.repoStats', { classes: $repo.classes, modules: $repo.modules })}
         </span>
       {:else}
         <span class="status">
           <span class="dot dim"></span>
-          no repository
+          {$t('app.noRepository')}
         </span>
       {/if}
     </div>
@@ -268,7 +269,7 @@
             viewMode.set('diagram');
           }}
         >
-          Diagrams
+          {$t('nav.diagrams')}
         </button>
       {/if}
       {#if !$repo || ($repo && $repo.markdown_count > 0)}
@@ -279,7 +280,7 @@
             followingMcp.set(false);
             viewMode.set('md');
           }}
-          title="Browse markdown files in this repository"
+          title={$t('nav.markdownTitle')}
         >
           MD
         </button>
@@ -292,7 +293,7 @@
             followingMcp.set(false);
             viewMode.set('html');
           }}
-          title="Browse HTML files and snippets in this repository"
+          title={$t('nav.htmlTitle')}
         >
           HTML
         </button>
@@ -302,27 +303,37 @@
           class:active={$viewMode === 'walkthrough'}
           class="walkthrough-btn"
           on:click={() => viewMode.set('walkthrough')}
-          title="Resume the active walk-through"
+          title={$t('nav.walkthroughTitle')}
         >
-          ▶ Walk-through
+          ▶ {$t('nav.walkthrough')}
         </button>
       {/if}
       {#if $viewMode === 'diff'}
-        <button class="active">Diff</button>
+        <button class="active">{$t('nav.diff')}</button>
       {/if}
       {#if $followingMcp}
-        <span class="follow" title="GUI is following an MCP-issued view intent. Click any tab to continue manually.">
-          following MCP
+        <span class="follow" title={$t('nav.followingMcpTitle')}>
+          {$t('nav.followingMcp')}
         </span>
       {/if}
       <button on:click={pickAndOpen} disabled={loading}>
-        {loading ? '…' : 'Open repo'}
+        {loading ? '...' : $t('nav.openRepo')}
       </button>
+      <select
+        class="language-select"
+        bind:value={$language}
+        aria-label={$t('language.label')}
+        title={$t('language.label')}
+      >
+        {#each languages as lang (lang.code)}
+          <option value={lang.code}>{lang.label}</option>
+        {/each}
+      </select>
       <button
         class="theme-toggle"
         on:click={toggleTheme}
-        title="Switch to {theme === 'dark' ? 'light' : 'dark'} mode"
-        aria-label="Toggle theme"
+        title={$t('theme.switchTo', { mode: theme === 'dark' ? $t('theme.light') : $t('theme.dark') })}
+        aria-label={$t('theme.toggle')}
       >
         {theme === 'dark' ? '☀' : '☾'}
       </button>
@@ -338,11 +349,11 @@
       <div class="welcome">
         <img class="welcome-logo" src="/logo.png" alt="ProjectMind" />
         <h1>ProjectMind</h1>
-        <p class="claim">Your project, explained by AI.</p>
-        <p class="by">by Plaintext</p>
-        <button on:click={pickAndOpen}>Open a repository to begin</button>
+        <p class="claim">{$t('welcome.claim')}</p>
+        <p class="by">{$t('welcome.by')}</p>
+        <button on:click={pickAndOpen}>{$t('welcome.open')}</button>
         <p class="hint">
-          Or use the <code>projectmind-mcp</code> server with your favourite LLM CLI — see the README.
+          {$t('welcome.hint')}
         </p>
       </div>
     </section>
@@ -358,19 +369,19 @@
           max: 480,
           initial: 220,
         }}
-        title="Drag to resize · double-click to reset"
+        title={$t('app.resizeTitle')}
       ></div>
       <aside class="sidebar">
         {#if $packageFilter !== null}
           <div class="path-bar">
-            <span class="path-label">package</span>
-            <code class="path-value">{$packageFilter || '(default)'}</code>
-            <button class="path-clear" on:click={() => packageFilter.set(null)} title="Clear package filter">×</button>
+            <span class="path-label">{$t('app.package')}</span>
+            <code class="path-value">{$packageFilter || $t('app.defaultPackage')}</code>
+            <button class="path-clear" on:click={() => packageFilter.set(null)} title={$t('app.clearPackageFilter')}>×</button>
           </div>
         {/if}
         <div class="filter">
           <button class="chip" class:active={$stereotypeFilter === null} on:click={() => setFilter(null)}>
-            all <span class="count">{$filteredClasses.length}</span>
+            {$t('app.all')} <span class="count">{$filteredClasses.length}</span>
           </button>
           {#each Object.entries($stereotypeCounts) as [name, count]}
             <button
@@ -382,7 +393,7 @@
             </button>
           {/each}
         </div>
-        <ul class="class-list" role="listbox" aria-label="Classes">
+        <ul class="class-list" role="listbox" aria-label={$t('app.classesLabel')}>
           {#each $filteredClasses as c (`${c.module}::${c.fqn}`)}
             <li role="option" aria-selected={$selectedClass?.fqn === c.fqn}>
               <button
@@ -412,7 +423,7 @@
           max: 720,
           initial: 360,
         }}
-        title="Drag to resize · double-click to reset"
+        title={$t('app.resizeTitle')}
       ></div>
       <main class="viewer">
         {#if $selectedClass}
@@ -422,7 +433,7 @@
             meta={classMeta}
           />
         {:else}
-          <div class="placeholder">Select a class on the left.</div>
+          <div class="placeholder">{$t('app.selectClass')}</div>
         {/if}
       </main>
     </section>
@@ -430,12 +441,12 @@
     <section class="diagram-view">
       <div class="diagram-tabs">
         <button class:active={diagramKind === 'bean-graph'} on:click={() => (diagramKind = 'bean-graph')}>
-          Bean graph
+          {$t('diagram.beanGraph')}
         </button>
         <button class:active={diagramKind === 'package-tree'} on:click={() => (diagramKind = 'package-tree')}>
-          Package tree
+          {$t('diagram.packageTree')}
         </button>
-        <span class="diagram-hint">Click a node to drill into it</span>
+        <span class="diagram-hint">{$t('diagram.drillHint')}</span>
       </div>
       <DiagramView kind={diagramKind} />
     </section>
@@ -460,7 +471,7 @@
   {:else}
     <section class="empty">
       <div class="welcome">
-        <p class="hint">No view selected. Pick Code, Diagrams or HTML above, or send an MCP intent.</p>
+        <p class="hint">{$t('app.noView')}</p>
       </div>
     </section>
   {/if}
@@ -579,6 +590,23 @@
     line-height: 1;
   }
 
+  .language-select {
+    background: var(--bg-1);
+    color: var(--fg-1);
+    border: 1px solid var(--bg-3);
+    border-radius: 4px;
+    padding: 5px 8px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .language-select:hover,
+  .language-select:focus {
+    border-color: var(--accent-2);
+    color: var(--fg-0);
+    outline: none;
+  }
+
   .walkthrough-btn {
     background: color-mix(in srgb, var(--accent-2) 18%, var(--bg-1));
     color: var(--accent-2);
@@ -659,13 +687,6 @@
     margin-top: 32px;
     color: var(--fg-2);
     font-size: 12px;
-  }
-
-  .welcome code {
-    font-family: var(--mono);
-    background: var(--bg-2);
-    padding: 1px 6px;
-    border-radius: 3px;
   }
 
   .layout {

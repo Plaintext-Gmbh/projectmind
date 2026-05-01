@@ -12,6 +12,7 @@
     stereotypeFilter,
     viewMode,
   } from '../lib/store';
+  import { t } from '../lib/i18n';
 
   export let kind: 'bean-graph' | 'package-tree';
 
@@ -187,14 +188,14 @@
 
 <div class="root">
   <div class="toolbar">
-    <button on:click={() => zoomBy(1.25)} title="Zoom in">＋</button>
-    <button on:click={() => zoomBy(0.8)} title="Zoom out">－</button>
-    <button on:click={resetView} title="Reset view">⌂</button>
+    <button on:click={() => zoomBy(1.25)} title={$t('diagram.zoomIn')}>＋</button>
+    <button on:click={() => zoomBy(0.8)} title={$t('diagram.zoomOut')}>－</button>
+    <button on:click={resetView} title={$t('diagram.resetView')}>⌂</button>
     <span class="zoom-readout">{Math.round(scale * 100)}%</span>
-    <span class="hint">Drag to pan • Wheel to zoom</span>
+    <span class="hint">{$t('diagram.panZoomHint')}</span>
   </div>
   {#if loading}
-    <div class="placeholder">Rendering diagram…</div>
+    <div class="placeholder">{$t('diagram.rendering')}</div>
   {:else if error}
     <div class="error">⚠ {error}</div>
     <pre>{mermaidSource}</pre>
@@ -210,7 +211,7 @@
       on:mouseup={endDrag}
       on:mouseleave={endDrag}
       role="img"
-      aria-label="Diagram canvas (drag to pan, wheel to zoom)"
+      aria-label={$t('diagram.canvasLabel')}
     >
       <div
         class="diagram"

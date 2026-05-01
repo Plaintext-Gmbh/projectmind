@@ -3,6 +3,7 @@
   import { searchMarkdown } from '../lib/api';
   import type { MarkdownFile, MarkdownHit } from '../lib/api';
   import { repo, fileView, viewMode } from '../lib/store';
+  import { t } from '../lib/i18n';
 
   let hits: MarkdownHit[] = [];
   let loadedFor: string | null = null;
@@ -105,48 +106,48 @@
 <section class="root">
   <header class="bar">
     <div class="title-block">
-      <h2>Markdown</h2>
+      <h2>{$t('markdown.title')}</h2>
       {#if $repo}
         <span class="subtitle">
           {#if query.trim()}
-            {hits.length} hits in {$repo.root}
+            {$t('markdown.hitsIn', { count: hits.length, root: $repo.root })}
           {:else}
-            {hits.length} files in {$repo.root}
+            {$t('markdown.filesIn', { count: hits.length, root: $repo.root })}
           {/if}
         </span>
       {:else}
-        <span class="subtitle">no repository open</span>
+        <span class="subtitle">{$t('markdown.noRepositoryOpen')}</span>
       {/if}
     </div>
     <input
       type="text"
       class="search"
       bind:value={query}
-      placeholder="Fuzzy-search title, path or content…"
+      placeholder={$t('markdown.searchPlaceholder')}
       autocomplete="off"
       spellcheck="false"
       disabled={!$repo || (loadedFor !== null && hits.length === 0 && !query.trim())}
     />
     {#if searching}
-      <span class="searching" aria-live="polite">searching…</span>
+      <span class="searching" aria-live="polite">{$t('markdown.searching')}</span>
     {/if}
   </header>
 
   <div class="body">
     {#if !$repo}
-      <div class="empty">Open a repository to see its markdown files.</div>
+      <div class="empty">{$t('markdown.openRepo')}</div>
     {:else if loading}
-      <div class="empty">Scanning…</div>
+      <div class="empty">{$t('markdown.scanning')}</div>
     {:else if error}
       <div class="error">⚠ {error}</div>
     {:else if hits.length === 0 && !query.trim()}
-      <div class="empty">No markdown files found in this repository.</div>
+      <div class="empty">{$t('markdown.noFiles')}</div>
     {:else if hits.length === 0}
-      <div class="empty">No matches for &ldquo;{query}&rdquo;.</div>
+      <div class="empty">{$t('markdown.noMatchesFor', { query })}</div>
     {:else if grouped}
       {#each grouped as [dir, entries] (dir)}
         <section class="group">
-          <h3 class="group-title">{dir === '·' ? '(root)' : dir}</h3>
+          <h3 class="group-title">{dir === '·' ? $t('markdown.root') : dir}</h3>
           <ul class="list">
             {#each entries as h (h.file.abs)}
               <li>
