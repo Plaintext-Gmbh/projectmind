@@ -372,8 +372,13 @@ fn end_walkthrough() -> Result<(), String> {
 #[tauri::command]
 fn open_external(app: AppHandle, url: String) -> Result<(), String> {
     let trimmed = url.trim();
-    if !(trimmed.starts_with("http://") || trimmed.starts_with("https://") || trimmed.starts_with("mailto:")) {
-        return Err(format!("refusing to open non-http(s)/mailto url: {trimmed}"));
+    if !(trimmed.starts_with("http://")
+        || trimmed.starts_with("https://")
+        || trimmed.starts_with("mailto:"))
+    {
+        return Err(format!(
+            "refusing to open non-http(s)/mailto url: {trimmed}"
+        ));
     }
     app.opener()
         .open_url(trimmed, None::<&str>)

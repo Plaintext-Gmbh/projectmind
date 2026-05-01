@@ -166,7 +166,12 @@ fn next_seq() -> u64 {
             let _ = SEQ.compare_exchange(0, current, Ordering::Relaxed, Ordering::Relaxed);
         }
     }
-    SEQ.fetch_add(1, Ordering::Relaxed) + current + 1
+    let previous = SEQ
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |seq| {
+            Some(seq.checked_add(1).unwrap_or(1))
+        })
+        .unwrap_or_else(|seq| seq);
+    previous.checked_add(1).unwrap_or(1)
 }
 
 #[cfg(test)]
@@ -243,6 +248,13 @@ mod tests {
         assert!(path.exists());
         assert!(!path.with_extension("json.tmp").exists());
         std::fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn next_seq_wraps_instead_of_panicking_at_u64_max() {
+        SEQ.store(u64::MAX, Ordering::Relaxed);
+        assert_eq!(next_seq(), 1);
+        SEQ.store(0, Ordering::Relaxed);
     }
 
     #[test]

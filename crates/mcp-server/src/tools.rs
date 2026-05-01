@@ -8,9 +8,9 @@ use std::path::PathBuf;
 
 use projectmind_browser_host::{self as browser_host, BrowserHostConfig};
 use projectmind_core::file_access;
+use projectmind_core::files;
 use projectmind_core::state::{self, UiState, ViewIntent};
 use projectmind_core::walkthrough::{self as wt, Walkthrough, WalkthroughStep};
-use projectmind_core::files;
 use projectmind_core::{diagram, git, html};
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_plugin_api::FrameworkPlugin;

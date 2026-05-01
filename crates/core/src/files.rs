@@ -394,12 +394,12 @@ mod tests {
 
         // Filtered out.
         assert!(!names.iter().any(|n| n.contains("target")));
-        assert!(!names
-            .iter()
-            .any(|n| std::path::Path::new(n).extension().is_some_and(|e| e == "java")));
-        assert!(!names
-            .iter()
-            .any(|n| std::path::Path::new(n).extension().is_some_and(|e| e == "md")));
+        assert!(!names.iter().any(|n| std::path::Path::new(n)
+            .extension()
+            .is_some_and(|e| e == "java")));
+        assert!(!names.iter().any(|n| std::path::Path::new(n)
+            .extension()
+            .is_some_and(|e| e == "md")));
 
         // Alphabetical ordering by `rel`.
         let sorted: Vec<&str> = {
