@@ -96,5 +96,7 @@
   "keyboard.row.help": "Show this cheatsheet",
   "keyboard.row.close": "Close",
   "keyboard.row.zoom": "Zoom in / out (any viewer)",
-  "keyboard.hint": "Tip: typing inside a text field disables these shortcuts."
+  "keyboard.hint": "Tip: typing inside a text field disables these shortcuts.",
+  "welcome.recent": "Recent",
+  "welcome.forget": "Remove from list"
 }

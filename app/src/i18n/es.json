@@ -96,5 +96,7 @@
   "keyboard.row.help": "Mostrar este resumen",
   "keyboard.row.close": "Cerrar",
   "keyboard.row.zoom": "Acercar / alejar (cualquier visor)",
-  "keyboard.hint": "Consejo: estos atajos se desactivan dentro de campos de texto."
+  "keyboard.hint": "Consejo: estos atajos se desactivan dentro de campos de texto.",
+  "welcome.recent": "Recientes",
+  "welcome.forget": "Quitar de la lista"
 }
