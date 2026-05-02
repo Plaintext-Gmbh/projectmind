@@ -3141,6 +3141,7 @@ dependencies = [
  "projectmind-framework-spring",
  "projectmind-lang-java",
  "projectmind-lang-rust",
+ "projectmind-plugin-api",
  "rand 0.8.6",
  "serde",
  "serde_json",

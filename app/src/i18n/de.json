@@ -102,5 +102,11 @@
   "mcp.toast.file": "MCP hat Datei geöffnet",
   "mcp.toast.class": "MCP hat Klasse geöffnet",
   "mcp.toast.view": "MCP hat Ansicht gewechselt",
-  "mcp.toast.stop": "MCP-Sync stoppen"
+  "mcp.toast.stop": "MCP-Sync stoppen",
+  "outline.title": "Übersicht",
+  "outline.methods": "Methoden",
+  "outline.fields": "Felder",
+  "outline.empty": "Keine Methoden oder Felder",
+  "outline.show": "Übersicht einblenden",
+  "outline.hide": "Übersicht ausblenden"
 }

@@ -400,6 +400,10 @@ fn route_api(
             let fqn = required(query, "fqn")?;
             Ok(serde_json::to_value(show_class_locked(&guard, fqn)?)?)
         }
+        ("GET", "/api/class_outline") => {
+            let fqn = required(query, "fqn")?;
+            Ok(serde_json::to_value(class_outline_locked(&guard, fqn)?)?)
+        }
         ("GET", "/api/list_changes_since") => {
             let reference = required(query, "reference")?;
             let to = query.get("to").map(String::as_str);
@@ -626,6 +630,68 @@ pub struct ClassDetails {
     pub source: String,
 }
 
+/// Structural outline of a class — methods, fields, annotations, no source.
+/// Mirror of the Tauri-side `ClassOutline`. Used by the GUI's `ClassViewer`
+/// to render a side-panel with click-to-jump navigation.
+#[derive(Debug, Serialize)]
+pub struct ClassOutline {
+    /// Fully-qualified class name.
+    pub fqn: String,
+    /// Simple class name.
+    pub name: String,
+    /// Lowercase class kind (`class`, `interface`, `enum`, `record`, `annotation`).
+    pub kind: String,
+    /// Visibility (`public`, `protected`, `package`, `private`).
+    pub visibility: String,
+    /// First line of the class definition (1-based).
+    pub line_start: u32,
+    /// Last line of the class definition.
+    pub line_end: u32,
+    /// Stereotypes attached by framework plugins.
+    pub stereotypes: Vec<String>,
+    /// Class-level annotation names (without `@`).
+    pub annotations: Vec<String>,
+    /// Methods, in source order.
+    pub methods: Vec<MethodOutline>,
+    /// Fields, in source order.
+    pub fields: Vec<FieldOutline>,
+}
+
+/// One method entry in the class outline.
+#[derive(Debug, Serialize)]
+pub struct MethodOutline {
+    /// Method name.
+    pub name: String,
+    /// Visibility.
+    pub visibility: String,
+    /// Whether the method is static.
+    pub is_static: bool,
+    /// 1-based start line of the method definition.
+    pub line_start: u32,
+    /// 1-based end line of the method definition.
+    pub line_end: u32,
+    /// Annotation names.
+    pub annotations: Vec<String>,
+}
+
+/// One field entry in the class outline.
+#[derive(Debug, Serialize)]
+pub struct FieldOutline {
+    /// Field name.
+    pub name: String,
+    /// Field type as written in source.
+    #[serde(rename = "type")]
+    pub type_text: String,
+    /// Visibility.
+    pub visibility: String,
+    /// Whether the field is static.
+    pub is_static: bool,
+    /// 1-based line where the field is declared.
+    pub line: u32,
+    /// Annotation names.
+    pub annotations: Vec<String>,
+}
+
 fn open_repo_locked(state: &mut HostState, path: &Path) -> anyhow::Result<RepoSummary> {
     if !path.is_absolute() {
         anyhow::bail!("repo path must be absolute: {}", path.display());
@@ -728,6 +794,62 @@ fn show_class_locked(state: &HostState, fqn: &str) -> anyhow::Result<ClassDetail
         line_end: class.line_end,
         source,
     })
+}
+
+fn class_outline_locked(state: &HostState, fqn: &str) -> anyhow::Result<ClassOutline> {
+    let repo = repo(state)?;
+    let (_module, class) = repo
+        .find_class(fqn)
+        .ok_or_else(|| anyhow::anyhow!("class not found: {fqn}"))?;
+    Ok(build_class_outline(class))
+}
+
+fn visibility_str(v: projectmind_plugin_api::Visibility) -> String {
+    use projectmind_plugin_api::Visibility;
+    match v {
+        Visibility::Public => "public",
+        Visibility::Protected => "protected",
+        Visibility::PackagePrivate => "package",
+        Visibility::Private => "private",
+    }
+    .to_string()
+}
+
+fn build_class_outline(class: &projectmind_plugin_api::Class) -> ClassOutline {
+    ClassOutline {
+        fqn: class.fqn.clone(),
+        name: class.name.clone(),
+        kind: format!("{:?}", class.kind).to_lowercase(),
+        visibility: visibility_str(class.visibility),
+        line_start: class.line_start,
+        line_end: class.line_end,
+        stereotypes: class.stereotypes.clone(),
+        annotations: class.annotations.iter().map(|a| a.name.clone()).collect(),
+        methods: class
+            .methods
+            .iter()
+            .map(|m| MethodOutline {
+                name: m.name.clone(),
+                visibility: visibility_str(m.visibility),
+                is_static: m.is_static,
+                line_start: m.line_start,
+                line_end: m.line_end,
+                annotations: m.annotations.iter().map(|a| a.name.clone()).collect(),
+            })
+            .collect(),
+        fields: class
+            .fields
+            .iter()
+            .map(|f| FieldOutline {
+                name: f.name.clone(),
+                type_text: f.type_text.clone(),
+                visibility: visibility_str(f.visibility),
+                is_static: f.is_static,
+                line: f.line,
+                annotations: f.annotations.iter().map(|a| a.name.clone()).collect(),
+            })
+            .collect(),
+    }
 }
 
 fn read_file_text_locked(state: &HostState, path: &Path) -> anyhow::Result<String> {
