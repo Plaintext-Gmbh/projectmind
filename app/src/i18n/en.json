@@ -108,5 +108,7 @@
   "outline.fields": "Fields",
   "outline.empty": "No methods or fields",
   "outline.show": "Show outline",
-  "outline.hide": "Hide outline"
+  "outline.hide": "Hide outline",
+  "gutter.show": "Show annotated gutter",
+  "gutter.hide": "Hide annotated gutter"
 }

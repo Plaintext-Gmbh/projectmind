@@ -108,5 +108,7 @@
   "outline.fields": "Felder",
   "outline.empty": "Keine Methoden oder Felder",
   "outline.show": "Übersicht einblenden",
-  "outline.hide": "Übersicht ausblenden"
+  "outline.hide": "Übersicht ausblenden",
+  "gutter.show": "Annotierten Gutter einblenden",
+  "gutter.hide": "Annotierten Gutter ausblenden"
 }
