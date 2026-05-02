@@ -96,5 +96,7 @@
   "keyboard.row.help": "Diese Übersicht anzeigen",
   "keyboard.row.close": "Schliessen",
   "keyboard.row.zoom": "Zoom rein / raus (alle Viewer)",
-  "keyboard.hint": "Hinweis: in Eingabefeldern sind diese Shortcuts deaktiviert."
+  "keyboard.hint": "Hinweis: in Eingabefeldern sind diese Shortcuts deaktiviert.",
+  "welcome.recent": "Zuletzt geöffnet",
+  "welcome.forget": "Aus Liste entfernen"
 }

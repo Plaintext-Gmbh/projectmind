@@ -96,5 +96,7 @@
   "keyboard.row.help": "Mostra questo riepilogo",
   "keyboard.row.close": "Chiudi",
   "keyboard.row.zoom": "Zoom avanti / indietro (qualsiasi viewer)",
-  "keyboard.hint": "Suggerimento: queste scorciatoie sono disabilitate nei campi di testo."
+  "keyboard.hint": "Suggerimento: queste scorciatoie sono disabilitate nei campi di testo.",
+  "welcome.recent": "Aperti di recente",
+  "welcome.forget": "Rimuovi dalla lista"
 }

@@ -55,6 +55,8 @@
   import * as nav from './lib/navigation';
   import { canBack as nav_canBack, canForward as nav_canForward } from './lib/navigation';
   import type { HistoryEntry, DiagramKind, FolderMapLayout } from './lib/navigation';
+  import * as recents from './lib/recentRepos';
+  import { recentRepos } from './lib/recentRepos';
   const lazyDiagramView = () =>
     loadComponent('DiagramView', () => import('./components/DiagramView.svelte'));
   const lazyFileView = () =>
@@ -484,6 +486,7 @@
       fileKindFilter.set(null);
       packageFilter.set(null);
       classSource = '';
+      recents.record(summary.root, summary.classes, summary.modules);
     } catch (err) {
       if (opts.silent) {
         // Re-throw so caller can decide whether to show or swallow.
@@ -910,6 +913,28 @@
         <p class="claim">{$t('welcome.tagline')}</p>
         <p class="by">{$t('welcome.by')}</p>
         <button on:click={pickAndOpen}>{$t('welcome.openButton')}</button>
+        {#if !browserMode && $recentRepos.length > 0}
+          <div class="recents">
+            <h2>{$t('welcome.recent') || 'Recent'}</h2>
+            <ul>
+              {#each $recentRepos as r (r.path)}
+                <li>
+                  <button class="recent-row" on:click={() => load(r.path)} title={r.path}>
+                    <span class="recent-name">{r.name}</span>
+                    <span class="recent-meta">{r.classes} · {r.modules}m</span>
+                    <span class="recent-path">{r.path}</span>
+                  </button>
+                  <button
+                    class="recent-x"
+                    on:click|stopPropagation={() => recents.forget(r.path)}
+                    title={$t('welcome.forget') || 'Remove from list'}
+                    aria-label="Remove {r.name} from recent list"
+                  >×</button>
+                </li>
+              {/each}
+            </ul>
+          </div>
+        {/if}
         <p class="hint">
           {#if browserMode}
             {$t('welcome.hint.browser')}
@@ -1395,6 +1420,90 @@
     margin: 0 0 20px;
     color: var(--fg-2);
     font-size: 12px;
+  }
+
+  .recents {
+    margin: 24px auto 8px;
+    max-width: 540px;
+    text-align: left;
+  }
+  .recents h2 {
+    margin: 0 0 8px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-2);
+    font-weight: 600;
+  }
+  .recents ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .recents li {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+  }
+  .recent-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    gap: 2px 8px;
+    flex: 1;
+    text-align: left;
+    background: var(--bg-1);
+    border: 1px solid var(--bg-3);
+    border-left: 3px solid transparent;
+    border-radius: 4px;
+    padding: 8px 12px;
+    color: var(--fg-1);
+    cursor: pointer;
+    font: inherit;
+    transition: background 80ms ease, border-left-color 80ms ease;
+  }
+  .recent-row:hover {
+    background: var(--bg-2);
+    border-left-color: var(--accent-2);
+  }
+  .recent-name {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg-0);
+  }
+  .recent-meta {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--fg-2);
+    align-self: center;
+  }
+  .recent-path {
+    grid-column: 1 / -1;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--fg-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .recent-x {
+    background: transparent;
+    border: 1px solid var(--bg-3);
+    border-radius: 4px;
+    color: var(--fg-2);
+    cursor: pointer;
+    width: 28px;
+    font-size: 16px;
+    line-height: 1;
+    padding: 0;
+  }
+  .recent-x:hover {
+    color: var(--accent-2);
+    border-color: var(--accent-2);
   }
 
   .welcome button {

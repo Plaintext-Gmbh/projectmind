@@ -96,5 +96,7 @@
   "keyboard.row.help": "Afficher cet aide-mémoire",
   "keyboard.row.close": "Fermer",
   "keyboard.row.zoom": "Zoom avant / arrière (tous les visualiseurs)",
-  "keyboard.hint": "Astuce : ces raccourcis sont désactivés dans les champs de saisie."
+  "keyboard.hint": "Astuce : ces raccourcis sont désactivés dans les champs de saisie.",
+  "welcome.recent": "Récemment ouverts",
+  "welcome.forget": "Retirer de la liste"
 }
