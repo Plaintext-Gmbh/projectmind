@@ -153,6 +153,14 @@ pub struct FileRecency {
     pub sha: String,
     /// First line of that commit's message, trimmed.
     pub summary: String,
+    /// Author display name (`commit.author().name()`), if present. Used by
+    /// the GUI's author overlay; cheap proxy for "primary author per file"
+    /// — strictly speaking this is "last toucher", but on most codebases
+    /// the two correlate strongly.
+    pub author_name: Option<String>,
+    /// Author email, if present. Combined with `author_name` it gives the
+    /// stable identity the overlay hashes onto a hue.
+    pub author_email: Option<String>,
 }
 
 /// Cap on commits we'll walk before bailing. Realistic repos with a few
@@ -209,6 +217,12 @@ pub fn file_recency(repo_root: &Path) -> Result<Vec<FileRecency>, GitError> {
             .unwrap_or_default();
         let sha = oid.to_string();
         let short_sha: String = sha.chars().take(7).collect();
+        // git2 returns Option<&str> for both name and email; we promote
+        // empty strings to `None` too so consumers don't have to special-
+        // case malformed signatures.
+        let author = commit.author();
+        let author_name = author.name().map(str::to_string).filter(|s| !s.is_empty());
+        let author_email = author.email().map(str::to_string).filter(|s| !s.is_empty());
 
         let Ok(tree) = commit.tree() else { continue };
         // Compare each parent against this commit's tree. For the root
@@ -248,6 +262,8 @@ pub fn file_recency(repo_root: &Path) -> Result<Vec<FileRecency>, GitError> {
                     secs_ago,
                     sha: short_sha.clone(),
                     summary: summary.clone(),
+                    author_name: author_name.clone(),
+                    author_email: author_email.clone(),
                 }
             });
             if recency.len() >= RECENCY_MAX_FILES {
@@ -313,6 +329,29 @@ mod tests {
     }
 
     fn commit_file(repo: &GitRepo, dir: &Path, rel: &str, content: &str, msg: &str, when: i64) {
+        commit_file_as(
+            repo,
+            dir,
+            rel,
+            content,
+            msg,
+            when,
+            "Test",
+            "test@example.com",
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn commit_file_as(
+        repo: &GitRepo,
+        dir: &Path,
+        rel: &str,
+        content: &str,
+        msg: &str,
+        when: i64,
+        author_name: &str,
+        author_email: &str,
+    ) {
         fs::write(dir.join(rel), content).unwrap();
         let mut idx = repo.index().unwrap();
         idx.add_path(Path::new(rel)).unwrap();
@@ -320,7 +359,7 @@ mod tests {
         let tree_id = idx.write_tree().unwrap();
         let tree = repo.find_tree(tree_id).unwrap();
         let sig =
-            git2::Signature::new("Test", "test@example.com", &git2::Time::new(when, 0)).unwrap();
+            git2::Signature::new(author_name, author_email, &git2::Time::new(when, 0)).unwrap();
         let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
         let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
         repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &parents)
@@ -382,5 +421,52 @@ mod tests {
         assert_eq!(r.sha.len(), 7);
         // Summary is the full commit subject line; we don't trim it here.
         assert_eq!(r.summary, "Add x with details that get cut");
+    }
+
+    #[test]
+    fn file_recency_records_author_of_most_recent_commit() {
+        let tmp = TempDir::new();
+        let repo = init_repo(tmp.path());
+        // Two authors touch the same file in sequence; revwalk visits the
+        // newest commit first so the second author wins.
+        commit_file_as(
+            &repo,
+            tmp.path(),
+            "x.md",
+            "1",
+            "one",
+            1_700_000_000,
+            "Alice",
+            "alice@example.com",
+        );
+        commit_file_as(
+            &repo,
+            tmp.path(),
+            "x.md",
+            "2",
+            "two",
+            1_700_000_100,
+            "Bob",
+            "bob@example.com",
+        );
+        commit_file_as(
+            &repo,
+            tmp.path(),
+            "y.md",
+            "1",
+            "y",
+            1_700_000_050,
+            "Alice",
+            "alice@example.com",
+        );
+
+        let result = file_recency(tmp.path()).unwrap();
+        let by_path: HashMap<_, _> = result.iter().map(|r| (r.path.clone(), r)).collect();
+        let x = by_path.get(&PathBuf::from("x.md")).unwrap();
+        assert_eq!(x.author_name.as_deref(), Some("Bob"));
+        assert_eq!(x.author_email.as_deref(), Some("bob@example.com"));
+        let y = by_path.get(&PathBuf::from("y.md")).unwrap();
+        assert_eq!(y.author_name.as_deref(), Some("Alice"));
+        assert_eq!(y.author_email.as_deref(), Some("alice@example.com"));
     }
 }
