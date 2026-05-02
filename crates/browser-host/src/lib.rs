@@ -572,6 +572,11 @@ pub struct RepoSummary {
     /// Diagram kinds available for this repo + plugin set. The browser UI
     /// uses this to render Diagram-tab buttons dynamically.
     pub available_diagrams: Vec<String>,
+    /// Top-level UI tabs the active plugin set contributes for this repo.
+    /// Core ships `files` + `diagrams`; plugins can append more (a future
+    /// `framework-junit` "Tests" tab, for example). The frontend renders
+    /// one nav button per entry.
+    pub tabs: Vec<projectmind_core::TabDescriptor>,
 }
 
 /// One class entry exposed to the browser UI.
@@ -630,6 +635,7 @@ fn open_repo_locked(state: &mut HostState, path: &Path) -> anyhow::Result<RepoSu
     let html_count =
         html::list_html_files(&repo.root).len() + html::find_html_snippets(&repo.root).len();
     let available_diagrams = state.engine.available_diagrams(&repo);
+    let tabs = state.engine.available_tabs(&repo);
     let summary = RepoSummary {
         root: repo.root.clone(),
         modules: repo.modules.len(),
@@ -639,6 +645,7 @@ fn open_repo_locked(state: &mut HostState, path: &Path) -> anyhow::Result<RepoSu
         markdown_count,
         html_count,
         available_diagrams,
+        tabs,
     };
     state.repo_root = Some(repo.root.clone());
     state::write(UiState {

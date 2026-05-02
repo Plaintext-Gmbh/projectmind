@@ -8,10 +8,54 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use ignore::WalkBuilder;
-use projectmind_plugin_api::{FrameworkPlugin, LanguagePlugin, Module};
+use projectmind_plugin_api::{FrameworkPlugin, LanguagePlugin, Module, TabContribution};
+use serde::Serialize;
 use tracing::{debug, info, warn};
 
 use crate::repository::{Repository, RepositoryError};
+
+/// Serializable view of a [`TabContribution`] for the public API.
+///
+/// `TabContribution` is a `Copy` static-string struct that's convenient for
+/// plugins to declare; the host turns it into this owned, serializable form
+/// before exposing it to the GUI.
+#[derive(Debug, Clone, Serialize)]
+pub struct TabDescriptor {
+    /// Stable identifier (e.g. `files`, `diagrams`, `tests`).
+    pub id: String,
+    /// i18n key for the visible label.
+    pub label_key: String,
+    /// Frontend view-mode value the tab activates.
+    pub view_mode: String,
+}
+
+impl From<TabContribution> for TabDescriptor {
+    fn from(c: TabContribution) -> Self {
+        Self {
+            id: c.id.to_string(),
+            label_key: c.label_key.to_string(),
+            view_mode: c.view_mode.to_string(),
+        }
+    }
+}
+
+/// Built-in tab contributions the core ships unconditionally.
+///
+/// Kept here (not on a plugin) because they describe core capabilities — a
+/// repo always has files, and `folder-map` is always renderable so the
+/// Diagrams tab is always meaningful.
+const CORE_TABS: &[TabContribution] = &[
+    TabContribution {
+        id: "files",
+        label_key: "nav.files",
+        view_mode: "classes",
+    },
+    TabContribution {
+        id: "diagrams",
+        label_key: "nav.diagrams",
+        view_mode: "diagram",
+    },
+];
 
 /// The engine wires plugins to repositories.
 pub struct Engine {
@@ -78,6 +122,51 @@ impl Engine {
     /// Get registered framework plugin ids (for diagnostics).
     pub fn framework_ids(&self) -> Vec<&'static str> {
         self.frameworks.iter().map(|p| p.info().id).collect()
+    }
+
+    /// Diagram kinds that the active plugin set can render against `repo`.
+    /// "folder-map" is always present (it's a core capability); language and
+    /// framework plugins contribute the rest. Languages only contribute when
+    /// the repo has parsed classes — a docs-only repo with no Java/Rust code
+    /// shouldn't advertise "package-tree" since it has no packages to draw.
+    /// Frameworks only contribute when at least one of their supported
+    /// languages produced a class (i.e. the framework has something to enrich).
+    /// The result is sorted + deduplicated for stable UI ordering.
+    /// Top-level UI tabs the active plugin set contributes for `repo`.
+    /// Core ships `files` + `diagrams` unconditionally; languages and
+    /// frameworks can append plugin-specific tabs (a future
+    /// `framework-junit` "Tests" tab, for example). Duplicate ids across
+    /// plugins are dropped — the first occurrence wins so core tabs always
+    /// appear in the order declared in [`CORE_TABS`].
+    ///
+    /// `repo` is currently unused but accepted so the signature mirrors
+    /// [`Engine::available_diagrams`] and so future plugins can scope tab
+    /// visibility to repo content (e.g. only show "Tests" when the repo
+    /// actually has tests).
+    pub fn available_tabs(&self, _repo: &Repository) -> Vec<TabDescriptor> {
+        let mut out: Vec<TabDescriptor> = Vec::new();
+        let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let push = |c: TabContribution,
+                    out: &mut Vec<TabDescriptor>,
+                    seen: &mut std::collections::BTreeSet<String>| {
+            if seen.insert(c.id.to_string()) {
+                out.push(c.into());
+            }
+        };
+        for c in CORE_TABS {
+            push(*c, &mut out, &mut seen);
+        }
+        for lang in &self.languages {
+            for c in lang.provided_tabs() {
+                push(*c, &mut out, &mut seen);
+            }
+        }
+        for fw in &self.frameworks {
+            for c in fw.provided_tabs() {
+                push(*c, &mut out, &mut seen);
+            }
+        }
+        out
     }
 
     /// Diagram kinds that the active plugin set can render against `repo`.
@@ -403,6 +492,89 @@ mod tests {
         assert_eq!(repo.class_count(), 1);
     }
 
+    struct TabPlugin;
+    impl LanguagePlugin for TabPlugin {
+        fn info(&self) -> PluginInfo {
+            PluginInfo {
+                id: "tab-lang",
+                name: "Tab",
+                version: "0.0.1",
+            }
+        }
+        fn file_extensions(&self) -> &[&'static str] {
+            &[]
+        }
+        fn parse_file(
+            &self,
+            _file: &Path,
+            _source: &str,
+            _module: &mut Module,
+        ) -> projectmind_plugin_api::Result<()> {
+            Ok(())
+        }
+        fn provided_tabs(&self) -> &[TabContribution] {
+            &[TabContribution {
+                id: "tests",
+                label_key: "nav.tests",
+                view_mode: "tests",
+            }]
+        }
+    }
+
+    #[test]
+    fn available_tabs_includes_core_and_plugin_contributions() {
+        let dir = tempdir();
+        let mut engine = Engine::new();
+        engine.register_language(Box::new(TabPlugin));
+        let repo = engine.open_repo(dir.path()).unwrap();
+        let tabs = engine.available_tabs(&repo);
+        let ids: Vec<_> = tabs.iter().map(|t| t.id.as_str()).collect();
+        // Core tabs come first in declaration order, then plugin tabs.
+        assert_eq!(ids, vec!["files", "diagrams", "tests"]);
+    }
+
+    #[test]
+    fn available_tabs_dedupes_by_id() {
+        // A plugin re-declaring a core id (e.g. `files`) shouldn't double the
+        // entry — first occurrence wins so core ordering stays stable.
+        struct ShadowPlugin;
+        impl LanguagePlugin for ShadowPlugin {
+            fn info(&self) -> PluginInfo {
+                PluginInfo {
+                    id: "shadow",
+                    name: "Shadow",
+                    version: "0.0.1",
+                }
+            }
+            fn file_extensions(&self) -> &[&'static str] {
+                &[]
+            }
+            fn parse_file(
+                &self,
+                _f: &Path,
+                _s: &str,
+                _m: &mut Module,
+            ) -> projectmind_plugin_api::Result<()> {
+                Ok(())
+            }
+            fn provided_tabs(&self) -> &[TabContribution] {
+                &[TabContribution {
+                    id: "files",
+                    label_key: "nav.files.shadowed",
+                    view_mode: "classes",
+                }]
+            }
+        }
+        let dir = tempdir();
+        let mut engine = Engine::new();
+        engine.register_language(Box::new(ShadowPlugin));
+        let repo = engine.open_repo(dir.path()).unwrap();
+        let tabs = engine.available_tabs(&repo);
+        let files: Vec<_> = tabs.iter().filter(|t| t.id == "files").collect();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].label_key, "nav.files");
+    }
+
     fn tempdir() -> TempDir {
         TempDir::new()
     }
@@ -410,8 +582,14 @@ mod tests {
     struct TempDir(PathBuf);
     impl TempDir {
         fn new() -> Self {
+            // Per-test directory: PID + a process-wide monotonic counter so
+            // tests running in parallel (cargo's default) don't share a path
+            // and stomp each other on Drop.
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static COUNTER: AtomicU64 = AtomicU64::new(0);
+            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
             let mut p = std::env::temp_dir();
-            p.push(format!("projectmind-test-{}", std::process::id()));
+            p.push(format!("projectmind-test-{}-{}", std::process::id(), n));
             std::fs::create_dir_all(&p).unwrap();
             Self(p)
         }
