@@ -68,6 +68,8 @@ cmd_check() {
     local cargo_args=(--workspace --all-targets)
     if [[ "${PROJECTMIND_SKIP_TAURI_APP:-}" == "1" ]]; then
         cargo_args+=(--exclude projectmind-app)
+    else
+        ensure_sidecar_placeholder
     fi
     cargo clippy "${cargo_args[@]}" -- -D warnings
 }
@@ -76,9 +78,32 @@ cmd_test() {
     local cargo_args=(--workspace)
     if [[ "${PROJECTMIND_SKIP_TAURI_APP:-}" == "1" ]]; then
         cargo_args+=(--exclude projectmind-app)
+    else
+        ensure_sidecar_placeholder
     fi
     cargo test "${cargo_args[@]}" --all-targets
     cargo test "${cargo_args[@]}" --doc
+}
+
+# tauri-build's build script validates `bundle.externalBin` paths on
+# every cargo invocation that touches the projectmind-app crate, even
+# `cargo check` / `clippy`. Stage an empty placeholder so check/test
+# don't have to do a full release build of the MCP binary just to
+# satisfy that lookup. Real release builds replace the placeholder via
+# `stage-mcp-sidecar` before `tauri build`.
+ensure_sidecar_placeholder() {
+    local sidecar_dir="$ROOT_DIR/app/src-tauri/binaries"
+    local host_triple
+    host_triple="$(rustc -vV | sed -n 's/^host: //p')"
+    local ext=""
+    case "$host_triple" in *windows*) ext=".exe" ;; esac
+    local path="$sidecar_dir/projectmind-mcp-${host_triple}${ext}"
+    if [[ -f "$path" ]]; then
+        return
+    fi
+    mkdir -p "$sidecar_dir"
+    : > "$path"
+    chmod +x "$path" 2>/dev/null || true
 }
 
 cmd_install_deps() {
