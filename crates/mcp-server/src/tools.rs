@@ -257,6 +257,11 @@ pub(crate) fn list() -> Value {
                 "inputSchema": ref_schema()
             },
             {
+                "name": "file_recency",
+                "description": "Per-file recency index for the current repo: every path's most-recent commit (sha, summary, age in seconds). Sorted newest-first. Capped at the 5,000 most-recent files / 10,000 commits walked. Use to drive heatmaps, author overlays, and other change-map visualisations.",
+                "inputSchema": no_args_schema()
+            },
+            {
                 "name": "show_diff",
                 "description": "Return unified diff between a git ref and the working tree (or another ref).",
                 "inputSchema": ref_schema()
@@ -380,6 +385,7 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "list_classes" => list_classes(state, parsed.arguments).await,
         "show_class" => show_class(state, parsed.arguments).await,
         "list_changes_since" => list_changes_since(state, parsed.arguments).await,
+        "file_recency" => file_recency(state).await,
         "show_diff" => show_diff(state, parsed.arguments).await,
         "show_diagram" => show_diagram(state, parsed.arguments).await,
         "find_class" => find_class(state, parsed.arguments).await,
@@ -542,6 +548,16 @@ async fn list_changes_since(state: &Mutex<ServerState>, args: Value) -> Dispatch
         let changes = git::list_changes_since(&repo.root, &args.from_ref, args.to.as_deref())
             .map_err(|e| DispatchError::internal(format!("git: {e}")))?;
         let body = serde_json::to_string_pretty(&changes).unwrap_or_else(|_| "[]".into());
+        Ok(text_result(body))
+    })
+}
+
+async fn file_recency(state: &Mutex<ServerState>) -> DispatchResult {
+    let state = state.lock().await;
+    with_repo(&state, |repo| {
+        let recency = git::file_recency(&repo.root)
+            .map_err(|e| DispatchError::internal(format!("git: {e}")))?;
+        let body = serde_json::to_string_pretty(&recency).unwrap_or_else(|_| "[]".into());
         Ok(text_result(body))
     })
 }

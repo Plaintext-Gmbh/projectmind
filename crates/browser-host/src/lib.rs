@@ -412,6 +412,10 @@ fn route_api(
                 &repo.root, reference, to,
             )?)?)
         }
+        ("GET", "/api/file_recency") => {
+            let repo = repo(&guard)?;
+            Ok(serde_json::to_value(git::file_recency(&repo.root)?)?)
+        }
         ("GET", "/api/show_diagram") => {
             let kind = required(query, "kind")?;
             let repo = repo(&guard)?;

@@ -309,6 +309,15 @@ fn list_changes_since(
 }
 
 #[tauri::command]
+fn file_recency(state: State<'_, Arc<AppState>>) -> Result<Vec<git::FileRecency>, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    git::file_recency(&repo.root).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn show_diagram(kind: String, state: State<'_, Arc<AppState>>) -> Result<String, String> {
     let guard = state.repo.read();
     let repo = guard
@@ -705,6 +714,7 @@ pub fn run() {
             show_class,
             class_outline,
             list_changes_since,
+            file_recency,
             show_diagram,
             show_diff,
             read_file_text,
