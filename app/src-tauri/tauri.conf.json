@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self' tauri: 'unsafe-inline' 'unsafe-eval' data: blob: ; img-src 'self' data: blob: tauri: asset: https: ; connect-src 'self' tauri: ipc: ws: wss: http://localhost:* http://127.0.0.1:* https://embed.diagrams.net ; frame-src https://embed.diagrams.net https://*.diagrams.net ; worker-src 'self' blob: ; object-src 'none' ; base-uri 'self'",
       "assetProtocol": {
         "enable": true,
         "scope": ["**"]
