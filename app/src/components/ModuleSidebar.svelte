@@ -1,5 +1,12 @@
 <script lang="ts">
-  import { modules, moduleFilter, fileCountByModule, moduleFilesByModule } from '../lib/store';
+  import {
+    modules,
+    moduleFilter,
+    fileCountByModule,
+    moduleFilesByModule,
+    moduleSidebarVisible,
+  } from '../lib/store';
+  import { t } from '../lib/i18n';
 
   function setModule(id: string | null) {
     moduleFilter.update((cur) => (cur === id ? null : id));
@@ -22,7 +29,15 @@
 <aside>
   <header>
     <h3>Modules</h3>
-    <span class="count">{$modules.length}</span>
+    <div class="actions">
+      <span class="count">{$modules.length}</span>
+      <button
+        class="collapse"
+        on:click={() => moduleSidebarVisible.set(false)}
+        title={$t('layout.modules.hide')}
+        aria-label={$t('layout.modules.hide')}
+      >‹</button>
+    </div>
   </header>
   <ul>
     <li class:active={$moduleFilter === null}>
@@ -72,10 +87,35 @@
     font-weight: 600;
   }
 
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
   .count {
     color: var(--fg-2);
     font-family: var(--mono);
     font-size: 11px;
+  }
+
+  .collapse {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--bg-3);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--fg-2);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .collapse:hover {
+    background: var(--bg-2);
+    color: var(--accent-2);
+    border-color: var(--accent-2);
   }
 
   ul {

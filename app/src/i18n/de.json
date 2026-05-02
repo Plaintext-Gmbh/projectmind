@@ -127,5 +127,9 @@
   "outline.hide": "Übersicht ausblenden",
   "outline.inheritance": "Vererbung",
   "gutter.show": "Annotierten Gutter einblenden",
-  "gutter.hide": "Annotierten Gutter ausblenden"
+  "gutter.hide": "Annotierten Gutter ausblenden",
+  "layout.modules.show": "Modul-Seitenleiste einblenden",
+  "layout.modules.hide": "Modul-Seitenleiste ausblenden",
+  "layout.files.show": "Datei-Seitenleiste einblenden",
+  "layout.files.hide": "Datei-Seitenleiste ausblenden"
 }

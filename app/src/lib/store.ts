@@ -110,3 +110,37 @@ export const fileCountByModule = derived(moduleFilesByModule, ($byMod) => {
   }
   return counts;
 });
+
+/// Persisted boolean store backed by localStorage. Used for the
+/// sidebar-collapse toggles below — survives reloads so the layout
+/// stays the way the user left it.
+function persistedBool(key: string, fallback: boolean) {
+  let initial = fallback;
+  try {
+    const v = typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
+    if (v === '1') initial = true;
+    else if (v === '0') initial = false;
+  } catch {
+    // localStorage unavailable
+  }
+  const inner = writable<boolean>(initial);
+  inner.subscribe((v) => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(key, v ? '1' : '0');
+      }
+    } catch {
+      // ignore — storage unavailable / quota exceeded
+    }
+  });
+  return inner;
+}
+
+/// Whether the modules sidebar (leftmost column) is rendered. When false,
+/// a thin rail with a `›` button takes its place so the user can re-open
+/// the panel.
+export const moduleSidebarVisible = persistedBool('projectmind.layout.modulesVisible', true);
+
+/// Whether the class/file sidebar (middle column) is rendered. When false,
+/// the viewer expands to fill the freed space.
+export const classSidebarVisible = persistedBool('projectmind.layout.filesVisible', true);
