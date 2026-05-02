@@ -87,5 +87,14 @@
   "diff.kind": "diff",
   "diff.workingTree": "working tree",
   "diff.computing": "Computing diff...",
-  "diff.noChanges": "No changes."
+  "diff.noChanges": "No changes.",
+  "keyboard.title": "Keyboard shortcuts",
+  "keyboard.section.navigation": "Navigation",
+  "keyboard.section.zoom": "Zoom",
+  "keyboard.row.back": "Back",
+  "keyboard.row.forward": "Forward",
+  "keyboard.row.help": "Show this cheatsheet",
+  "keyboard.row.close": "Close",
+  "keyboard.row.zoom": "Zoom in / out (any viewer)",
+  "keyboard.hint": "Tip: typing inside a text field disables these shortcuts."
 }

@@ -43,6 +43,7 @@
   import ImageView from './components/ImageView.svelte';
   import PdfView from './components/PdfView.svelte';
   import DiffView from './components/DiffView.svelte';
+  import KeyboardHelp from './components/KeyboardHelp.svelte';
   // Heavy components — pulled in dynamically the first time the user
   // visits the matching tab. mermaid (~640 KB) and marked (~40 KB) ride
   // along with DiagramView / FileView / WalkthroughView etc., so keeping
@@ -226,6 +227,8 @@
     nav.forward(applyHistoryEntry);
   }
 
+  let kbdHelpOpen = false;
+
   function onNavKey(ev: KeyboardEvent) {
     // Don't steal navigation keys while the user is typing in a field.
     const t = ev.target as HTMLElement | null;
@@ -238,6 +241,12 @@
     } else if (cmdOrAlt && (ev.key === ']' || ev.key === 'ArrowRight')) {
       ev.preventDefault();
       navForward();
+    } else if (ev.key === '?' && !ev.metaKey && !ev.ctrlKey) {
+      // Bare `?` (Shift+/) opens the keyboard cheatsheet — same shortcut as
+      // every modern web app + Slack + GitHub. The carve-out above keeps it
+      // from firing while the user is typing inside an input or textarea.
+      ev.preventDefault();
+      kbdHelpOpen = true;
     }
   }
   // Reactive auto-push: any time a navigation-relevant store / local var
@@ -858,6 +867,12 @@
       >
         {theme === 'dark' ? '☀' : '☾'}
       </button>
+      <button
+        class="kbd-help-toggle"
+        on:click={() => (kbdHelpOpen = true)}
+        title="{$t('keyboard.title')} (?)"
+        aria-label={$t('keyboard.title')}
+      >?</button>
     </nav>
   </header>
 
@@ -1114,6 +1129,8 @@
       </div>
     </div>
   {/if}
+
+  <KeyboardHelp bind:open={kbdHelpOpen} />
 </main>
 
 <style>
@@ -1291,6 +1308,16 @@
     padding: 6px 0;
     text-align: center;
     font-size: 15px;
+    line-height: 1;
+  }
+
+  .kbd-help-toggle {
+    width: 28px;
+    padding: 6px 0;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
     line-height: 1;
   }
 

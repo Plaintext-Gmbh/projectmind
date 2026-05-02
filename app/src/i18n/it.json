@@ -87,5 +87,14 @@
   "diff.kind": "diff",
   "diff.workingTree": "working tree",
   "diff.computing": "Calcolo diff...",
-  "diff.noChanges": "Nessuna modifica."
+  "diff.noChanges": "Nessuna modifica.",
+  "keyboard.title": "Scorciatoie da tastiera",
+  "keyboard.section.navigation": "Navigazione",
+  "keyboard.section.zoom": "Zoom",
+  "keyboard.row.back": "Indietro",
+  "keyboard.row.forward": "Avanti",
+  "keyboard.row.help": "Mostra questo riepilogo",
+  "keyboard.row.close": "Chiudi",
+  "keyboard.row.zoom": "Zoom avanti / indietro (qualsiasi viewer)",
+  "keyboard.hint": "Suggerimento: queste scorciatoie sono disabilitate nei campi di testo."
 }
