@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Tab registry as a plugin contract** — `TabContribution` + `provided_tabs()` on `LanguagePlugin` / `FrameworkPlugin`; `Engine::available_tabs(repo)` aggregates core tabs (`files`, `diagrams`) with plugin contributions; `App.svelte` renders nav buttons dynamically from `RepoSummary.tabs`. Future plugins (e.g. a `framework-junit` "Tests" tab) can drop in a top-level entry without touching frontend code — the prerequisite for Phase 2's dynamic plugin loading.
+
+### Changed
+
+- **Roadmap and backlog moved from `docs/plan/` and `TODO.md` to GitHub Issues / Discussions.** `docs/plan/03-architecture.md` is now `docs/architecture.md` (living reference). Vision, persistence, visualisation catalogue, and walkthrough follow-ups are tracked as Issues; vision discussion lives on GitHub Discussions. README and CONTRIBUTING updated to point at the new locations.
+
 ## [0.3.0] — 2026-05-02
 
 The first release that bundles the Phase-1 UI work that had been sitting
