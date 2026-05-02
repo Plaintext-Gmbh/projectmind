@@ -259,16 +259,22 @@ A Cargo workspace with seven crates plus a Svelte frontend:
 
 Phase 1 plugins are **statically registered**. Phase 2 will add dynamic loading from a `./plugins/` directory next to the binary, so third-party plugins can drop in `.so` / `.dylib` files.
 
-See [`docs/SYNC.md`](docs/SYNC.md) for how the MCP server and the Tauri GUI stay in sync (statefile + view intents).
+## Reference docs (in the repo)
 
-See [`docs/plan/`](docs/plan/) for the full design notes:
+- [`docs/architecture.md`](docs/architecture.md) — workspace layout, plugin API, MCP tool schemas. Living reference, kept in sync with the code.
+- [`docs/SYNC.md`](docs/SYNC.md) — how the MCP server and the Tauri GUI stay in sync (statefile + view intents).
+- [`docs/branding.md`](docs/branding.md) — colour, typography, logo specs.
+- [`docs/reviews/`](docs/reviews/) — historical architecture reviews.
 
-- [01-brainstorming-vision.md](docs/plan/01-brainstorming-vision.md) — vision, requirements, user stories
-- [02-persistence.md](docs/plan/02-persistence.md) — annotation + graph storage backends (Mempalace, SurrealDB, SQLite, JSON)
-- [03-architecture.md](docs/plan/03-architecture.md) — workspace, plugin API, MCP tool schemas
-- [04-visualizations.md](docs/plan/04-visualizations.md) — visualisation catalogue and "wow factor" sketches
+## Roadmap & planning
 
-## Roadmap
+The roadmap and feature backlog now live on **GitHub**:
+
+- **[Issues](https://github.com/Plaintext-Gmbh/projectmind/issues)** — concrete, schedulable work items (bugs, features, sub-tasks of epics)
+- **[Project board](https://github.com/Plaintext-Gmbh/projectmind/projects)** — Kanban view of what's in flight
+- **[Discussions](https://github.com/Plaintext-Gmbh/projectmind/discussions)** — vision, longer-form design conversations, and visualisation sketches. The [Vision & Roadmap thread](https://github.com/Plaintext-Gmbh/projectmind/discussions/58) is the canonical place for high-level direction.
+
+Phase summary:
 
 - **Phase 1 (done):** MCP server with Java + Spring + Lombok plugins, Rust plugin, package tree, bean graph, folder map, diff view, Markdown + HTML browsers, walkthrough mode, core MCP tools, Tauri shell with bidirectional MCP sync.
 - **Phase 2 (in progress):** Annotation round-trip, ~~draw.io embed~~ (`.drawio` files render via the embedded diagrams.net viewer), Confluence MCP bridge, dynamic plugin loading from `./plugins/`.

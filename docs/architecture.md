@@ -1,6 +1,6 @@
 # Architecture
 
-> **Status:** 2026-04-28 — initial architecture design. Iterates with the MVP.
+> **Status:** living reference — kept in sync with the codebase. For roadmap and open design questions, see [GitHub Issues](https://github.com/Plaintext-Gmbh/projectmind/issues) and the [Vision & Roadmap discussion](https://github.com/Plaintext-Gmbh/projectmind/discussions/58).
 
 ## Workspace Layout
 

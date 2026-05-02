@@ -6,10 +6,11 @@ Thanks for your interest! `projectmind` is an **early MVP** — the MCP server a
 
 ### Discuss the Design
 
-The current design notes live under [`docs/plan/`](docs/plan/). If something is unclear, missing, or could be improved:
+Architecture and reference docs live under [`docs/`](docs/) (see `architecture.md`, `SYNC.md`, `branding.md`). The roadmap and feature backlog live on GitHub:
 
-- Open a [Discussion](https://github.com/Plaintext-Gmbh/projectmind/discussions) for open-ended topics
-- Open an [Issue](https://github.com/Plaintext-Gmbh/projectmind/issues) for concrete proposals or problems
+- **[Discussions](https://github.com/Plaintext-Gmbh/projectmind/discussions)** for vision, brainstorming, sketches — start with the [Vision & Roadmap thread](https://github.com/Plaintext-Gmbh/projectmind/discussions/58)
+- **[Issues](https://github.com/Plaintext-Gmbh/projectmind/issues)** for concrete proposals, bugs, sub-tasks of epics
+- **[Project board](https://github.com/Plaintext-Gmbh/projectmind/projects)** for what's currently in flight
 
 ### Reporting Bugs
 
