@@ -44,26 +44,30 @@
   // ----- Folder-map colour-by state ----------------------------------------
 
   // 'structure' (default) keeps the existing per-kind palette; 'recency'
-  // tints each leaf by how long ago it was last touched, with folders
-  // inheriting the most-recent timestamp from their descendants. Persisted
-  // per-browser so the user's preference sticks across sessions.
-  type ColorBy = 'structure' | 'recency';
+  // tints each leaf by how long ago it was last touched; 'author' tints
+  // by the most-recent committer. Folders inherit the fact of the most
+  // recent descendant so both git-driven modes stay consistent.
+  // Persisted per-browser so the user's preference sticks across sessions.
+  type ColorBy = 'structure' | 'recency' | 'author';
   const COLOR_BY_KEY = 'projectmind.diagram.folderMap.colorBy';
   let colorBy: ColorBy = readColorByPref();
-  // path (forward-slash, repo-relative) → seconds since the most recent
-  // commit that touched the file. `null` means "haven't loaded yet";
-  // an empty Map means "loaded, repo has no git history".
-  let recencyByPath: Map<string, number> | null = null;
-  let recencyForRoot: string | null = null;
-  let recencyError: string | null = null;
+  /// Per-path git fact: how long ago + who. Both recency and author modes
+  /// read from this single cache so toggling between them doesn't re-fetch.
+  /// `null` means "haven't loaded yet"; an empty Map means "loaded, repo
+  /// has no git history".
+  type GitFact = { secs_ago: number; author: string | null };
+  let factsByPath: Map<string, GitFact> | null = null;
+  let factsForRoot: string | null = null;
+  let gitError: string | null = null;
 
   function readColorByPref(): ColorBy {
     try {
       const v = localStorage.getItem(COLOR_BY_KEY);
-      return v === 'recency' ? 'recency' : 'structure';
+      if (v === 'recency' || v === 'author' || v === 'structure') return v;
     } catch {
-      return 'structure';
+      // localStorage unavailable
     }
+    return 'structure';
   }
 
   function writeColorByPref(v: ColorBy) {
@@ -81,29 +85,42 @@
     void render(kind, folderLayout);
   }
 
-  /// Fetch the recency index for the current repo if we haven't already, then
-  /// re-render. Best-effort: failure is non-fatal, the heatmap just stays in
-  /// "structure" mode and surfaces the error in the toolbar.
-  async function ensureRecencyForCurrentRepo(): Promise<void> {
+  /// Fetch the per-file git facts (recency + author) for the current repo
+  /// if we haven't already, then trigger a re-render. Best-effort: failure
+  /// is non-fatal — the diagram falls back to structure colouring and the
+  /// toolbar shows a "git unavailable" hint.
+  async function ensureGitFactsForCurrentRepo(): Promise<void> {
     const root = $repo?.root ?? null;
     if (!root) return;
-    if (recencyForRoot === root && recencyByPath !== null) return;
+    if (factsForRoot === root && factsByPath !== null) return;
     try {
       const items = await fileRecency();
-      const map = new Map<string, number>();
+      const map = new Map<string, GitFact>();
       for (const item of items) {
         // Normalise Windows backslashes so the lookup matches the
         // forward-slash ids the folder-map renderer uses.
-        map.set(item.path.replace(/\\/g, '/'), item.secs_ago);
+        map.set(item.path.replace(/\\/g, '/'), {
+          secs_ago: item.secs_ago,
+          author: authorIdentity(item.author_name, item.author_email),
+        });
       }
-      recencyByPath = map;
-      recencyForRoot = root;
-      recencyError = null;
+      factsByPath = map;
+      factsForRoot = root;
+      gitError = null;
     } catch (err) {
-      recencyError = String(err);
-      recencyByPath = new Map();
-      recencyForRoot = root;
+      gitError = String(err);
+      factsByPath = new Map();
+      factsForRoot = root;
     }
+  }
+
+  /// Pick the stablest per-author identity from a name + email pair. Email
+  /// wins when present (people change display names but not email); falls
+  /// back to the display name; null when the signature was empty.
+  function authorIdentity(name: string | null, email: string | null): string | null {
+    if (email && email.trim()) return email.trim().toLowerCase();
+    if (name && name.trim()) return name.trim();
+    return null;
   }
 
   // viewport state
@@ -191,11 +208,12 @@
     loading = true;
     error = null;
     try {
-      // Fire the recency fetch in parallel with showDiagram. Only blocks
-      // when the user is actually looking at the folder map in recency
-      // mode — otherwise the result is unused but cached for next time.
-      const wantRecency = k === 'folder-map' && colorBy === 'recency';
-      if (wantRecency) await ensureRecencyForCurrentRepo();
+      // Fetch git facts (recency + author) when the user is looking at
+      // the folder map in either git-driven mode. Cached per repo root,
+      // so toggling between R and A re-renders without a re-fetch.
+      const wantGitFacts =
+        k === 'folder-map' && (colorBy === 'recency' || colorBy === 'author');
+      if (wantGitFacts) await ensureGitFactsForCurrentRepo();
 
       const payload = await showDiagram(k);
       if (k === 'folder-map') {
@@ -255,12 +273,17 @@
   function buildFillFor(
     map: FolderMap,
   ): (id: string, kind: 'root' | 'folder' | 'file') => string | null {
-    if (colorBy !== 'recency' || !recencyByPath || recencyByPath.size === 0) {
+    if (
+      (colorBy !== 'recency' && colorBy !== 'author') ||
+      !factsByPath ||
+      factsByPath.size === 0
+    ) {
       return () => null;
     }
-    // Aggregate per id: a folder is "as recent as" its most-recent
-    // descendant (min secs_ago over the subtree). One DFS pass populates
-    // both leaf and folder entries.
+    // Aggregate per id: each node inherits the GitFact of its most recent
+    // descendant (min secs_ago across the subtree). Recency mode reads the
+    // age, author mode reads the author identity — both stay consistent
+    // because they share the same "winning leaf".
     const byParent = new Map<string, FolderMapNode[]>();
     for (const n of map.nodes) {
       if (!n.parent) continue;
@@ -268,30 +291,37 @@
       arr.push(n);
       byParent.set(n.parent, arr);
     }
-    const recencyById = new Map<string, number>();
-    const recency = recencyByPath;
-    function visit(node: FolderMapNode): number | null {
+    const factById = new Map<string, GitFact>();
+    const facts = factsByPath;
+    function visit(node: FolderMapNode): GitFact | null {
       if (node.kind === 'file') {
-        const s = recency.get(node.id);
-        if (s !== undefined) recencyById.set(node.id, s);
-        return s ?? null;
+        const f = facts.get(node.id) ?? null;
+        if (f) factById.set(node.id, f);
+        return f;
       }
       const children = byParent.get(node.id) ?? [];
-      let best: number | null = null;
+      let best: GitFact | null = null;
       for (const c of children) {
         const v = visit(c);
-        if (v !== null && (best === null || v < best)) best = v;
+        if (v !== null && (best === null || v.secs_ago < best.secs_ago)) best = v;
       }
-      if (best !== null) recencyById.set(node.id, best);
+      if (best !== null) factById.set(node.id, best);
       return best;
     }
     const rootNode = map.nodes.find((n) => n.parent === null);
     if (rootNode) visit(rootNode);
 
+    if (colorBy === 'recency') {
+      return (id) => {
+        const f = factById.get(id);
+        return f ? recencyColor(f.secs_ago) : null;
+      };
+    }
+    // author mode
     return (id) => {
-      const s = recencyById.get(id);
-      if (s === undefined) return null;
-      return recencyColor(s);
+      const f = factById.get(id);
+      if (!f || !f.author) return null;
+      return authorColor(f.author);
     };
   }
 
@@ -309,6 +339,23 @@
     const sat = 78 - 50 * t;
     const light = 52 - 18 * t;
     return `hsl(${hue.toFixed(0)}, ${sat.toFixed(0)}%, ${light.toFixed(0)}%)`;
+  }
+
+  /// Map an author identity (email when available, else display name) onto
+  /// a stable HSL colour. djb2-style 32-bit hash → hue; saturation and
+  /// lightness are fixed so all authors render at the same chroma. This
+  /// is intentionally not "primary author by line count" — that would
+  /// require git blame and far more work; "most recent committer per file"
+  /// is a cheap proxy that correlates well in practice.
+  function authorColor(identity: string): string {
+    let h = 5381;
+    for (let i = 0; i < identity.length; i++) {
+      h = ((h << 5) + h + identity.charCodeAt(i)) | 0;
+    }
+    // Use the unsigned 32-bit mod 360 so identical strings always map to
+    // the same hue across reloads / processes.
+    const hue = ((h >>> 0) % 360);
+    return `hsl(${hue}, 60%, 52%)`;
   }
 
   /// Helper used by all three folder-map layouts. Returns the `<circle>`
@@ -635,8 +682,14 @@
         title="Colour by last commit recency — recent files glow, stale ones recede"
         aria-pressed={colorBy === 'recency'}
       >R</button>
-      {#if colorBy === 'recency' && recencyError}
-        <span class="hint" style="color: var(--error);" title={recencyError}>⚠ git unavailable</span>
+      <button
+        class:active={colorBy === 'author'}
+        on:click={() => setColorBy('author')}
+        title="Colour by last committer — same author always gets the same hue"
+        aria-pressed={colorBy === 'author'}
+      >A</button>
+      {#if (colorBy === 'recency' || colorBy === 'author') && gitError}
+        <span class="hint" style="color: var(--error);" title={gitError}>⚠ git unavailable</span>
       {/if}
     {/if}
     <span class="zoom-readout">{Math.round(scale * 100)}%</span>

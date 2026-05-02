@@ -207,6 +207,12 @@ export interface FileRecency {
   sha: string;
   /// First line of that commit's message.
   summary: string;
+  /// Author display name of the most-recent touching commit, or null when
+  /// the signature was missing or empty.
+  author_name: string | null;
+  /// Author email of the same commit. Combined with `author_name` it gives
+  /// the stable identity the GUI's author overlay hashes onto a hue.
+  author_email: string | null;
 }
 
 /// Per-file recency index for the open repo. Drives change-map visualisations
