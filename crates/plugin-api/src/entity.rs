@@ -63,9 +63,40 @@ pub struct Class {
     /// Stereotypes attached by framework plugins (e.g. `service`, `controller`, `dto`).
     pub stereotypes: Vec<String>,
 
+    /// Super types declared on this class — `extends` targets (typically
+    /// just one in Java; none on Rust types) and `implements` / Rust trait-
+    /// `impl` targets. Names are kept as written in source: language plugins
+    /// don't try to resolve to fully-qualified names since imports may live
+    /// in other files. Consumers that need FQN resolution can do their own
+    /// pass against the parsed [`Module`].
+    #[serde(default)]
+    pub super_types: Vec<TypeRef>,
+
     /// Free-form metadata that framework plugins may attach.
     #[serde(default)]
     pub extras: BTreeMap<String, serde_json::Value>,
+}
+
+/// A reference to another type, declared as a parent or implemented interface.
+/// Plain simple-or-qualified name as written in source — no FQN resolution.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TypeRef {
+    /// Type name as written in source (`AbstractEntity`, `java.io.Serializable`, `Display`).
+    pub name: String,
+    /// Whether this is an `extends` target or an `implements` / trait-impl target.
+    pub kind: TypeRefKind,
+}
+
+/// How a [`TypeRef`] relates to its bearing class.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TypeRefKind {
+    /// Java `extends`. The bearing class inherits from this type.
+    #[default]
+    Extends,
+    /// Java `implements` or Rust `impl Trait for T` — the bearing class
+    /// satisfies this interface / trait without inheriting from it.
+    Implements,
 }
 
 /// Kind of class-like entity.
