@@ -38,7 +38,10 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "Read-only architecture browser",
-    "longDescription": "A read-only architecture browser that pairs with LLM coding agents via MCP."
+    "longDescription": "A read-only architecture browser that pairs with LLM coding agents via MCP.",
+    "externalBin": [
+      "binaries/projectmind-mcp"
+    ]
   },
   "plugins": {}
 }

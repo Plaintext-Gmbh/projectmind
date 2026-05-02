@@ -36,6 +36,14 @@ Commands:
                               platform (.app/.dmg on macOS, .deb/.AppImage on Linux,
                               .msi/.exe on Windows). Optional Rust target triple
                               for cross-arch builds (e.g. universal-apple-darwin).
+                              Stages the MCP binary as a Tauri sidecar first so
+                              the bundle ships both binaries.
+  stage-mcp-sidecar [<target>]
+                              Build projectmind-mcp for the given target (host
+                              triple if omitted; per-arch + lipo for
+                              universal-apple-darwin) and copy it to
+                              app/src-tauri/binaries/ where tauri-bundler's
+                              externalBin lookup finds it.
   app-package <target> <suffix>
                               Collect every Tauri bundle artefact under
                               target/<target>/release/bundle into
@@ -60,6 +68,8 @@ cmd_check() {
     local cargo_args=(--workspace --all-targets)
     if [[ "${PROJECTMIND_SKIP_TAURI_APP:-}" == "1" ]]; then
         cargo_args+=(--exclude projectmind-app)
+    else
+        ensure_sidecar_placeholder
     fi
     cargo clippy "${cargo_args[@]}" -- -D warnings
 }
@@ -68,9 +78,32 @@ cmd_test() {
     local cargo_args=(--workspace)
     if [[ "${PROJECTMIND_SKIP_TAURI_APP:-}" == "1" ]]; then
         cargo_args+=(--exclude projectmind-app)
+    else
+        ensure_sidecar_placeholder
     fi
     cargo test "${cargo_args[@]}" --all-targets
     cargo test "${cargo_args[@]}" --doc
+}
+
+# tauri-build's build script validates `bundle.externalBin` paths on
+# every cargo invocation that touches the projectmind-app crate, even
+# `cargo check` / `clippy`. Stage an empty placeholder so check/test
+# don't have to do a full release build of the MCP binary just to
+# satisfy that lookup. Real release builds replace the placeholder via
+# `stage-mcp-sidecar` before `tauri build`.
+ensure_sidecar_placeholder() {
+    local sidecar_dir="$ROOT_DIR/app/src-tauri/binaries"
+    local host_triple
+    host_triple="$(rustc -vV | sed -n 's/^host: //p')"
+    local ext=""
+    case "$host_triple" in *windows*) ext=".exe" ;; esac
+    local path="$sidecar_dir/projectmind-mcp-${host_triple}${ext}"
+    if [[ -f "$path" ]]; then
+        return
+    fi
+    mkdir -p "$sidecar_dir"
+    : > "$path"
+    chmod +x "$path" 2>/dev/null || true
 }
 
 cmd_install_deps() {
@@ -149,6 +182,12 @@ cmd_release_package() {
 
 cmd_app_build() {
     local target="${1:-}"
+    # Stage the MCP server as a Tauri sidecar before kicking off the
+    # bundle build. tauri.conf.json declares `externalBin` so the bundler
+    # picks up `app/src-tauri/binaries/projectmind-mcp-<triple>{ext}` and
+    # ships it next to the GUI binary inside the .app/.deb/.msi.
+    cmd_stage_mcp_sidecar "$target"
+
     cd "$ROOT_DIR/app"
     if [[ ! -d node_modules ]]; then
         echo "app-build: installing js deps (first run)"
@@ -162,6 +201,50 @@ cmd_app_build() {
         pnpm tauri build
     fi
     cd "$ROOT_DIR"
+}
+
+# Build the MCP server binary for the requested target(s) and copy it
+# into `app/src-tauri/binaries/` under the Rust target triple Tauri's
+# externalBin lookup expects. On macOS universal builds we lipo the two
+# arch slices into one fat binary because Tauri 2 doesn't auto-combine
+# external binaries the way it does the main bundle.
+cmd_stage_mcp_sidecar() {
+    local target="${1:-}"
+    local sidecar_dir="$ROOT_DIR/app/src-tauri/binaries"
+    mkdir -p "$sidecar_dir"
+
+    if [[ -z "$target" ]]; then
+        # Host build — let cargo pick the default triple.
+        local host_triple
+        host_triple="$(rustc -vV | sed -n 's/^host: //p')"
+        local ext=""
+        case "$host_triple" in *windows*) ext=".exe" ;; esac
+        echo "stage-mcp-sidecar: host target $host_triple"
+        cargo build --release --bin projectmind-mcp
+        cp "$ROOT_DIR/target/release/projectmind-mcp${ext}" \
+           "$sidecar_dir/projectmind-mcp-${host_triple}${ext}"
+        return
+    fi
+
+    if [[ "$target" == "universal-apple-darwin" ]]; then
+        echo "stage-mcp-sidecar: universal-apple-darwin (lipo aarch64 + x86_64)"
+        for t in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --bin projectmind-mcp --target "$t"
+            cp "$ROOT_DIR/target/$t/release/projectmind-mcp" \
+               "$sidecar_dir/projectmind-mcp-$t"
+        done
+        lipo -create -output "$sidecar_dir/projectmind-mcp-universal-apple-darwin" \
+            "$sidecar_dir/projectmind-mcp-aarch64-apple-darwin" \
+            "$sidecar_dir/projectmind-mcp-x86_64-apple-darwin"
+        return
+    fi
+
+    local ext=""
+    case "$target" in *windows*) ext=".exe" ;; esac
+    echo "stage-mcp-sidecar: $target"
+    cargo build --release --bin projectmind-mcp --target "$target"
+    cp "$ROOT_DIR/target/$target/release/projectmind-mcp${ext}" \
+       "$sidecar_dir/projectmind-mcp-${target}${ext}"
 }
 
 cmd_app_package() {
@@ -215,11 +298,12 @@ case "${1:-}" in
     check)           shift; cmd_check "$@" ;;
     test)            shift; cmd_test "$@" ;;
     install-deps)    shift; cmd_install_deps "$@" ;;
-    release-build)   shift; cmd_release_build "$@" ;;
-    release-smoke)   shift; cmd_release_smoke "$@" ;;
-    release-package) shift; cmd_release_package "$@" ;;
-    app-build)       shift; cmd_app_build "$@" ;;
-    app-package)     shift; cmd_app_package "$@" ;;
+    release-build)     shift; cmd_release_build "$@" ;;
+    release-smoke)     shift; cmd_release_smoke "$@" ;;
+    release-package)   shift; cmd_release_package "$@" ;;
+    stage-mcp-sidecar) shift; cmd_stage_mcp_sidecar "$@" ;;
+    app-build)         shift; cmd_app_build "$@" ;;
+    app-package)       shift; cmd_app_package "$@" ;;
     all)             cmd_check; cmd_test ;;
     -h|--help|help|"") usage ;;
     *) echo "unknown command: $1" >&2; usage; exit 2 ;;
