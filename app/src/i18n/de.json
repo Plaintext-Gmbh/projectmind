@@ -131,5 +131,6 @@
   "layout.modules.show": "Modul-Seitenleiste einblenden",
   "layout.modules.hide": "Modul-Seitenleiste ausblenden",
   "layout.files.show": "Datei-Seitenleiste einblenden",
-  "layout.files.hide": "Datei-Seitenleiste ausblenden"
+  "layout.files.hide": "Datei-Seitenleiste ausblenden",
+  "index.moduleFilter.clear": "Modulfilter löschen"
 }

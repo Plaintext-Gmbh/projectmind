@@ -1,7 +1,7 @@
 <script lang="ts">
   import { searchMarkdown } from '../lib/api';
   import type { MarkdownFile, MarkdownHit } from '../lib/api';
-  import { repo, fileView, viewMode } from '../lib/store';
+  import { repo, fileView, viewMode, modules, moduleFilter } from '../lib/store';
   import { t } from '../lib/i18n';
   import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
 
@@ -79,9 +79,29 @@
     return idx === -1 ? '·' : rel.slice(0, idx);
   }
 
+  /// When a module is selected in the modules sidebar, narrow the index to
+  /// markdown files that live under that module's root. Lookup happens against
+  /// `$modules` so we can match the module id back to its absolute root path.
+  $: selectedModuleRoot = pickModuleRoot($moduleFilter, $modules);
+  $: visibleHits = filterByModuleRoot(hits, selectedModuleRoot);
+
+  function pickModuleRoot(
+    moduleId: string | null,
+    mods: Array<{ id: string; root: string }>,
+  ): string | null {
+    if (!moduleId) return null;
+    return mods.find((m) => m.id === moduleId)?.root ?? null;
+  }
+
+  function filterByModuleRoot(list: MarkdownHit[], root: string | null): MarkdownHit[] {
+    if (!root) return list;
+    const prefix = root.endsWith('/') ? root : `${root}/`;
+    return list.filter((h) => h.file.abs === root || h.file.abs.startsWith(prefix));
+  }
+
   /// Group hits when no query is active (browsing mode); flat scored list when
   /// a query is in flight (relevance order matters more than directory).
-  $: grouped = query.trim() ? null : groupByDir(hits);
+  $: grouped = query.trim() ? null : groupByDir(visibleHits);
 
   function groupByDir(list: MarkdownHit[]): Array<[string, MarkdownHit[]]> {
     const map = new Map<string, MarkdownHit[]>();
@@ -109,11 +129,21 @@
       {#if $repo}
         <span class="subtitle">
           {#if query.trim()}
-            {$t('markdown.hitsIn', { count: hits.length, root: $repo.root })}
+            {$t('markdown.hitsIn', { count: visibleHits.length, root: $repo.root })}
           {:else}
-            {$t('markdown.filesIn', { count: hits.length, root: $repo.root })}
+            {$t('markdown.filesIn', { count: visibleHits.length, root: $repo.root })}
           {/if}
         </span>
+        {#if $moduleFilter}
+          <button
+            class="module-chip"
+            on:click={() => moduleFilter.set(null)}
+            title={$t('index.moduleFilter.clear')}
+          >
+            <span class="chip-label">{$moduleFilter}</span>
+            <span class="chip-x" aria-hidden="true">×</span>
+          </button>
+        {/if}
       {:else}
         <span class="subtitle">{$t('markdown.noRepositoryOpen')}</span>
       {/if}
@@ -125,7 +155,7 @@
       placeholder={$t('markdown.searchPlaceholder')}
       autocomplete="off"
       spellcheck="false"
-      disabled={!$repo || (loadedFor !== null && hits.length === 0 && !query.trim())}
+      disabled={!$repo || (loadedFor !== null && visibleHits.length === 0 && !query.trim())}
     />
     {#if searching}
       <span class="searching" aria-live="polite">{$t('markdown.searching')}</span>
@@ -139,9 +169,9 @@
       <div class="empty">{$t('markdown.scanning')}</div>
     {:else if error}
       <div class="error">⚠ {error}</div>
-    {:else if hits.length === 0 && !query.trim()}
+    {:else if visibleHits.length === 0 && !query.trim()}
       <div class="empty">{$t('markdown.noFiles')}</div>
-    {:else if hits.length === 0}
+    {:else if visibleHits.length === 0}
       <div class="empty">{$t('markdown.noMatchesFor', { query })}</div>
     {:else if grouped}
       {#each grouped as [dir, entries] (dir)}
@@ -162,7 +192,7 @@
       {/each}
     {:else}
       <ul class="list flat">
-        {#each hits as h (h.file.abs)}
+        {#each visibleHits as h (h.file.abs)}
           <li>
             <button type="button" class="item" on:click={() => open(h.file)}>
               <span class="item-title">{h.file.title}</span>
@@ -216,6 +246,30 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 460px;
+  }
+
+  .module-chip {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 2px;
+    padding: 1px 6px 1px 8px;
+    background: color-mix(in srgb, var(--accent-2) 18%, var(--bg-2));
+    border: 1px solid color-mix(in srgb, var(--accent-2) 40%, var(--bg-3));
+    border-radius: 10px;
+    color: var(--fg-0);
+    font-family: var(--mono);
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .module-chip:hover {
+    border-color: var(--accent-2);
+  }
+  .module-chip .chip-x {
+    color: var(--fg-2);
+    font-size: 13px;
+    line-height: 1;
   }
 
   .search {

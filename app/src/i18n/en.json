@@ -131,5 +131,6 @@
   "layout.modules.show": "Show modules sidebar",
   "layout.modules.hide": "Hide modules sidebar",
   "layout.files.show": "Show files sidebar",
-  "layout.files.hide": "Hide files sidebar"
+  "layout.files.hide": "Hide files sidebar",
+  "index.moduleFilter.clear": "Clear module filter"
 }
