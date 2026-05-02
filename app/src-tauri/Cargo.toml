@@ -39,3 +39,10 @@ tracing-subscriber = { workspace = true }
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+# Desktop-only single-instance guard: a second `projectmind-app` started while
+# one is already running forwards its launch args to the existing instance and
+# then exits. Combined with the MCP-server heartbeat check this prevents the
+# `open_repo` "double window" bug (#74).
+[target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'.dependencies]
+tauri-plugin-single-instance = "2"
