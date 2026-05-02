@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-05-02
+
 ### Added
 
 - **Tab registry as a plugin contract** — `TabContribution` + `provided_tabs()` on `LanguagePlugin` / `FrameworkPlugin`; `Engine::available_tabs(repo)` aggregates core tabs (`files`, `diagrams`) with plugin contributions; `App.svelte` renders nav buttons dynamically from `RepoSummary.tabs`. Future plugins (e.g. a `framework-junit` "Tests" tab) can drop in a top-level entry without touching frontend code — the prerequisite for Phase 2's dynamic plugin loading.
@@ -14,6 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Roadmap and backlog moved from `docs/plan/` and `TODO.md` to GitHub Issues / Discussions.** `docs/plan/03-architecture.md` is now `docs/architecture.md` (living reference). Vision, persistence, visualisation catalogue, and walkthrough follow-ups are tracked as Issues; vision discussion lives on GitHub Discussions. README and CONTRIBUTING updated to point at the new locations.
+
+### Fixed
+
+- Release workflow now installs concrete Rust targets for the macOS
+  universal desktop build while keeping Tauri's
+  `universal-apple-darwin` build target.
+- Linux desktop archives package `.deb`, `.rpm`, and `.AppImage`
+  outputs reliably.
+- Windows desktop builds reference the checked-in `.ico` icon.
+- MCP release artifacts no longer include unsupported macOS x86_64
+  builds.
 
 ## [0.3.0] — 2026-05-02
 
@@ -205,6 +218,8 @@ was sitting in unpublished branches.
 - Issue and pull request templates
 - Dependabot configuration
 
-[Unreleased]: https://github.com/Plaintext-Gmbh/projectmind/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Plaintext-Gmbh/projectmind/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Plaintext-Gmbh/projectmind/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/Plaintext-Gmbh/projectmind/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Plaintext-Gmbh/projectmind/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Plaintext-Gmbh/projectmind/releases/tag/v0.1.0
