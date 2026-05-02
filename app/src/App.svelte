@@ -1179,13 +1179,26 @@
     background: var(--bg-1);
     border-bottom: 1px solid var(--bg-3);
     flex-shrink: 0;
+    /* `min-width: 0` is required so the inner flex children may shrink
+       below their intrinsic content width — otherwise a long repo path
+       in `.brand` blows the header out and pushes `nav` off-screen.
+       `gap: 12px` keeps brand and nav apart when there's slack. */
+    min-width: 0;
+    gap: 12px;
   }
 
   .brand {
     display: flex;
     align-items: center;
     gap: 12px;
+    /* Allow the brand block to shrink (and clip its inner crumb) so the
+       nav on the right always has room to render. Without `min-width: 0`
+       a flex item refuses to shrink below its content's intrinsic width. */
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
   }
+
 
   .nav-history {
     display: inline-flex;
@@ -1327,6 +1340,14 @@
   nav {
     display: flex;
     gap: 8px;
+    /* Repeated in the header overrides above for clarity, but keeping it
+       here too means the rule survives if anyone moves the header CSS. */
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    /* Toolbar can wrap on very narrow windows instead of getting clipped;
+       align-content controls the row spacing when it does wrap. */
+    align-content: center;
+    row-gap: 4px;
   }
 
   nav button.active {

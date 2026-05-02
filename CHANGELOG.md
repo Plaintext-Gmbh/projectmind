@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Header nav buttons could disappear on narrow windows** — the `.brand` block on the left had no `min-width: 0`, so a long repo path refused to shrink and pushed the right-side `<nav>` (Files / Diagrams / Open repo / theme) off-screen. Brand block now `flex: 1 1 auto; min-width: 0; overflow: hidden` so it clips its inner crumb instead, and `nav` gets `flex-shrink: 0; flex-wrap: wrap` so it stays visible (and wraps onto a second row at extreme widths) instead of vanishing.
+- **Missing `status.*` and `nav.*` i18n keys surfaced as raw key strings** in the header status badge ("status.repoCount") and a few tooltips. Added: `status.repoCount`, `status.files.{one,other}`, `status.modules.{one,other}`, `status.noRepo`, `status.loading`, `nav.followingMcp.title`, `nav.token`, `nav.langToggle`, `nav.themeToggle.{toLight,toDark}` in EN + DE. Other locales fall through to EN via the existing dictionary fallback.
 - `maven::tests` flake under parallel execution — the per-test temp directory used a nanosecond-precision suffix that occasionally collided when cargo's parallel test runner landed two calls in the same nanosecond. Switched to a process-wide atomic counter (same pattern the engine tests already use).
 
 ## [0.3.1] — 2026-05-02
