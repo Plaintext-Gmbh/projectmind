@@ -175,14 +175,14 @@ mod tests {
     }
 
     fn tmpdir() -> PathBuf {
-        let p = std::env::temp_dir().join(format!(
-            "projectmind-mvn-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        // PID + a process-wide atomic counter so parallel tests get
+        // distinct paths. The previous nanosecond suffix collided under
+        // load (cargo's default test-threads = N CPUs, easy to land two
+        // calls in the same nanosecond on a fast machine).
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let p = std::env::temp_dir().join(format!("projectmind-mvn-{}-{}", std::process::id(), n));
         std::fs::create_dir_all(&p).unwrap();
         p
     }
