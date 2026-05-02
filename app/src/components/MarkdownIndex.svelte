@@ -1,7 +1,13 @@
 <script lang="ts">
   import { searchMarkdown } from '../lib/api';
   import type { MarkdownFile, MarkdownHit } from '../lib/api';
-  import { repo, fileView, viewMode } from '../lib/store';
+  import {
+    repo,
+    navigateTo,
+    moduleFilter,
+    modules,
+    fileBelongsToModule,
+  } from '../lib/store';
   import { t } from '../lib/i18n';
   import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
 
@@ -60,12 +66,10 @@
   }
 
   function open(f: MarkdownFile) {
-    fileView.update((cur) => ({
-      path: f.abs,
-      anchor: null,
-      nonce: (cur?.nonce ?? 0) + 1,
-    }));
-    viewMode.set('file');
+    navigateTo({
+      viewMode: 'file',
+      fileView: { path: f.abs, anchor: null, nonce: Date.now() },
+    });
   }
 
   function fmtSize(bytes: number): string {
@@ -79,9 +83,24 @@
     return idx === -1 ? '·' : rel.slice(0, idx);
   }
 
+  /// Filter hits by the active module (when set). A file belongs to a module
+  /// when its absolute path lives inside the module's root directory.
+  $: visibleHits = filterByModule(hits, $moduleFilter, $modules);
+
   /// Group hits when no query is active (browsing mode); flat scored list when
   /// a query is in flight (relevance order matters more than directory).
-  $: grouped = query.trim() ? null : groupByDir(hits);
+  $: grouped = query.trim() ? null : groupByDir(visibleHits);
+
+  function filterByModule(
+    list: MarkdownHit[],
+    modId: string | null,
+    mods: typeof $modules,
+  ): MarkdownHit[] {
+    if (modId === null) return list;
+    const target = mods.find((m) => m.id === modId);
+    if (!target) return list;
+    return list.filter((h) => fileBelongsToModule(h.file.abs, target));
+  }
 
   function groupByDir(list: MarkdownHit[]): Array<[string, MarkdownHit[]]> {
     const map = new Map<string, MarkdownHit[]>();
@@ -109,9 +128,9 @@
       {#if $repo}
         <span class="subtitle">
           {#if query.trim()}
-            {$t('markdown.hitsIn', { count: hits.length, root: $repo.root })}
+            {$t('markdown.hitsIn', { count: visibleHits.length, root: $repo.root })}
           {:else}
-            {$t('markdown.filesIn', { count: hits.length, root: $repo.root })}
+            {$t('markdown.filesIn', { count: visibleHits.length, root: $repo.root })}
           {/if}
         </span>
       {:else}
@@ -139,9 +158,9 @@
       <div class="empty">{$t('markdown.scanning')}</div>
     {:else if error}
       <div class="error">⚠ {error}</div>
-    {:else if hits.length === 0 && !query.trim()}
+    {:else if visibleHits.length === 0 && !query.trim()}
       <div class="empty">{$t('markdown.noFiles')}</div>
-    {:else if hits.length === 0}
+    {:else if visibleHits.length === 0}
       <div class="empty">{$t('markdown.noMatchesFor', { query })}</div>
     {:else if grouped}
       {#each grouped as [dir, entries] (dir)}
@@ -162,7 +181,7 @@
       {/each}
     {:else}
       <ul class="list flat">
-        {#each hits as h (h.file.abs)}
+        {#each visibleHits as h (h.file.abs)}
           <li>
             <button type="button" class="item" on:click={() => open(h.file)}>
               <span class="item-title">{h.file.title}</span>

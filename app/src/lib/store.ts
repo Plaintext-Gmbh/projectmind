@@ -1,5 +1,5 @@
-import { writable, derived } from 'svelte/store';
-import type { ClassEntry, ModuleEntry, ModuleFile, RepoSummary } from './api';
+import { writable, derived, get } from 'svelte/store';
+import type { ClassEntry, DiagramKind, ModuleEntry, ModuleFile, RepoSummary } from './api';
 
 export const repo = writable<RepoSummary | null>(null);
 export const modules = writable<ModuleEntry[]>([]);
@@ -37,6 +37,177 @@ export interface WalkthroughCursor {
 }
 export const walkthroughCursor = writable<WalkthroughCursor | null>(null);
 export const viewMode = writable<ViewMode>('classes');
+export const diagramKind = writable<DiagramKind>('bean-graph');
+
+export interface NavState {
+  viewMode: ViewMode;
+  diagramKind: DiagramKind;
+  fileView: FileView | null;
+  diffViewRef: { reference: string; to: string | null } | null;
+  selectedFqn: string | null;
+}
+
+const MAX_NAV_HISTORY = 80;
+export const navBackStack = writable<NavState[]>([]);
+export const navForwardStack = writable<NavState[]>([]);
+export const canGoBack = derived(navBackStack, ($stack) => $stack.length > 0);
+export const canGoForward = derived(navForwardStack, ($stack) => $stack.length > 0);
+
+export function currentNavState(): NavState {
+  return {
+    viewMode: get(viewMode),
+    diagramKind: get(diagramKind),
+    fileView: cloneFileView(get(fileView)),
+    diffViewRef: cloneDiffRef(get(diffViewRef)),
+    selectedFqn: get(selectedClass)?.fqn ?? null,
+  };
+}
+
+export function navigateTo(target: Partial<NavState>) {
+  const current = currentNavState();
+  const next: NavState = {
+    ...current,
+    ...target,
+    fileView: target.fileView !== undefined ? cloneFileView(target.fileView) : current.fileView,
+    diffViewRef:
+      target.diffViewRef !== undefined ? cloneDiffRef(target.diffViewRef) : current.diffViewRef,
+  };
+  if (sameNavState(current, next)) return;
+  navBackStack.update((stack) => [...stack.slice(-(MAX_NAV_HISTORY - 1)), current]);
+  navForwardStack.set([]);
+  applyNavState(next);
+}
+
+export function replaceNavState(target: Partial<NavState>) {
+  const current = currentNavState();
+  applyNavState({
+    ...current,
+    ...target,
+    fileView: target.fileView !== undefined ? cloneFileView(target.fileView) : current.fileView,
+    diffViewRef:
+      target.diffViewRef !== undefined ? cloneDiffRef(target.diffViewRef) : current.diffViewRef,
+  });
+}
+
+export function goBack() {
+  const stack = get(navBackStack);
+  const previous = stack[stack.length - 1];
+  if (!previous) return;
+  navBackStack.set(stack.slice(0, -1));
+  navForwardStack.update((forward) => [currentNavState(), ...forward].slice(0, MAX_NAV_HISTORY));
+  applyNavState(previous);
+}
+
+export function goForward() {
+  const stack = get(navForwardStack);
+  const next = stack[0];
+  if (!next) return;
+  navForwardStack.set(stack.slice(1));
+  navBackStack.update((back) => [...back.slice(-(MAX_NAV_HISTORY - 1)), currentNavState()]);
+  applyNavState(next);
+}
+
+export function clearNavigationHistory() {
+  navBackStack.set([]);
+  navForwardStack.set([]);
+}
+
+function applyNavState(state: NavState) {
+  diagramKind.set(state.diagramKind);
+  fileView.set(cloneFileView(state.fileView));
+  diffViewRef.set(cloneDiffRef(state.diffViewRef));
+  if (state.selectedFqn) {
+    selectedClass.set(get(classes).find((c) => c.fqn === state.selectedFqn) ?? null);
+  } else {
+    selectedClass.set(null);
+  }
+  viewMode.set(state.viewMode);
+}
+
+function cloneFileView(value: FileView | null): FileView | null {
+  return value ? { ...value } : null;
+}
+
+function cloneDiffRef(
+  value: { reference: string; to: string | null } | null,
+): { reference: string; to: string | null } | null {
+  return value ? { ...value } : null;
+}
+
+function sameNavState(a: NavState, b: NavState): boolean {
+  return (
+    a.viewMode === b.viewMode &&
+    a.diagramKind === b.diagramKind &&
+    a.selectedFqn === b.selectedFqn &&
+    JSON.stringify(a.fileView) === JSON.stringify(b.fileView) &&
+    JSON.stringify(a.diffViewRef) === JSON.stringify(b.diffViewRef)
+  );
+}
+
+/// Visibility flags for the two left-hand panes in code view. Persisted in
+/// localStorage so the user's layout choice survives reloads.
+function persistedBool(key: string, fallback: boolean) {
+  let initial = fallback;
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw !== null) initial = raw === 'true';
+  } catch {
+    // localStorage unavailable
+  }
+  const store = writable<boolean>(initial);
+  store.subscribe((v) => {
+    try {
+      localStorage.setItem(key, String(v));
+    } catch {
+      // ignore
+    }
+  });
+  return store;
+}
+
+export const moduleSidebarVisible = persistedBool('projectmind.layout.modules.visible', true);
+export const classSidebarVisible = persistedBool('projectmind.layout.files.visible', true);
+
+const RECENT_REPOS_KEY = 'projectmind.recentRepos';
+const RECENT_REPOS_MAX = 10;
+
+function readRecentRepos(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_REPOS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((x): x is string => typeof x === 'string');
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+export const recentRepos = writable<string[]>(readRecentRepos());
+
+recentRepos.subscribe((value) => {
+  try {
+    localStorage.setItem(RECENT_REPOS_KEY, JSON.stringify(value));
+  } catch {
+    // ignore
+  }
+});
+
+/// Move (or insert) a repo path to the top of the MRU list, capped at
+/// RECENT_REPOS_MAX. Called from the App after a successful openRepo.
+export function rememberRepo(path: string) {
+  if (!path) return;
+  recentRepos.update((cur) => {
+    const next = [path, ...cur.filter((p) => p !== path)];
+    return next.slice(0, RECENT_REPOS_MAX);
+  });
+}
+
+export function forgetRecentRepo(path: string) {
+  recentRepos.update((cur) => cur.filter((p) => p !== path));
+}
 
 export interface FileView {
   path: string;
@@ -110,3 +281,23 @@ export const fileCountByModule = derived(moduleFilesByModule, ($byMod) => {
   }
   return counts;
 });
+
+/// Returns true when an absolute file path lives inside the given module's
+/// root directory. Used by MarkdownIndex/HtmlIndex to honour the global
+/// moduleFilter when listing files.
+export function fileBelongsToModule(abs: string, mod: ModuleEntry): boolean {
+  if (!mod.root) return false;
+  return abs === mod.root || abs.startsWith(mod.root.endsWith('/') ? mod.root : mod.root + '/');
+}
+
+/// Resolves the module that owns the given absolute file path, if any. Picks
+/// the longest-prefix match so nested modules win over their parents.
+export function moduleForFile(abs: string, mods: ModuleEntry[]): ModuleEntry | null {
+  let best: ModuleEntry | null = null;
+  for (const m of mods) {
+    if (fileBelongsToModule(abs, m) && (best === null || m.root.length > best.root.length)) {
+      best = m;
+    }
+  }
+  return best;
+}

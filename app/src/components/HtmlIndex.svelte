@@ -5,7 +5,7 @@
     readFileText,
   } from '../lib/api';
   import type { HtmlFile, HtmlSnippet } from '../lib/api';
-  import { repo } from '../lib/store';
+  import { repo, moduleFilter, modules, fileBelongsToModule } from '../lib/store';
   import { t } from '../lib/i18n';
   import { resizable } from '../lib/resizable';
   import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
@@ -37,8 +37,12 @@
   let detailLoading = false;
   let detailError: string | null = null;
 
-  $: filteredFiles = filterFiles(files, query);
-  $: filteredSnippets = filterSnippets(snippets, query);
+  $: filteredFiles = filterFilesByModule(filterFiles(files, query), $moduleFilter, $modules);
+  $: filteredSnippets = filterSnippetsByModule(
+    filterSnippets(snippets, query),
+    $moduleFilter,
+    $modules,
+  );
   $: void load($repo?.root ?? null);
 
   function filterFiles(list: HtmlFile[], q: string): HtmlFile[] {
@@ -55,6 +59,28 @@
         s.rel.toLowerCase().includes(needle) ||
         s.content.toLowerCase().includes(needle),
     );
+  }
+
+  function filterFilesByModule(
+    list: HtmlFile[],
+    modId: string | null,
+    mods: typeof $modules,
+  ): HtmlFile[] {
+    if (modId === null) return list;
+    const target = mods.find((m) => m.id === modId);
+    if (!target) return list;
+    return list.filter((f) => fileBelongsToModule(f.abs, target));
+  }
+
+  function filterSnippetsByModule(
+    list: HtmlSnippet[],
+    modId: string | null,
+    mods: typeof $modules,
+  ): HtmlSnippet[] {
+    if (modId === null) return list;
+    const target = mods.find((m) => m.id === modId);
+    if (!target) return list;
+    return list.filter((s) => fileBelongsToModule(s.abs, target));
   }
 
   async function load(root: string | null) {
@@ -359,13 +385,15 @@
           {:else if detailError}
             <div class="error">⚠ {detailError}</div>
           {:else if renderMode === 'rendered' && isRenderable()}
-            <iframe
-              class="render-frame"
-              title={$t('html.previewTitle')}
-              sandbox=""
-              src={iframeSrc}
-              style="zoom: {$zoom};"
-            ></iframe>
+            <div class="render-frame-wrap">
+              <iframe
+                class="render-frame"
+                title={$t('html.previewTitle')}
+                sandbox=""
+                src={iframeSrc}
+                style="transform: scale({$zoom}); transform-origin: 0 0; width: {100 / $zoom}%; height: {100 / $zoom}%;"
+              ></iframe>
+            </div>
           {:else}
             <pre class="source" style="font-size: {12.5 * $zoom}px;"><code
               >{selectedSource}</code
@@ -659,12 +687,17 @@
     display: flex;
   }
 
-  .render-frame {
+  .render-frame-wrap {
     flex: 1;
-    width: 100%;
-    height: 100%;
+    overflow: auto;
+    background: white;
+    position: relative;
+  }
+
+  .render-frame {
     border: 0;
     background: white;
+    display: block;
   }
 
   .source {

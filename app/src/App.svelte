@@ -22,7 +22,20 @@
     fileView,
     walkthroughCursor,
     diffViewRef,
+    diagramKind,
     followingMcp,
+    canGoBack,
+    canGoForward,
+    goBack,
+    goForward,
+    navigateTo,
+    replaceNavState,
+    clearNavigationHistory,
+    moduleSidebarVisible,
+    classSidebarVisible,
+    recentRepos,
+    rememberRepo,
+    forgetRecentRepo,
   } from './lib/store';
   import {
     openRepo,
@@ -111,7 +124,7 @@
 
   function activateTab(tab: TabDescriptor) {
     followingMcp.set(false);
-    viewMode.set(tab.view_mode as Parameters<typeof viewMode.set>[0]);
+    navigateTo({ viewMode: tab.view_mode as Parameters<typeof viewMode.set>[0] });
   }
 
   function toggleLang() {
@@ -122,7 +135,6 @@
     setLanguage(codes[(idx + 1) % codes.length]);
   }
 
-  let diagramKind: 'bean-graph' | 'package-tree' | 'folder-map' = 'bean-graph';
   let folderMapLayout: 'hierarchy' | 'solar' | 'td' = 'solar';
   let classSource = '';
   let classMeta: { file: string; line_start: number; line_end: number } | null = null;
@@ -152,8 +164,10 @@
   // (e.g. switching from a Java repo to a docs-only repo would orphan the
   // bean-graph), fall back to the first available kind. folder-map is
   // always present so this never fails.
-  $: if ($repo && !$repo.available_diagrams.includes(diagramKind)) {
-    diagramKind = ($repo.available_diagrams[0] ?? 'folder-map') as typeof diagramKind;
+  $: if ($repo && !$repo.available_diagrams.includes($diagramKind)) {
+    replaceNavState({
+      diagramKind: ($repo.available_diagrams[0] ?? 'folder-map') as typeof $diagramKind,
+    });
   }
 
   function diagramLabel(kind: string): string {
@@ -161,6 +175,7 @@
       case 'bean-graph': return $t('diagram.beanGraph');
       case 'package-tree': return $t('diagram.packageTree');
       case 'folder-map': return $t('diagram.folderMap');
+      case 'doc-graph': return $t('diagram.docGraph');
       default: return kind; // unknown plugin-contributed diagram — show id
     }
   }
@@ -250,16 +265,15 @@
   })();
 
   function openModuleFile(f: ModuleFile) {
-    fileView.update((cur) => ({
-      path: f.abs,
-      anchor: null,
-      nonce: (cur?.nonce ?? 0) + 1,
-    }));
-    if (f.kind === 'pdf') {
-      viewMode.set('pdf');
-    } else {
-      viewMode.set('image');
-    }
+    const target = f.kind === 'pdf' ? 'pdf' : 'image';
+    navigateTo({
+      viewMode: target,
+      fileView: {
+        path: f.abs,
+        anchor: null,
+        nonce: Date.now(),
+      },
+    });
   }
 
   async function loadSourceFor(c: ClassEntry | null) {
@@ -283,6 +297,27 @@
   function basename(p: string): string {
     const idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
     return idx === -1 ? p : p.slice(idx + 1);
+  }
+
+  let repoMenuOpen = false;
+
+  function toggleRepoMenu() {
+    repoMenuOpen = !repoMenuOpen;
+  }
+
+  function closeRepoMenu() {
+    repoMenuOpen = false;
+  }
+
+  async function switchToRepo(path: string) {
+    closeRepoMenu();
+    if ($repo?.root === path) return;
+    await load(path);
+  }
+
+  function dropFromRecents(path: string, ev: Event) {
+    ev.stopPropagation();
+    forgetRecentRepo(path);
   }
 
   async function pickAndOpen() {
@@ -333,7 +368,12 @@
       fileKindFilter.set(null);
       packageFilter.set(null);
       classSource = '';
+      rememberRepo(summary.root);
+      clearNavigationHistory();
     } catch (err) {
+      // The path didn't load. Drop it from the recents so the dropdown
+      // doesn't keep offering a broken entry.
+      forgetRecentRepo(path);
       if (opts.silent) {
         // Re-throw so caller can decide whether to show or swallow.
         throw err;
@@ -345,7 +385,7 @@
   }
 
   function handleSelect(c: ClassEntry) {
-    selectedClass.set(c);
+    navigateTo({ viewMode: 'classes', selectedFqn: c.fqn });
   }
 
   function setFilter(s: string | null) {
@@ -389,33 +429,31 @@
       const v = s.view;
       switch (v.kind) {
         case 'classes':
-          viewMode.set('classes');
-          if (v.selected_fqn) {
-            const match = get(classes).find((c) => c.fqn === v.selected_fqn);
-            if (match) selectedClass.set(match);
-          }
+          replaceNavState({ viewMode: 'classes', selectedFqn: v.selected_fqn ?? null });
           break;
         case 'diagram':
           if (
             v.diagram_kind === 'bean-graph' ||
             v.diagram_kind === 'package-tree' ||
-            v.diagram_kind === 'folder-map'
+            v.diagram_kind === 'folder-map' ||
+            v.diagram_kind === 'doc-graph'
           ) {
-            diagramKind = v.diagram_kind;
+            replaceNavState({ viewMode: 'diagram', diagramKind: v.diagram_kind });
+          } else {
+            replaceNavState({ viewMode: 'diagram' });
           }
-          viewMode.set('diagram');
           break;
         case 'diff':
-          diffViewRef.set({ reference: v.reference, to: v.to ?? null });
-          viewMode.set('diff');
+          replaceNavState({
+            viewMode: 'diff',
+            diffViewRef: { reference: v.reference, to: v.to ?? null },
+          });
           break;
         case 'file':
-          fileView.update((cur) => ({
-            path: v.path,
-            anchor: v.anchor ?? null,
-            nonce: (cur?.nonce ?? 0) + 1,
-          }));
-          viewMode.set('file');
+          replaceNavState({
+            viewMode: 'file',
+            fileView: { path: v.path, anchor: v.anchor ?? null, nonce: Date.now() },
+          });
           break;
         case 'walkthrough':
           walkthroughCursor.update((cur) => ({
@@ -423,7 +461,7 @@
             step: v.step,
             nonce: (cur?.nonce ?? 0) + 1,
           }));
-          viewMode.set('walkthrough');
+          replaceNavState({ viewMode: 'walkthrough' });
           break;
       }
     } catch (err) {
@@ -483,22 +521,20 @@
     await load(repoPath);
     if (get(errorMessage)) return; // load() already surfaced a message
     if (isDirectory) {
-      viewMode.set('classes');
+      replaceNavState({ viewMode: 'classes' });
       return;
     }
     const ext = extOf(absPath);
     const target = viewModeForExt(ext);
     if (target === null) {
       // Source files / unknown extensions land on the Code tab.
-      viewMode.set('classes');
+      replaceNavState({ viewMode: 'classes' });
       return;
     }
-    fileView.update((cur) => ({
-      path: absPath,
-      anchor: null,
-      nonce: (cur?.nonce ?? 0) + 1,
-    }));
-    viewMode.set(target);
+    replaceNavState({
+      viewMode: target,
+      fileView: { path: absPath, anchor: null, nonce: Date.now() },
+    });
   }
 
   function flashBrowserDropHint(message: string) {
@@ -540,7 +576,22 @@
     );
   }
 
+  function onNavKey(ev: KeyboardEvent) {
+    const tag = (ev.target as HTMLElement | null)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    const cmd = ev.metaKey || ev.ctrlKey;
+    if (!cmd && !ev.altKey) return;
+    if (ev.key === '[' || ev.key === 'ArrowLeft') {
+      ev.preventDefault();
+      goBack();
+    } else if (ev.key === ']' || ev.key === 'ArrowRight') {
+      ev.preventDefault();
+      goForward();
+    }
+  }
+
   onMount(async () => {
+    window.addEventListener('keydown', onNavKey);
     browserMode = !isTauriRuntime();
     if (browserMode && !browserToken()) {
       browserAuthorized = false;
@@ -606,6 +657,7 @@
   });
 
   onDestroy(() => {
+    window.removeEventListener('keydown', onNavKey);
     unlistenState?.();
     unlistenDragDrop?.();
     if (statePoll) clearInterval(statePoll);
@@ -625,10 +677,57 @@
       <img class="logo" src="/logo.png" alt="ProjectMind" />
       <span class="title">ProjectMind</span>
       {#if $repo}
-        <span class="repo" title={$repo.root}>
-          <span class="repo-name">{basename($repo.root)}</span>
-          <span class="repo-path">{$repo.root}</span>
-        </span>
+        <div class="repo-switcher">
+          <button
+            type="button"
+            class="repo"
+            on:click={toggleRepoMenu}
+            title={$repo.root}
+            aria-haspopup="menu"
+            aria-expanded={repoMenuOpen}
+          >
+            <span class="repo-name">{basename($repo.root)}</span>
+            <span class="repo-path">{$repo.root}</span>
+            <span class="repo-caret" aria-hidden="true">▾</span>
+          </button>
+          {#if repoMenuOpen}
+            <div class="menu-backdrop" on:click={closeRepoMenu} role="presentation"></div>
+            <div class="repo-menu" role="menu">
+              {#if $recentRepos.length > 0}
+                <div class="menu-section-label">{$t('repo.recent')}</div>
+                {#each $recentRepos as path (path)}
+                  <div class="menu-row" class:current={$repo.root === path}>
+                    <button
+                      type="button"
+                      class="menu-item"
+                      on:click={() => switchToRepo(path)}
+                      role="menuitem"
+                    >
+                      <span class="menu-item-name">{basename(path)}</span>
+                      <span class="menu-item-path">{path}</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="menu-item-forget"
+                      on:click={(ev) => dropFromRecents(path, ev)}
+                      title={$t('repo.forget')}
+                      aria-label={$t('repo.forget')}
+                    >×</button>
+                  </div>
+                {/each}
+                <div class="menu-divider" role="separator"></div>
+              {/if}
+              <button
+                type="button"
+                class="menu-item open-other"
+                on:click={() => { closeRepoMenu(); pickAndOpen(); }}
+                role="menuitem"
+              >
+                {$t('repo.openAnother')}
+              </button>
+            </div>
+          {/if}
+        </div>
         <span class="status">
           <span class="dot"></span>
           {$t('status.repoCount', {
@@ -646,6 +745,12 @@
       {/if}
     </div>
     <nav>
+      <button class="back-btn" on:click={goBack} disabled={!$canGoBack} title={$t('nav.back')} aria-label={$t('nav.back')}>
+        ← {$t('nav.back')}
+      </button>
+      <button class="back-btn" on:click={goForward} disabled={!$canGoForward} title={$t('nav.forward')} aria-label={$t('nav.forward')}>
+        {$t('nav.forward')} →
+      </button>
       {#if $repo}
         {#each $repo.tabs as tab (tab.id)}
           <button
@@ -663,7 +768,7 @@
         <button
           class:active={$viewMode === 'walkthrough'}
           class="walkthrough-btn"
-          on:click={() => viewMode.set('walkthrough')}
+          on:click={() => navigateTo({ viewMode: 'walkthrough' })}
           title={$t('nav.walkthrough')}
         >
           ▶ {$t('nav.walkthrough')}
@@ -745,19 +850,32 @@
       </div>
     </section>
   {:else if $viewMode === 'classes' || $viewMode === 'pdf' || $viewMode === 'image' || $viewMode === 'md' || $viewMode === 'html' || $viewMode === 'file'}
-    <section class="layout">
-      <ModuleSidebar />
-      <div
-        class="resizer"
-        use:resizable={{
-          storageKey: 'projectmind.layout.code.col1',
-          cssVar: '--code-col-1',
-          min: 140,
-          max: 480,
-          initial: 220,
-        }}
-        title="Drag to resize · double-click to reset"
-      ></div>
+    <section
+      class="layout"
+      class:modules-collapsed={!$moduleSidebarVisible}
+      class:files-collapsed={!$classSidebarVisible}
+    >
+      {#if $moduleSidebarVisible}
+        <ModuleSidebar />
+        <div
+          class="resizer"
+          use:resizable={{
+            storageKey: 'projectmind.layout.code.col1',
+            cssVar: '--code-col-1',
+            min: 140,
+            max: 480,
+            initial: 220,
+          }}
+          title="Drag to resize · double-click to reset"
+        ></div>
+      {:else}
+        <button
+          class="pane-rail"
+          on:click={() => moduleSidebarVisible.set(true)}
+          title={$t('layout.modules.show')}
+          aria-label={$t('layout.modules.show')}
+        >›</button>
+      {/if}
       {#if $viewMode === 'md'}
         <div class="files-fullspan">
           {#await lazyMarkdownIndex() then mod}
@@ -770,8 +888,49 @@
             <svelte:component this={mod.default} />
           {/await}
         </div>
+      {:else if !$classSidebarVisible}
+        <button
+          class="pane-rail"
+          on:click={() => classSidebarVisible.set(true)}
+          title={$t('layout.files.show')}
+          aria-label={$t('layout.files.show')}
+        >›</button>
+        <main class="viewer">
+          {#if $viewMode === 'pdf' && $fileView}
+            <PdfView path={$fileView.path} />
+          {:else if $viewMode === 'image' && $fileView}
+            <ImageView path={$fileView.path} />
+          {:else if $viewMode === 'file' && $fileView && /\.drawio$/i.test($fileView.path ?? '')}
+            {#await lazyDrawIoView() then mod}
+              <svelte:component this={mod.default} path={$fileView.path} />
+            {/await}
+          {:else if $viewMode === 'file' && $fileView}
+            {#await lazyFileView() then mod}
+              <svelte:component
+                this={mod.default}
+                path={$fileView.path}
+                anchor={$fileView.anchor}
+                nonce={$fileView.nonce}
+              />
+            {/await}
+          {:else if $selectedClass}
+            <ClassViewer
+              klass={$selectedClass}
+              source={classSource}
+              meta={classMeta}
+            />
+          {:else}
+            <div class="placeholder">{$t('files.placeholder')}</div>
+          {/if}
+        </main>
       {:else}
         <aside class="sidebar">
+          <button
+            class="pane-collapse"
+            on:click={() => classSidebarVisible.set(false)}
+            title={$t('layout.files.hide')}
+            aria-label={$t('layout.files.hide')}
+          >‹</button>
           {#if $packageFilter !== null}
             <div class="path-bar">
               <span class="path-label">{$t('files.package.label')}</span>
@@ -810,7 +969,7 @@
                 class="chip md"
                 on:click={() => {
                   followingMcp.set(false);
-                  viewMode.set('md');
+                  navigateTo({ viewMode: 'md' });
                 }}
                 title={$t('files.filter.md.title')}
               >
@@ -822,7 +981,7 @@
                 class="chip html"
                 on:click={() => {
                   followingMcp.set(false);
-                  viewMode.set('html');
+                  navigateTo({ viewMode: 'html' });
                 }}
                 title={$t('files.filter.html.title')}
               >
@@ -918,14 +1077,14 @@
     <section class="diagram-view">
       <div class="diagram-tabs">
         {#each $repo.available_diagrams as d (d)}
-          <button class:active={diagramKind === d} on:click={() => (diagramKind = d as typeof diagramKind)}>
+          <button class:active={$diagramKind === d} on:click={() => navigateTo({ viewMode: 'diagram', diagramKind: d as typeof $diagramKind })}>
             {diagramLabel(d)}
           </button>
         {/each}
         <span class="diagram-hint">{$t('diagram.hint')}</span>
       </div>
       {#await lazyDiagramView() then mod}
-        <svelte:component this={mod.default} kind={diagramKind} folderLayout={folderMapLayout} />
+        <svelte:component this={mod.default} kind={$diagramKind} folderLayout={folderMapLayout} />
       {/await}
     </section>
   {:else if $viewMode === 'walkthrough' && $walkthroughCursor}
@@ -1038,6 +1197,11 @@
     color: var(--fg-2);
   }
 
+  .repo-switcher {
+    position: relative;
+    display: inline-block;
+  }
+
   .repo {
     display: inline-flex;
     align-items: baseline;
@@ -1046,7 +1210,130 @@
     background: var(--bg-2);
     border-radius: 4px;
     border: 1px solid var(--bg-3);
-    cursor: default;
+    cursor: pointer;
+    color: var(--fg-1);
+    font-family: inherit;
+  }
+  .repo:hover {
+    background: var(--bg-3);
+    border-color: var(--accent-2);
+  }
+
+  .repo-caret {
+    color: var(--fg-2);
+    font-size: 10px;
+    margin-left: 2px;
+  }
+
+  .menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+  }
+
+  .repo-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 60;
+    min-width: 320px;
+    max-width: 520px;
+    background: var(--bg-1);
+    border: 1px solid var(--bg-3);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .menu-section-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--fg-2);
+    padding: 6px 10px 4px;
+  }
+
+  .menu-row {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    border-radius: 4px;
+  }
+  .menu-row:hover {
+    background: var(--bg-2);
+  }
+  .menu-row.current {
+    background: color-mix(in srgb, var(--accent-2) 12%, transparent);
+  }
+
+  .menu-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    padding: 6px 10px;
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    text-align: left;
+    color: var(--fg-1);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    min-width: 0;
+  }
+  .menu-item.open-other {
+    color: var(--accent-2);
+    font-weight: 500;
+  }
+
+  .menu-item-name {
+    font-weight: 600;
+    color: var(--fg-0);
+  }
+
+  .menu-item-path {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .menu-item-forget {
+    align-self: center;
+    width: 22px;
+    height: 22px;
+    margin-right: 6px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--fg-2);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    opacity: 0;
+    flex-shrink: 0;
+  }
+  .menu-row:hover .menu-item-forget,
+  .menu-item-forget:focus-visible {
+    opacity: 1;
+  }
+  .menu-item-forget:hover {
+    background: var(--bg-3);
+    color: var(--fg-0);
+  }
+
+  .menu-divider {
+    height: 1px;
+    background: var(--bg-3);
+    margin: 4px 6px;
   }
 
   .repo-name {
@@ -1123,6 +1410,15 @@
     background: color-mix(in srgb, var(--accent-2) 28%, var(--bg-1));
   }
 
+  .back-btn {
+    color: var(--fg-1);
+    font-weight: 500;
+  }
+  .back-btn:hover {
+    color: var(--accent-2);
+    border-color: var(--accent-2);
+  }
+
   .follow {
     font-size: 11px;
     padding: 4px 8px;
@@ -1195,19 +1491,21 @@
     font-size: 12px;
   }
 
-  .welcome code {
-    font-family: var(--mono);
-    background: var(--bg-2);
-    padding: 1px 6px;
-    border-radius: 3px;
-  }
-
   .layout {
     display: grid;
     grid-template-columns:
       var(--code-col-1, 220px) 6px var(--code-col-2, 360px) 6px 1fr;
     flex: 1;
     overflow: hidden;
+  }
+  .layout.modules-collapsed {
+    grid-template-columns: 28px var(--code-col-2, 360px) 6px 1fr;
+  }
+  .layout.files-collapsed {
+    grid-template-columns: var(--code-col-1, 220px) 6px 28px 1fr;
+  }
+  .layout.modules-collapsed.files-collapsed {
+    grid-template-columns: 28px 28px 1fr;
   }
 
   /* When the Files tab hosts MD or HTML browsers (no class-list / viewer
@@ -1221,9 +1519,51 @@
     flex-direction: column;
     min-width: 0;
   }
+  .layout.modules-collapsed .files-fullspan {
+    grid-column: 2 / -1;
+  }
   .files-fullspan > :global(*) {
     flex: 1;
     min-height: 0;
+  }
+
+  .pane-rail {
+    background: var(--bg-1);
+    border: none;
+    border-right: 1px solid var(--bg-3);
+    color: var(--fg-2);
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pane-rail:hover {
+    background: var(--bg-2);
+    color: var(--accent-2);
+  }
+
+  .pane-collapse {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--bg-3);
+    border-radius: 4px;
+    background: var(--bg-1);
+    color: var(--fg-2);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 2;
+  }
+  .pane-collapse:hover {
+    background: var(--bg-2);
+    color: var(--fg-0);
   }
 
   .resizer {
@@ -1250,6 +1590,7 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    position: relative;
   }
 
   .path-bar {

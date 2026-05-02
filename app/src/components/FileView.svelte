@@ -5,7 +5,7 @@
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { fileAssetUrl, readFileText, listMarkdownFiles } from '../lib/api';
   import type { MarkdownFile } from '../lib/api';
-  import { repo, fileView } from '../lib/store';
+  import { repo, navigateTo } from '../lib/store';
   import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
 
   export let path: string;
@@ -15,6 +15,9 @@
   /// Bumped on every (re)issued intent — re-runs the scroll even if path/anchor
   /// is unchanged. Optional so manual GUI navigation still works.
   export let nonce: number = 0;
+  /// The project-wide Markdown picker is useful as a standalone browser, but
+  /// it is distracting when FileView is reached from a graph. Keep it opt-in.
+  export let showProjectPicker = false;
 
   interface TocEntry {
     id: string;
@@ -97,11 +100,10 @@
 
   function pickFile(f: MarkdownFile) {
     pickerOpen = false;
-    fileView.update((cur) => ({
-      path: f.abs,
-      anchor: null,
-      nonce: (cur?.nonce ?? 0) + 1,
-    }));
+    navigateTo({
+      viewMode: 'file',
+      fileView: { path: f.abs, anchor: null, nonce: Date.now() },
+    });
   }
 
   function onPickerKeydown(ev: KeyboardEvent) {
@@ -431,7 +433,7 @@
     if (path) void load(path);
     window.addEventListener('keydown', onKey);
     document.addEventListener('mousedown', onDocClick);
-    void ensureMdFilesLoaded();
+    if (showProjectPicker) void ensureMdFilesLoaded();
   });
 
   onDestroy(() => {
@@ -446,7 +448,7 @@
     <span class="kind">{fileKind(path)}</span>
     <code class="path" title={path}>{path}</code>
     <div class="spacer"></div>
-    {#if mdFiles.length > 0}
+    {#if showProjectPicker && mdFiles.length > 0}
       <div class="picker-wrap">
         <button
           id="md-picker-trigger"

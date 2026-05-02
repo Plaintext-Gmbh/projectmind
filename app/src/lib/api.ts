@@ -142,7 +142,7 @@ export async function listChangesSince(reference: string, to?: string): Promise<
   return invoke<ChangedFile[]>('list_changes_since', { reference, to });
 }
 
-export type DiagramKind = 'bean-graph' | 'package-tree' | 'folder-map';
+export type DiagramKind = 'bean-graph' | 'package-tree' | 'folder-map' | 'doc-graph';
 
 export async function showDiagram(kind: DiagramKind): Promise<string> {
   if (!isTauriRuntime()) return api<string>(`/api/show_diagram${query({ kind })}`);

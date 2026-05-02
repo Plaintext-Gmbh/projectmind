@@ -81,7 +81,7 @@ fn diagram_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "type": { "type": "string", "enum": ["bean-graph", "package-tree", "folder-map"] }
+            "type": { "type": "string", "enum": ["bean-graph", "package-tree", "folder-map", "doc-graph"] }
         },
         "required": ["type"]
     })
@@ -323,7 +323,7 @@ pub(crate) fn list() -> Value {
             },
             {
                 "name": "view_diagram",
-                "description": "Tell the GUI to switch to the diagram view (`bean-graph` or `package-tree`).",
+                "description": "Tell the GUI to switch to the diagram view (`bean-graph`, `package-tree`, `folder-map`, or `doc-graph`).",
                 "inputSchema": diagram_schema()
             },
             {
@@ -572,6 +572,10 @@ async fn show_diagram(state: &Mutex<ServerState>, args: Value) -> DispatchResult
         "bean-graph" => Ok(text_result(diagram::render_bean_graph(repo, &spring))),
         "package-tree" => Ok(text_result(diagram::render_package_tree(repo))),
         "folder-map" => Ok(text_result(diagram::render_folder_map(repo))),
+        "doc-graph" => Ok(text_result(
+            serde_json::to_string(&projectmind_core::doc_graph::build(&repo.root))
+                .map_err(|e| DispatchError::internal(format!("doc-graph failed: {e}")))?,
+        )),
         other => Err(DispatchError::invalid_params(format!(
             "unknown diagram: {other}"
         ))),
@@ -892,7 +896,11 @@ struct DiagramKindArgs {
 fn view_diagram(args: Value) -> DispatchResult {
     let args: DiagramKindArgs = serde_json::from_value(args)
         .map_err(|e| DispatchError::invalid_params(format!("view_diagram: {e}")))?;
-    if args.kind != "bean-graph" && args.kind != "package-tree" && args.kind != "folder-map" {
+    if args.kind != "bean-graph"
+        && args.kind != "package-tree"
+        && args.kind != "folder-map"
+        && args.kind != "doc-graph"
+    {
         return Err(DispatchError::invalid_params(format!(
             "unknown diagram type: {}",
             args.kind

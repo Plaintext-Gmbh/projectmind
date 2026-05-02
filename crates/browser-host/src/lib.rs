@@ -416,6 +416,9 @@ fn route_api(
                 "bean-graph" => Ok(json!(diagram::render_bean_graph(repo, &spring))),
                 "package-tree" => Ok(json!(diagram::render_package_tree(repo))),
                 "folder-map" => Ok(json!(diagram::render_folder_map(repo))),
+                "doc-graph" => Ok(json!(serde_json::to_string(
+                    &projectmind_core::doc_graph::build(&repo.root)
+                )?)),
                 other => anyhow::bail!("unknown diagram kind: {other}"),
             }
         }

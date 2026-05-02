@@ -21,11 +21,10 @@
   } from '../lib/api';
   import {
     errorMessage,
-    viewMode,
     walkthroughCursor,
     selectedClass,
-    fileView,
-    diffViewRef,
+    navigateTo,
+    replaceNavState,
   } from '../lib/store';
   import ClassViewer from './ClassViewer.svelte';
   import FileView from './FileView.svelte';
@@ -273,7 +272,7 @@
     try {
       await endWalkthrough();
       walkthroughCursor.set(null);
-      viewMode.set('classes');
+      replaceNavState({ viewMode: 'classes' });
     } catch (err) {
       errorMessage.set(String(err));
     }
@@ -298,10 +297,26 @@
     }
   }
 
-  // Render markdown narration to HTML once per step.
+  // Render markdown narration to HTML once per step. Bare [step:3] markers are
+  // accepted as shorthand for an internal jump link to the 1-based step number.
   $: narrationHtml = step?.narration
-    ? marked.parse(step.narration, { gfm: true, breaks: false })
+    ? marked.parse(linkifyStepSugar(step.narration), { gfm: true, breaks: false })
     : '';
+
+  function linkifyStepSugar(markdown: string): string {
+    let inFence = false;
+    return markdown
+      .split('\n')
+      .map((line) => {
+        if (/^\s*(```|~~~)/.test(line)) {
+          inFence = !inFence;
+          return line;
+        }
+        if (inFence) return line;
+        return line.replace(/\[step:(\d+)\](?!\()/gi, (_, n) => `[step:${n}](pm:step:${n})`);
+      })
+      .join('\n');
+  }
 
   // Keyboard shortcuts: ←/→ to navigate.
   function onKey(ev: KeyboardEvent) {
@@ -387,26 +402,31 @@
         module: '',
       };
       selectedClass.set(stub);
-      viewMode.set('classes');
+      navigateTo({ viewMode: 'classes', selectedFqn: fqn });
       return;
     }
     if (rest.startsWith('file:') || rest.startsWith('file/')) {
       const tail = rest.slice(5);
       const [path, anchor] = splitAnchor(tail);
       if (!path) return;
-      fileView.set({ path, anchor, nonce: Date.now() });
-      viewMode.set('file');
+      navigateTo({ viewMode: 'file', fileView: { path, anchor, nonce: Date.now() } });
       return;
     }
     if (rest.startsWith('diff:') || rest.startsWith('diff/')) {
       const spec = rest.slice(5);
       const m = spec.match(/^([^.]+)\.\.([^.]+)$/);
       if (m) {
-        diffViewRef.set({ reference: m[1], to: m[2] });
+        navigateTo({ viewMode: 'diff', diffViewRef: { reference: m[1], to: m[2] } });
       } else {
-        diffViewRef.set({ reference: spec, to: null });
+        navigateTo({ viewMode: 'diff', diffViewRef: { reference: spec, to: null } });
       }
-      viewMode.set('diff');
+      return;
+    }
+    if (rest.startsWith('step:') || rest.startsWith('step/')) {
+      const raw = rest.slice(5);
+      const stepNo = Number.parseInt(raw, 10);
+      if (!Number.isFinite(stepNo)) return;
+      void goTo(stepNo - 1);
       return;
     }
     console.warn('walkthrough: unrecognised pm: link', href);
