@@ -1414,9 +1414,13 @@
     color: var(--fg-1);
     font-weight: 500;
   }
-  .back-btn:hover {
+  .back-btn:hover:not(:disabled) {
     color: var(--accent-2);
     border-color: var(--accent-2);
+  }
+  .back-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
   }
 
   .follow {

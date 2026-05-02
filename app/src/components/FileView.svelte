@@ -7,6 +7,7 @@
   import type { MarkdownFile } from '../lib/api';
   import { repo, navigateTo } from '../lib/store';
   import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
+  import { openUrl } from '../lib/openUrl';
 
   export let path: string;
   /// Optional heading slug to scroll to after rendering. If a slug doesn't
@@ -285,6 +286,45 @@
     activeHeadingId = id;
   }
 
+  function onContentClick(ev: MouseEvent) {
+    let node = ev.target as HTMLElement | null;
+    while (node && node !== host) {
+      if (node.tagName === 'A') break;
+      node = node.parentElement;
+    }
+    if (!node || node.tagName !== 'A') return;
+    const href = (node as HTMLAnchorElement).getAttribute('href') ?? '';
+    if (!href) return;
+    if (href.startsWith('#')) {
+      ev.preventDefault();
+      void scrollToAnchor(href.slice(1));
+      return;
+    }
+    if (/^(https?:|mailto:)/i.test(href)) {
+      ev.preventDefault();
+      void openUrl(href);
+      return;
+    }
+    const [rawTarget, rawAnchor] = splitHrefAnchor(href);
+    if (!isMarkdown(rawTarget)) return;
+    ev.preventDefault();
+    const abs = normalizePath(`${parentDir(path)}/${rawTarget}`);
+    navigateTo({
+      viewMode: 'file',
+      fileView: {
+        path: abs,
+        anchor: rawAnchor,
+        nonce: Date.now(),
+      },
+    });
+  }
+
+  function splitHrefAnchor(href: string): [string, string | null] {
+    const idx = href.indexOf('#');
+    if (idx === -1) return [href, null];
+    return [href.slice(0, idx), href.slice(idx + 1) || null];
+  }
+
   /// Update the TOC active item as the user scrolls. Picks the heading whose
   /// top is closest above the viewport top (with a small offset).
   function onScroll() {
@@ -546,6 +586,8 @@
             class="content"
             bind:this={host}
             style="font-size: {$zoom}em;"
+            on:click={onContentClick}
+            role="presentation"
           >
             {@html html}
           </div>
