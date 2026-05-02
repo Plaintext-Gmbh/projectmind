@@ -8,6 +8,10 @@
 # Tauri
 **/src-tauri/target/
 **/src-tauri/gen/
+# Sidecar binaries staged into the Tauri bundle by scripts/ci.sh — built
+# at release time and copied here so tauri-bundler picks them up via the
+# `externalBin` entry in tauri.conf.json. Never committed.
+app/src-tauri/binaries/
 
 # Frontend
 node_modules/

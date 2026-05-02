@@ -188,7 +188,7 @@ to whichever config the client uses (e.g. `.mcp.json` for Claude Code,
   "mcpServers": {
     "projectmind": {
       "type": "stdio",
-      "command": "/absolute/path/to/projectmind/target/release/projectmind-mcp",
+      "command": "/absolute/path/to/projectmind-mcp",
       "env": {
         "PROJECTMIND_LOG": "info"
       }
@@ -196,6 +196,36 @@ to whichever config the client uses (e.g. `.mcp.json` for Claude Code,
   }
 }
 ```
+
+### Where is `projectmind-mcp` on disk?
+
+Pick whichever of these you have installed:
+
+- **Desktop app installed** — the MCP server is bundled next to the GUI
+  binary, so you can point your client straight at the in-app path. No
+  separate install step:
+  - **macOS:** `/Applications/ProjectMind.app/Contents/MacOS/projectmind-mcp`
+  - **Linux (`.deb` / `.AppImage`):** `/usr/bin/projectmind-mcp` (`.deb`
+    installs to `/usr/bin/`; `.AppImage` mounts a temporary FUSE root —
+    extract the AppImage with `--appimage-extract` if you need the binary
+    on a stable path)
+  - **Windows (`.msi`):** `C:\Program Files\ProjectMind\projectmind-mcp.exe`
+- **MCP-only install** (without the desktop app) — use the standalone
+  tarball from the [Releases page](https://github.com/Plaintext-Gmbh/projectmind/releases/latest)
+  or the helper scripts under [`scripts/`](scripts/). The binary lands
+  wherever you placed it (commonly `~/.local/bin/projectmind-mcp`).
+- **From source** — `target/release/projectmind-mcp` after
+  `cargo build --release --bin projectmind-mcp`.
+
+Claude Code users can register the bundled binary in one line:
+
+```bash
+# macOS
+claude mcp add projectmind /Applications/ProjectMind.app/Contents/MacOS/projectmind-mcp
+```
+
+Re-running the same command after a desktop-app upgrade is a no-op, so
+the MCP server stays in lockstep with the GUI version automatically.
 
 Restart the client. From a session, you can then ask things like:
 
