@@ -16,7 +16,13 @@
   /// dedicated approval workflow lives on the future-work list.
 
   import { onMount, onDestroy } from 'svelte';
-  import { followingMcp, fileView, viewMode, selectedClass } from '../lib/store';
+  import {
+    followingMcp,
+    fileView,
+    viewMode,
+    selectedClass,
+    walkthroughCursor,
+  } from '../lib/store';
   import { t } from '../lib/i18n';
 
   type Toast = {
@@ -60,6 +66,7 @@
   let lastFile: string | null = null;
   let lastClass: string | null = null;
   let lastView: string | null = null;
+  let lastWalkthroughId: string | null = null;
   $: if ($followingMcp && $fileView && $fileView.path !== lastFile) {
     lastFile = $fileView.path;
     emit($t('mcp.toast.file') || 'MCP opened file', basename($fileView.path));
@@ -72,6 +79,48 @@
     lastView = $viewMode;
     emit($t('mcp.toast.view') || 'MCP switched view', $viewMode);
   }
+  // Walkthroughs deserve their own toast: the user might be on another
+  // tab or in another app entirely when an LLM starts a tour, and a
+  // generic "view changed" message buries the lede. We watch the cursor
+  // id (not just `viewMode === 'walkthrough'`) so re-running an already-
+  // open tour also surfaces — same id is suppressed but a new id wins.
+  $: if (
+    $followingMcp &&
+    $walkthroughCursor &&
+    $walkthroughCursor.id !== lastWalkthroughId
+  ) {
+    lastWalkthroughId = $walkthroughCursor.id;
+    emit(
+      $t('mcp.toast.walkthrough') || 'MCP started tour',
+      $walkthroughCursor.id,
+    );
+    flashTitleIfHidden();
+  }
+
+  // ----- Background notification ------------------------------------------
+
+  /// When a tour starts and the window is hidden / blurred, prepend "▶ "
+  /// to `document.title` so the user sees something change in their tab
+  /// strip / dock. Restore the original title as soon as the window
+  /// regains focus or visibility — same heuristic as web chat apps.
+  let originalTitle: string | null = null;
+
+  function flashTitleIfHidden() {
+    if (typeof document === 'undefined') return;
+    if (!document.hidden && document.hasFocus()) return;
+    if (originalTitle === null) originalTitle = document.title;
+    if (!document.title.startsWith('▶ ')) {
+      document.title = `▶ ${originalTitle}`;
+    }
+  }
+
+  function restoreTitle() {
+    if (originalTitle === null) return;
+    if (typeof document !== 'undefined') {
+      document.title = originalTitle;
+    }
+    originalTitle = null;
+  }
 
   onMount(() => {
     interval = setInterval(() => {
@@ -79,9 +128,20 @@
       const next = toasts.filter((t) => t.expiresAt > now);
       if (next.length !== toasts.length) toasts = next;
     }, 500);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', restoreTitle);
+      window.addEventListener('visibilitychange', restoreTitle);
+    }
   });
   onDestroy(() => {
     if (interval) clearInterval(interval);
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('focus', restoreTitle);
+      window.removeEventListener('visibilitychange', restoreTitle);
+    }
+    // If we still have a flashed title, put the original back so the next
+    // mount of the component (or the test harness) doesn't see a stale "▶".
+    restoreTitle();
   });
 </script>
 
