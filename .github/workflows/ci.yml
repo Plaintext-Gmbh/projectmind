@@ -65,6 +65,11 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
+      - name: Frontend unit tests
+        if: runner.os == 'Linux'
+        working-directory: app
+        run: pnpm test
+
       - name: Format + clippy
         env:
           PROJECTMIND_SKIP_TAURI_APP: ${{ runner.os == 'Linux' && '1' || '' }}
