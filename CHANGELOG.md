@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Method outline pane in the class viewer** — when a class is selected, a collapsible right-hand panel lists its methods and fields with visibility glyphs (`+`/`#`/`-`/`~`), the first annotation, and the source line. Click jumps the source pane to the matching line and flashes it briefly. New `class_outline` Tauri command + `/api/class_outline` HTTP endpoint reuse the same data shape as the existing MCP `class_outline` tool, so what the user sees and what the LLM sees are exactly aligned. Open/closed state persists in `localStorage`. First step toward the "annotated source" / code-level maps captured in #64.
+
 ## [0.3.1] — 2026-05-02
 
 ### Added

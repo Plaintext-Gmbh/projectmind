@@ -32,6 +32,7 @@ use projectmind_framework_lombok::LombokPlugin;
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_lang_java::JavaPlugin;
 use projectmind_lang_rust::RustPlugin;
+use projectmind_plugin_api::{Class, Visibility};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_opener::OpenerExt;
@@ -107,6 +108,44 @@ pub struct ClassDetails {
     pub line_start: u32,
     pub line_end: u32,
     pub source: String,
+}
+
+/// Structural outline of a class — methods, fields, annotations, no source.
+/// Used by the GUI's `ClassViewer` to render a side-panel with click-to-jump
+/// navigation. The same data is exposed via the `class_outline` MCP tool.
+#[derive(Debug, Serialize)]
+pub struct ClassOutline {
+    pub fqn: String,
+    pub name: String,
+    pub kind: String,
+    pub visibility: String,
+    pub line_start: u32,
+    pub line_end: u32,
+    pub stereotypes: Vec<String>,
+    pub annotations: Vec<String>,
+    pub methods: Vec<MethodOutline>,
+    pub fields: Vec<FieldOutline>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MethodOutline {
+    pub name: String,
+    pub visibility: String,
+    pub is_static: bool,
+    pub line_start: u32,
+    pub line_end: u32,
+    pub annotations: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FieldOutline {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub type_text: String,
+    pub visibility: String,
+    pub is_static: bool,
+    pub line: u32,
+    pub annotations: Vec<String>,
 }
 
 /// Tauri command: open a repository.
@@ -232,6 +271,18 @@ fn show_class(fqn: String, state: State<'_, Arc<AppState>>) -> Result<ClassDetai
         line_end: class.line_end,
         source,
     })
+}
+
+#[tauri::command]
+fn class_outline(fqn: String, state: State<'_, Arc<AppState>>) -> Result<ClassOutline, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    let (_module, class) = repo
+        .find_class(&fqn)
+        .ok_or_else(|| format!("class not found: {fqn}"))?;
+    Ok(build_class_outline(class))
 }
 
 #[tauri::command]
@@ -486,6 +537,59 @@ fn list_module_files(
     ))
 }
 
+/// Render a [`Visibility`] enum as the lowercase string the frontend expects
+/// (`"public"`, `"protected"`, `"package"`, `"private"`). Matches the rendering
+/// the MCP `class_outline` tool uses, so MCP and GUI stay in sync.
+fn visibility_str(v: Visibility) -> String {
+    match v {
+        Visibility::Public => "public",
+        Visibility::Protected => "protected",
+        Visibility::PackagePrivate => "package",
+        Visibility::Private => "private",
+    }
+    .to_string()
+}
+
+/// Build a [`ClassOutline`] from a parsed [`Class`]. Pure data shaping — no
+/// I/O, no source reading. Reused by the Tauri command and (in `browser-host`)
+/// by the HTTP endpoint serving the same payload.
+fn build_class_outline(class: &Class) -> ClassOutline {
+    ClassOutline {
+        fqn: class.fqn.clone(),
+        name: class.name.clone(),
+        kind: format!("{:?}", class.kind).to_lowercase(),
+        visibility: visibility_str(class.visibility),
+        line_start: class.line_start,
+        line_end: class.line_end,
+        stereotypes: class.stereotypes.clone(),
+        annotations: class.annotations.iter().map(|a| a.name.clone()).collect(),
+        methods: class
+            .methods
+            .iter()
+            .map(|m| MethodOutline {
+                name: m.name.clone(),
+                visibility: visibility_str(m.visibility),
+                is_static: m.is_static,
+                line_start: m.line_start,
+                line_end: m.line_end,
+                annotations: m.annotations.iter().map(|a| a.name.clone()).collect(),
+            })
+            .collect(),
+        fields: class
+            .fields
+            .iter()
+            .map(|f| FieldOutline {
+                name: f.name.clone(),
+                type_text: f.type_text.clone(),
+                visibility: visibility_str(f.visibility),
+                is_static: f.is_static,
+                line: f.line,
+                annotations: f.annotations.iter().map(|a| a.name.clone()).collect(),
+            })
+            .collect(),
+    }
+}
+
 /// Best-effort publish: GUI tells the MCP/cooperating processes about its state.
 fn publish_state(payload: UiState) {
     if let Err(err) = state::write(payload) {
@@ -578,6 +682,7 @@ pub fn run() {
             list_classes,
             list_modules,
             show_class,
+            class_outline,
             list_changes_since,
             show_diagram,
             show_diff,

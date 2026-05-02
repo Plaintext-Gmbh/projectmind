@@ -102,5 +102,11 @@
   "mcp.toast.file": "MCP opened file",
   "mcp.toast.class": "MCP opened class",
   "mcp.toast.view": "MCP switched view",
-  "mcp.toast.stop": "Stop following MCP"
+  "mcp.toast.stop": "Stop following MCP",
+  "outline.title": "Outline",
+  "outline.methods": "Methods",
+  "outline.fields": "Fields",
+  "outline.empty": "No methods or fields",
+  "outline.show": "Show outline",
+  "outline.hide": "Hide outline"
 }

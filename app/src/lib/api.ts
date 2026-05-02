@@ -135,6 +135,42 @@ export async function showClass(
   return invoke('show_class', { fqn });
 }
 
+export interface MethodOutline {
+  name: string;
+  visibility: 'public' | 'protected' | 'package' | 'private';
+  is_static: boolean;
+  line_start: number;
+  line_end: number;
+  annotations: string[];
+}
+
+export interface FieldOutline {
+  name: string;
+  type: string;
+  visibility: 'public' | 'protected' | 'package' | 'private';
+  is_static: boolean;
+  line: number;
+  annotations: string[];
+}
+
+export interface ClassOutline {
+  fqn: string;
+  name: string;
+  kind: string;
+  visibility: 'public' | 'protected' | 'package' | 'private';
+  line_start: number;
+  line_end: number;
+  stereotypes: string[];
+  annotations: string[];
+  methods: MethodOutline[];
+  fields: FieldOutline[];
+}
+
+export async function classOutline(fqn: string): Promise<ClassOutline> {
+  if (!isTauriRuntime()) return api<ClassOutline>(`/api/class_outline${query({ fqn })}`);
+  return invoke<ClassOutline>('class_outline', { fqn });
+}
+
 export async function listChangesSince(reference: string, to?: string): Promise<ChangedFile[]> {
   if (!isTauriRuntime()) {
     return api<ChangedFile[]>(`/api/list_changes_since${query({ reference, to })}`);
