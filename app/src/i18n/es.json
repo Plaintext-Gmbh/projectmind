@@ -12,6 +12,8 @@
   "nav.followingMcp": "siguiendo MCP",
   "nav.followingMcpTitle": "La GUI sigue una intencion MCP. Haz clic en una pestana para continuar manualmente.",
   "nav.openRepo": "Abrir repo",
+  "nav.back": "Atrás",
+  "nav.forward": "Adelante",
   "theme.toggle": "Cambiar tema",
   "theme.switchTo": "Cambiar a modo {mode}",
   "theme.light": "claro",

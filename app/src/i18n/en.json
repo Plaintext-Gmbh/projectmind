@@ -12,6 +12,8 @@
   "nav.followingMcp": "following MCP",
   "nav.followingMcpTitle": "GUI is following an MCP-issued view intent. Click any tab to continue manually.",
   "nav.openRepo": "Open repo",
+  "nav.back": "Back",
+  "nav.forward": "Forward",
   "theme.toggle": "Toggle theme",
   "theme.switchTo": "Switch to {mode} mode",
   "theme.light": "light",
