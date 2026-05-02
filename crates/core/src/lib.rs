@@ -26,7 +26,7 @@ pub mod state;
 pub mod walkthrough;
 
 pub use cargo::CargoCrate;
-pub use engine::Engine;
+pub use engine::{Engine, TabDescriptor};
 pub use maven::MavenModule;
 pub use repository::{Repository, RepositoryError};
 

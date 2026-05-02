@@ -23,6 +23,27 @@ pub struct PluginInfo {
     pub version: &'static str,
 }
 
+/// A top-level UI tab a plugin contributes.
+///
+/// The frontend renders one button per contribution (after deduplication
+/// across plugins). `view_mode` is the value that's set on the frontend's
+/// `viewMode` store when the tab is clicked — keeping it as a plain string
+/// means a future plugin can introduce an entirely new render mode without
+/// the core having to know its name.
+///
+/// Core ships two contributions out of the box: `files` and `diagrams`.
+/// Plugins can add their own (e.g. a future `framework-junit` "Tests" tab).
+#[derive(Debug, Clone, Copy)]
+pub struct TabContribution {
+    /// Stable identifier (e.g. `tests`). Used for de-duplication and as the
+    /// React/Svelte key in the rendered nav.
+    pub id: &'static str,
+    /// i18n key for the visible label (e.g. `nav.tests`).
+    pub label_key: &'static str,
+    /// Frontend view-mode value the tab activates (e.g. `tests`).
+    pub view_mode: &'static str,
+}
+
 /// A plugin that knows how to parse a programming language.
 pub trait LanguagePlugin: Send + Sync {
     /// Plugin metadata.
@@ -45,6 +66,14 @@ pub trait LanguagePlugin: Send + Sync {
     fn provided_diagrams(&self) -> &[&'static str] {
         &[]
     }
+
+    /// Top-level UI tabs this plugin contributes. Default empty —
+    /// plugins that just produce classes fold into the core "files" tab
+    /// and don't need an entry here. Plugins that own a standalone view
+    /// (a future `framework-junit` "Tests" tab) return their tabs here.
+    fn provided_tabs(&self) -> &[TabContribution] {
+        &[]
+    }
 }
 
 /// A plugin that enriches one or more languages with framework-specific information.
@@ -65,6 +94,12 @@ pub trait FrameworkPlugin: Send + Sync {
     /// `&["bean-graph"]`; a future `framework-junit` could return
     /// `&["test-coverage"]`. Default empty.
     fn provided_diagrams(&self) -> &[&'static str] {
+        &[]
+    }
+
+    /// Top-level UI tabs this framework contributes. Default empty.
+    /// See [`LanguagePlugin::provided_tabs`] for guidance on when to add one.
+    fn provided_tabs(&self) -> &[TabContribution] {
         &[]
     }
 }

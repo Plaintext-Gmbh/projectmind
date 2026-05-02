@@ -23,7 +23,7 @@ pub mod relation;
 pub mod storage;
 
 pub use entity::{Annotation, Class, ClassKind, Field, Method, Module, Visibility};
-pub use plugin::{FrameworkPlugin, LanguagePlugin, PluginInfo, VisualizerPlugin};
+pub use plugin::{FrameworkPlugin, LanguagePlugin, PluginInfo, TabContribution, VisualizerPlugin};
 pub use relation::{Relation, RelationKind};
 pub use storage::{AnnotationStore, CodeGraphStore, EdgeKind, GraphNode, GraphQuery, NodeId};
 

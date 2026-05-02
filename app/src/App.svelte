@@ -36,7 +36,7 @@
     isTauriRuntime,
     setBrowserToken,
   } from './lib/api';
-  import type { ClassEntry, ModuleEntry, ModuleFile, UiState } from './lib/api';
+  import type { ClassEntry, ModuleEntry, ModuleFile, TabDescriptor, UiState } from './lib/api';
   // Eagerly imported — small, almost-always rendered:
   import ClassViewer from './components/ClassViewer.svelte';
   import ModuleSidebar from './components/ModuleSidebar.svelte';
@@ -97,6 +97,22 @@
   // chip refactor) markdown / HTML alike. "Modules" stays as the synonym
   // for folders.
   $: codeTabLabel = $t('nav.files');
+
+  // The "files" tab hosts several render modes (classes / pdf / image /
+  // markdown / html / single-file viewer) that are all reachable from
+  // chips inside the same surface. Other tabs are 1:1 with their
+  // viewMode so the default below covers them.
+  const FILES_VIEW_MODES = new Set(['classes', 'pdf', 'image', 'md', 'html', 'file']);
+
+  function isTabActive(tab: TabDescriptor, mode: string): boolean {
+    if (tab.id === 'files') return FILES_VIEW_MODES.has(mode);
+    return tab.view_mode === mode;
+  }
+
+  function activateTab(tab: TabDescriptor) {
+    followingMcp.set(false);
+    viewMode.set(tab.view_mode as Parameters<typeof viewMode.set>[0]);
+  }
 
   function toggleLang() {
     // Cycle through the configured languages (codex's i18n module ships
@@ -630,31 +646,19 @@
       {/if}
     </div>
     <nav>
-      <button
-        class:active={$viewMode === 'classes' ||
-          $viewMode === 'pdf' ||
-          $viewMode === 'image' ||
-          $viewMode === 'md' ||
-          $viewMode === 'html' ||
-          $viewMode === 'file'}
-        disabled={!$repo}
-        on:click={() => {
-          followingMcp.set(false);
-          viewMode.set('classes');
-        }}
-      >
-        {codeTabLabel}
-      </button>
-      <button
-        class:active={$viewMode === 'diagram'}
-        disabled={!$repo}
-        on:click={() => {
-          followingMcp.set(false);
-          viewMode.set('diagram');
-        }}
-      >
-        {$t('nav.diagrams')}
-      </button>
+      {#if $repo}
+        {#each $repo.tabs as tab (tab.id)}
+          <button
+            class:active={isTabActive(tab, $viewMode)}
+            on:click={() => activateTab(tab)}
+          >
+            {$t(tab.label_key)}
+          </button>
+        {/each}
+      {:else}
+        <button disabled>{codeTabLabel}</button>
+        <button disabled>{$t('nav.diagrams')}</button>
+      {/if}
       {#if $walkthroughCursor}
         <button
           class:active={$viewMode === 'walkthrough'}

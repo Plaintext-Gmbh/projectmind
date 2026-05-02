@@ -79,6 +79,15 @@ export interface ModuleEntry {
   stereotypes: Record<string, number>;
 }
 
+export interface TabDescriptor {
+  /// Stable id, used as Svelte each-key (e.g. "files", "diagrams", "tests").
+  id: string;
+  /// i18n key for the visible label.
+  label_key: string;
+  /// Frontend viewMode the tab activates.
+  view_mode: string;
+}
+
 export interface RepoSummary {
   root: string;
   modules: number;
@@ -91,6 +100,10 @@ export interface RepoSummary {
   /// "package-tree", "folder-map"). Returned by the backend so the UI can
   /// render the Diagram-tab buttons dynamically.
   available_diagrams: string[];
+  /// Top-level UI tabs the active plugin set contributes. Core ships
+  /// "files" + "diagrams"; plugins can append more (e.g. a future
+  /// "framework-junit" "Tests" tab). Rendered in declaration order.
+  tabs: TabDescriptor[];
 }
 
 export interface ChangedFile {
