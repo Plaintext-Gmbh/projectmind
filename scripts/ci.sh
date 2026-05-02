@@ -70,8 +70,9 @@ cmd_install_deps() {
         echo "install-deps: skipped (not Linux)"
         return 0
     fi
-    sudo apt-get update
-    sudo apt-get install -y \
+    export DEBIAN_FRONTEND=noninteractive
+    sudo -E apt-get -o Dpkg::Lock::Timeout=120 update
+    sudo -E apt-get -o Dpkg::Lock::Timeout=120 install -y --no-install-recommends \
         libwebkit2gtk-4.1-dev \
         libgtk-3-dev \
         libayatana-appindicator3-dev \
