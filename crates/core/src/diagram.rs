@@ -9,8 +9,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 
+use ignore::WalkBuilder;
 use projectmind_plugin_api::{FrameworkPlugin, Relation, RelationKind};
+use serde::Serialize;
 
 use crate::Repository;
 
@@ -207,6 +210,142 @@ pub fn render_package_tree(repo: &Repository) -> String {
         }
     }
     out
+}
+
+/// Render a repository folder map as JSON.
+///
+/// The frontend can switch layouts (hierarchy, solar, ...), so this returns a
+/// stable, read-only model rather than a concrete Mermaid diagram.
+#[must_use]
+pub fn render_folder_map(repo: &Repository) -> String {
+    #[derive(Debug, Serialize)]
+    struct FolderMap {
+        root: PathBuf,
+        max_depth: usize,
+        truncated: bool,
+        nodes: Vec<FolderNode>,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    struct FolderNode {
+        id: String,
+        parent: Option<String>,
+        label: String,
+        path: PathBuf,
+        kind: &'static str,
+        depth: usize,
+        weight: u32,
+    }
+
+    const MAX_DEPTH: usize = 5;
+    const MAX_NODES: usize = 420;
+
+    let root = repo.root.clone();
+    let mut nodes = vec![FolderNode {
+        id: ".".into(),
+        parent: None,
+        label: root
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("repo")
+            .to_string(),
+        path: root.clone(),
+        kind: "root",
+        depth: 0,
+        weight: 1,
+    }];
+    let mut truncated = false;
+
+    let walker = WalkBuilder::new(&root)
+        .hidden(false)
+        .parents(true)
+        .ignore(true)
+        .git_ignore(true)
+        .git_exclude(true)
+        .max_depth(Some(MAX_DEPTH))
+        .filter_entry(|entry| {
+            let name = entry.file_name().to_string_lossy();
+            !matches!(
+                name.as_ref(),
+                ".git" | "target" | "node_modules" | "dist" | ".svelte-kit"
+            )
+        })
+        .build();
+
+    for entry in walker.flatten() {
+        if entry.path() == root {
+            continue;
+        }
+        if nodes.len() >= MAX_NODES {
+            truncated = true;
+            break;
+        }
+        let Ok(rel) = entry.path().strip_prefix(&root) else {
+            continue;
+        };
+        if rel.as_os_str().is_empty() {
+            continue;
+        }
+        let depth = rel.components().count();
+        let id = rel_id(rel);
+        let parent = rel
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .map_or_else(|| ".".to_string(), rel_id);
+        let kind = if entry.file_type().is_some_and(|t| t.is_dir()) {
+            "folder"
+        } else {
+            "file"
+        };
+        nodes.push(FolderNode {
+            id,
+            parent: Some(parent),
+            label: rel
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("?")
+                .to_string(),
+            path: entry.path().to_path_buf(),
+            kind,
+            depth,
+            weight: u32::from(kind == "file"),
+        });
+    }
+
+    // Aggregate descendant file counts into folders. The weight drives visual
+    // size in non-hierarchical layouts.
+    let file_ids: Vec<String> = nodes
+        .iter()
+        .filter(|n| n.kind == "file")
+        .map(|n| n.id.clone())
+        .collect();
+    let parent_by_id: BTreeMap<String, Option<String>> = nodes
+        .iter()
+        .map(|n| (n.id.clone(), n.parent.clone()))
+        .collect();
+    let mut weights: BTreeMap<String, u32> = BTreeMap::new();
+    for id in file_ids {
+        let mut cur = Some(id);
+        while let Some(node_id) = cur {
+            *weights.entry(node_id.clone()).or_default() += 1;
+            cur = parent_by_id.get(&node_id).cloned().flatten();
+        }
+    }
+    for node in &mut nodes {
+        node.weight = weights.get(&node.id).copied().unwrap_or(1).max(1);
+    }
+
+    serde_json::to_string(&FolderMap {
+        root,
+        max_depth: MAX_DEPTH,
+        truncated,
+        nodes,
+    })
+    .unwrap_or_else(|_| "{}".to_string())
+}
+
+fn rel_id(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
 /// Escape a string for use as a Mermaid `click ... call fn("...")` argument.

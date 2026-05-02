@@ -27,4 +27,26 @@ export default defineConfig(async () => ({
       ignored: ['**/src-tauri/**'],
     },
   },
+
+  build: {
+    // Mermaid is hefty (lots of diagram types). Splitting it into its own
+    // chunk + lazy-importing DiagramView lets the welcome screen and the
+    // Files tab load without paying the mermaid tax. Vite 8/rolldown
+    // requires `manualChunks` as a function rather than the object form
+    // that earlier vite tolerated.
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (id.includes('node_modules/mermaid')) return 'mermaid';
+          if (id.includes('node_modules/marked')) return 'marked';
+          return undefined;
+        },
+      },
+    },
+    // Tauri targets a known modern engine (system webview); we don't need
+    // ES2015 transpilation.
+    target: 'es2022',
+    // Squelch the 500 KB warning — we already split the heavyweights.
+    chunkSizeWarningLimit: 1000,
+  },
 }));

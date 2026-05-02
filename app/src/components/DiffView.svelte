@@ -1,6 +1,7 @@
 <script lang="ts">
   import { showDiff } from '../lib/api';
   import { t } from '../lib/i18n';
+  import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
 
   export let reference: string;
   export let to: string | null = null;
@@ -9,6 +10,9 @@
   let lines: { kind: 'meta' | 'header' | 'add' | 'del' | 'context' | 'hunk'; text: string }[] = [];
   let loading = false;
   let error: string | null = null;
+
+  // Shift + wheel zoom, persisted under the per-component key.
+  const { zoom, action: zoomAction } = createShiftWheelZoom('projectmind.diffview.zoom');
 
   $: if (reference) void load(reference, to);
 
@@ -48,7 +52,7 @@
   }
 </script>
 
-<section class="root">
+<section class="root" use:zoomAction style="font-size: {$zoom}em;">
   <header class="bar">
     <span class="kind">{$t('diff.kind')}</span>
     <code class="ref">{reference}</code>
@@ -83,7 +87,7 @@
     padding: 6px 16px;
     background: var(--bg-1);
     border-bottom: 1px solid var(--bg-3);
-    font-size: 12px;
+    font-size: 0.86em;
     color: var(--fg-1);
   }
   .kind {
@@ -93,7 +97,7 @@
     background: var(--bg-2);
     border-radius: 3px;
     color: var(--fg-2);
-    font-size: 10px;
+    font-size: 0.72em;
   }
   .arrow {
     color: var(--fg-2);
@@ -119,13 +123,27 @@
     margin: 0;
     padding: 16px;
     font-family: var(--mono);
-    font-size: 12px;
-    line-height: 1.45;
+    font-size: 1em;
+    line-height: 1.5;
     overflow: auto;
     flex: 1;
     background: var(--bg-0);
-    color: var(--fg-1);
+    color: var(--fg-0);
     white-space: pre;
+    /* Diff colours are theme-aware via these custom properties.
+       Defaults below are for the dark theme; light theme overrides
+       follow the matching :global(:root[data-theme='light']) block. */
+    --diff-add-fg: #b8eaa6;
+    --diff-add-bg: #2ea043;
+    --diff-del-fg: #f8b6b6;
+    --diff-del-bg: #cf222e;
+  }
+
+  :global(:root[data-theme='light']) .diff {
+    --diff-add-fg: #044317;
+    --diff-add-bg: #1a7f37;
+    --diff-del-fg: #82071e;
+    --diff-del-bg: #cf222e;
   }
 
   .line {
@@ -145,17 +163,18 @@
   }
   .line.hunk {
     color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
     border-left-color: var(--accent);
+    font-weight: 500;
   }
   .line.add {
-    color: #b8eaa6;
-    background: color-mix(in srgb, #2ea043 18%, transparent);
-    border-left-color: #2ea043;
+    color: var(--diff-add-fg);
+    background: color-mix(in srgb, var(--diff-add-bg) 22%, transparent);
+    border-left-color: var(--diff-add-bg);
   }
   .line.del {
-    color: #f8b6b6;
-    background: color-mix(in srgb, #cf222e 18%, transparent);
-    border-left-color: #cf222e;
+    color: var(--diff-del-fg);
+    background: color-mix(in srgb, var(--diff-del-bg) 22%, transparent);
+    border-left-color: var(--diff-del-bg);
   }
 </style>

@@ -33,10 +33,9 @@ Commands:
   release-package <target> <suffix>
                               tar.gz + sha256 packaging for the MCP server binary
   app-build [<target>]        Build the Tauri desktop app bundle for the host
-                              platform (.app/.dmg on macOS, .deb/.AppImage on
-                              Linux, .msi/.exe on Windows). Optional Rust
-                              target triple for cross-arch builds (e.g.
-                              universal-apple-darwin).
+                              platform (.app/.dmg on macOS, .deb/.AppImage on Linux,
+                              .msi/.exe on Windows). Optional Rust target triple
+                              for cross-arch builds (e.g. universal-apple-darwin).
   app-package <target> <suffix>
                               Collect every Tauri bundle artefact under
                               target/<target>/release/bundle into
@@ -58,12 +57,20 @@ sha256() {
 
 cmd_check() {
     cargo fmt --all -- --check
-    cargo clippy --workspace --all-targets -- -D warnings
+    local cargo_args=(--workspace --all-targets)
+    if [[ "${PROJECTMIND_SKIP_TAURI_APP:-}" == "1" ]]; then
+        cargo_args+=(--exclude projectmind-app)
+    fi
+    cargo clippy "${cargo_args[@]}" -- -D warnings
 }
 
 cmd_test() {
-    cargo test --workspace --all-targets
-    cargo test --workspace --doc
+    local cargo_args=(--workspace)
+    if [[ "${PROJECTMIND_SKIP_TAURI_APP:-}" == "1" ]]; then
+        cargo_args+=(--exclude projectmind-app)
+    fi
+    cargo test "${cargo_args[@]}" --all-targets
+    cargo test "${cargo_args[@]}" --doc
 }
 
 cmd_install_deps() {
@@ -71,8 +78,9 @@ cmd_install_deps() {
         echo "install-deps: skipped (not Linux)"
         return 0
     fi
-    sudo apt-get update
-    sudo apt-get install -y \
+    export DEBIAN_FRONTEND=noninteractive
+    sudo -E apt-get -o Dpkg::Lock::Timeout=120 update
+    sudo -E apt-get -o Dpkg::Lock::Timeout=120 install -y --no-install-recommends \
         libwebkit2gtk-4.1-dev \
         libgtk-3-dev \
         libayatana-appindicator3-dev \
@@ -170,8 +178,9 @@ cmd_app_package() {
     # Tauri scatters bundle artefacts across format-specific subdirs
     # (bundle/dmg/, bundle/macos/, bundle/deb/, bundle/appimage/, bundle/msi/,
     # bundle/nsis/). Pick whatever distributable formats actually got produced
-    # and pack them plus LICENSE + README into one archive — keeps the workflow
-    # simple: ONE artefact per target, asset_suffix telling Mac/Linux/Win apart.
+    # and pack them plus LICENSE + README into one archive. This keeps the
+    # workflow simple: ONE artefact per target, asset_suffix telling Mac/Linux/Win
+    # apart.
     local bundles=()
     while IFS= read -r f; do
         bundles+=("$f")

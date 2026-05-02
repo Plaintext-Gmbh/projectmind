@@ -2,6 +2,7 @@
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
   import { onMount, onDestroy } from 'svelte';
   import { listen } from '@tauri-apps/api/event';
+  import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { get } from 'svelte/store';
   import {
     repo,
@@ -9,11 +10,14 @@
     modules,
     selectedClass,
     stereotypeFilter,
+    fileKindFilter,
     moduleFilter,
     packageFilter,
     errorMessage,
     filteredClasses,
     stereotypeCounts,
+    moduleFilesByModule,
+    filteredModuleFiles,
     viewMode,
     fileView,
     walkthroughCursor,
@@ -24,22 +28,41 @@
     openRepo,
     listClasses,
     listModules,
+    listModuleFiles,
     showClass,
     currentState,
+    browserToken,
+    clearBrowserToken,
+    isTauriRuntime,
+    setBrowserToken,
   } from './lib/api';
-  import type { ClassEntry, UiState } from './lib/api';
+  import type { ClassEntry, ModuleEntry, ModuleFile, UiState } from './lib/api';
+  // Eagerly imported — small, almost-always rendered:
   import ClassViewer from './components/ClassViewer.svelte';
-  import DiagramView from './components/DiagramView.svelte';
-  import DiffView from './components/DiffView.svelte';
-  import FileView from './components/FileView.svelte';
-  import HtmlIndex from './components/HtmlIndex.svelte';
-  import MarkdownIndex from './components/MarkdownIndex.svelte';
   import ModuleSidebar from './components/ModuleSidebar.svelte';
-  import WalkthroughView from './components/WalkthroughView.svelte';
-  import { language, languages, t } from './lib/i18n';
+  import ImageView from './components/ImageView.svelte';
+  import PdfView from './components/PdfView.svelte';
+  import DiffView from './components/DiffView.svelte';
+  // Heavy components — pulled in dynamically the first time the user
+  // visits the matching tab. mermaid (~640 KB) and marked (~40 KB) ride
+  // along with DiagramView / FileView / WalkthroughView etc., so keeping
+  // those imports lazy keeps the initial bundle under 200 KB.
   import { resizable } from './lib/resizable';
+  import { t, language, setLanguage, languages } from './lib/i18n';
+  import { loadComponent } from './lib/lazyLoad';
+  const lazyDiagramView = () =>
+    loadComponent('DiagramView', () => import('./components/DiagramView.svelte'));
+  const lazyFileView = () =>
+    loadComponent('FileView', () => import('./components/FileView.svelte'));
+  const lazyHtmlIndex = () =>
+    loadComponent('HtmlIndex', () => import('./components/HtmlIndex.svelte'));
+  const lazyMarkdownIndex = () =>
+    loadComponent('MarkdownIndex', () => import('./components/MarkdownIndex.svelte'));
+  const lazyWalkthroughView = () =>
+    loadComponent('WalkthroughView', () => import('./components/WalkthroughView.svelte'));
 
   type Theme = 'dark' | 'light';
+  const BROWSER_STATE_POLL_MS = 500;
   let theme: Theme = readTheme();
   $: applyTheme(theme);
 
@@ -67,16 +90,39 @@
     theme = theme === 'dark' ? 'light' : 'dark';
   }
 
-  // The Code tab falls back to "Files" when the repo has no parsed classes
-  // (e.g. a docs-only or office-style folder).
-  $: codeTabLabel = $repo && $repo.classes === 0 ? $t('nav.files') : $t('nav.code');
+  // The main browse tab is always labelled with the i18n entry — the term
+  // covers parsed classes, plain assets (PDFs, images), and (after the
+  // chip refactor) markdown / HTML alike. "Modules" stays as the synonym
+  // for folders.
+  $: codeTabLabel = $t('nav.files');
 
-  let diagramKind: 'bean-graph' | 'package-tree' = 'bean-graph';
+  function toggleLang() {
+    // Cycle through the configured languages (codex's i18n module ships
+    // five). Wrap to the first one once we hit the end.
+    const codes = languages.map((l) => l.code);
+    const idx = codes.indexOf($language);
+    setLanguage(codes[(idx + 1) % codes.length]);
+  }
+
+  let diagramKind: 'bean-graph' | 'package-tree' | 'folder-map' = 'bean-graph';
+  let folderMapLayout: 'hierarchy' | 'solar' | 'td' = 'solar';
   let classSource = '';
   let classMeta: { file: string; line_start: number; line_end: number } | null = null;
   let loading = false;
+  let browserMode = false;
+  let browserAuthorized = true;
+  let tokenInput = '';
   let unlistenState: (() => void) | null = null;
+  let statePoll: ReturnType<typeof setInterval> | null = null;
   let lastSeq = 0;
+  // Drag-and-drop state. `dragOver` toggles the full-window overlay; in
+  // browser mode `browserDropHint` flashes a transient inline notice telling
+  // the user the desktop app supports the gesture but the browser can't see
+  // absolute paths.
+  let dragOver = false;
+  let browserDropHint: string | null = null;
+  let browserDropHintTimer: ReturnType<typeof setTimeout> | null = null;
+  let unlistenDragDrop: (() => void) | null = null;
   /// True while we're applying an MCP-driven state change. Prevents the
   /// resulting load() from re-publishing and triggering an event loop.
   let applyingExternal = false;
@@ -84,7 +130,119 @@
   // Whenever selectedClass changes (from sidebar click *or* a diagram drilldown)
   // load the source for the right-hand viewer.
   let lastLoadedFqn: string | null = null;
+  // If the active diagram kind isn't in the new repo's available_diagrams
+  // (e.g. switching from a Java repo to a docs-only repo would orphan the
+  // bean-graph), fall back to the first available kind. folder-map is
+  // always present so this never fails.
+  $: if ($repo && !$repo.available_diagrams.includes(diagramKind)) {
+    diagramKind = ($repo.available_diagrams[0] ?? 'folder-map') as typeof diagramKind;
+  }
+
+  function diagramLabel(kind: string): string {
+    switch (kind) {
+      case 'bean-graph': return $t('diagram.beanGraph');
+      case 'package-tree': return $t('diagram.packageTree');
+      case 'folder-map': return $t('diagram.folderMap');
+      default: return kind; // unknown plugin-contributed diagram — show id
+    }
+  }
   $: void loadSourceFor($selectedClass);
+
+  // PDFs / images that live inside each module. The map is reloaded whenever
+  // the module filter changes (or new modules arrive); the right-pane list
+  // and per-module counters subscribe to the derived stores in store.ts.
+  let moduleFilesLoadedFor: string | null = null;
+  // Re-run on either change: a different filter, OR new modules arriving
+  // (the "all modules" path needs the populated $modules list).
+  $: void loadModuleFilesFor($moduleFilter, $modules);
+
+  async function loadModuleFilesFor(moduleId: string | null, mods: ModuleEntry[]) {
+    // Cache key — id of the filter plus the module-set fingerprint, so that
+    // a repo-open which repopulates $modules invalidates a previous "0 mods"
+    // result.
+    const token = `${moduleId ?? '__all__'}::${mods.map((m) => m.id).join(',')}`;
+    if (moduleFilesLoadedFor === token) return;
+    moduleFilesLoadedFor = token;
+    try {
+      let map: Record<string, ModuleFile[]>;
+      if (moduleId) {
+        const items = await listModuleFiles(moduleId);
+        map = { [moduleId]: items };
+      } else if (mods.length === 0) {
+        map = {};
+      } else {
+        // "All modules" filter — fan out across every module and merge.
+        const lists = await Promise.all(mods.map((m) => listModuleFiles(m.id)));
+        map = {};
+        mods.forEach((m, i) => {
+          map[m.id] = lists[i];
+        });
+      }
+      // Race guard: ignore the result if the user switched while we were fetching.
+      if (moduleFilesLoadedFor === token) moduleFilesByModule.set(map);
+    } catch (err) {
+      // Don't blow up the whole Code tab — non-fatal, just hide the section.
+      console.warn('list_module_files failed:', err);
+      if (moduleFilesLoadedFor === token) moduleFilesByModule.set({});
+    }
+  }
+
+  // Discriminated row type for the mixed Code-tab list. Either a parsed
+  // class or a non-source file (PDF / image) sourced from list_module_files.
+  type DisplayItem =
+    | { kind: 'class'; entry: ClassEntry }
+    | { kind: 'file'; entry: ModuleFile };
+
+  // Distinct kinds present in the visible files — drives the filter pills
+  // shown next to the stereotype pills. Sorted for stable UI ordering.
+  $: fileKindsPresent = (() => {
+    const set = new Set<string>();
+    for (const f of $filteredModuleFiles) set.add(f.kind);
+    return Array.from(set).sort();
+  })();
+
+  // Mixed list rendered on the right: classes + files, filtered by the
+  // active filter axis (stereotype, file-kind, module).
+  //
+  //  - fileKindFilter set → only files of that kind, no classes.
+  //  - stereotypeFilter set → only classes with that stereotype, no files.
+  //  - otherwise → classes (already module/package-filtered) + files for
+  //    the same module scope, classes first then files (each block sorted).
+  $: displayItems = (() => {
+    const out: DisplayItem[] = [];
+    if ($fileKindFilter !== null) {
+      const files = $filteredModuleFiles
+        .filter((f) => f.kind === $fileKindFilter)
+        .slice()
+        .sort((a, b) => a.rel.localeCompare(b.rel));
+      for (const f of files) out.push({ kind: 'file', entry: f });
+      return out;
+    }
+    if ($stereotypeFilter !== null) {
+      for (const c of $filteredClasses) out.push({ kind: 'class', entry: c });
+      return out;
+    }
+    // No file/stereotype filter — classes first (filteredClasses already
+    // honours moduleFilter + packageFilter), then module files.
+    const sortedClasses = $filteredClasses.slice().sort((a, b) => a.fqn.localeCompare(b.fqn));
+    for (const c of sortedClasses) out.push({ kind: 'class', entry: c });
+    const sortedFiles = $filteredModuleFiles.slice().sort((a, b) => a.rel.localeCompare(b.rel));
+    for (const f of sortedFiles) out.push({ kind: 'file', entry: f });
+    return out;
+  })();
+
+  function openModuleFile(f: ModuleFile) {
+    fileView.update((cur) => ({
+      path: f.abs,
+      anchor: null,
+      nonce: (cur?.nonce ?? 0) + 1,
+    }));
+    if (f.kind === 'pdf') {
+      viewMode.set('pdf');
+    } else {
+      viewMode.set('image');
+    }
+  }
 
   async function loadSourceFor(c: ClassEntry | null) {
     if (!c) {
@@ -110,9 +268,36 @@
   }
 
   async function pickAndOpen() {
+    if (browserMode) {
+      const picked = window.prompt('Absolute repository path on the ProjectMind host');
+      if (picked) await load(picked);
+      return;
+    }
     const picked = await openDialog({ directory: true, multiple: false });
     if (!picked || Array.isArray(picked)) return;
     await load(picked);
+  }
+
+  async function useBrowserToken() {
+    const token = tokenInput.trim();
+    if (!token) return;
+    setBrowserToken(token);
+    browserAuthorized = true;
+    errorMessage.set(null);
+    try {
+      const initial = await currentState();
+      if (initial) await applyState(initial);
+    } catch (err) {
+      browserAuthorized = false;
+      errorMessage.set(String(err));
+    }
+  }
+
+  function forgetBrowserToken() {
+    clearBrowserToken();
+    browserAuthorized = false;
+    tokenInput = '';
+    repo.set(null);
   }
 
   async function load(path: string, opts: { silent?: boolean } = {}) {
@@ -127,6 +312,7 @@
       selectedClass.set(null);
       moduleFilter.set(null);
       stereotypeFilter.set(null);
+      fileKindFilter.set(null);
       packageFilter.set(null);
       classSource = '';
     } catch (err) {
@@ -145,7 +331,19 @@
   }
 
   function setFilter(s: string | null) {
+    if (s === null) {
+      // "all" — clear both filter axes.
+      stereotypeFilter.set(null);
+      fileKindFilter.set(null);
+      return;
+    }
+    fileKindFilter.set(null);
     stereotypeFilter.update((cur) => (cur === s ? null : s));
+  }
+
+  function setKindFilter(k: string) {
+    stereotypeFilter.set(null);
+    fileKindFilter.update((cur) => (cur === k ? null : k));
   }
 
   // ----- MCP↔GUI sync: listen for state changes, apply intents -----------
@@ -180,7 +378,11 @@
           }
           break;
         case 'diagram':
-          if (v.diagram_kind === 'bean-graph' || v.diagram_kind === 'package-tree') {
+          if (
+            v.diagram_kind === 'bean-graph' ||
+            v.diagram_kind === 'package-tree' ||
+            v.diagram_kind === 'folder-map'
+          ) {
             diagramKind = v.diagram_kind;
           }
           viewMode.set('diagram');
@@ -213,18 +415,189 @@
     }
   }
 
-  onMount(async () => {
-    // Pick up wherever we left off (or whatever the MCP server has set since).
-    const initial = await currentState();
-    if (initial) await applyState(initial);
+  // ----- Drag-and-drop ------------------------------------------------------
 
-    unlistenState = await listen<UiState>('state-changed', (ev) => {
-      void applyState(ev.payload);
-    });
+  function dirname(p: string): string {
+    // Strip a trailing slash (so `/foo/bar/` → `/foo/bar` → `/foo`) before
+    // looking for the separator. Works for both POSIX and Windows-style
+    // paths since Tauri returns forward slashes on POSIX and backslashes on
+    // Windows; we honour both.
+    const trimmed = p.replace(/[\\/]+$/, '');
+    const idx = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+    if (idx === -1) return trimmed;
+    if (idx === 0) return trimmed.slice(0, 1); // root: "/"
+    return trimmed.slice(0, idx);
+  }
+
+  function extOf(p: string): string {
+    const base = p.replace(/[\\/]+$/, '');
+    const slash = Math.max(base.lastIndexOf('/'), base.lastIndexOf('\\'));
+    const name = slash === -1 ? base : base.slice(slash + 1);
+    const dot = name.lastIndexOf('.');
+    if (dot <= 0) return '';
+    return name.slice(dot + 1).toLowerCase();
+  }
+
+  function viewModeForExt(ext: string): 'file' | 'pdf' | 'image' | null {
+    if (ext === 'md' || ext === 'markdown' || ext === 'mdx') return 'file';
+    if (ext === 'pdf') return 'pdf';
+    if (ext === 'png' || ext === 'jpg' || ext === 'jpeg' || ext === 'webp' || ext === 'gif') {
+      return 'image';
+    }
+    return null;
+  }
+
+  /// Open the repo for a dropped OS path. If the path is a file, route to
+  /// the matching content view (markdown / pdf / image). For directories or
+  /// unrecognised extensions, leave the default Code-tab view.
+  ///
+  /// `isDirectory` is only known reliably under Tauri (we'd need a backend
+  /// stat for browsers, but browser-mode never reaches this path). On the
+  /// desktop side we infer directory-ness from the absence of an extension —
+  /// good enough for the common drop targets (Finder folders, single files).
+  async function handleDroppedPath(absPath: string, isDirectory: boolean): Promise<void> {
+    const repoPath = isDirectory ? absPath : dirname(absPath);
+    if (!repoPath) {
+      errorMessage.set(`Cannot derive repository directory from: ${absPath}`);
+      return;
+    }
+    followingMcp.set(false);
+    await load(repoPath);
+    if (get(errorMessage)) return; // load() already surfaced a message
+    if (isDirectory) {
+      viewMode.set('classes');
+      return;
+    }
+    const ext = extOf(absPath);
+    const target = viewModeForExt(ext);
+    if (target === null) {
+      // Source files / unknown extensions land on the Code tab.
+      viewMode.set('classes');
+      return;
+    }
+    fileView.update((cur) => ({
+      path: absPath,
+      anchor: null,
+      nonce: (cur?.nonce ?? 0) + 1,
+    }));
+    viewMode.set(target);
+  }
+
+  function flashBrowserDropHint(message: string) {
+    browserDropHint = message;
+    if (browserDropHintTimer) clearTimeout(browserDropHintTimer);
+    browserDropHintTimer = setTimeout(() => {
+      browserDropHint = null;
+      browserDropHintTimer = null;
+    }, 6000);
+  }
+
+  // Browser-mode handlers — registered as DOM listeners on `window`.
+  // We can't read absolute paths in browsers (the File API hides them), so we
+  // intercept the drop, prevent the default navigation, and surface a hint.
+  function onBrowserDragOver(ev: DragEvent) {
+    if (!ev.dataTransfer) return;
+    const types = Array.from(ev.dataTransfer.types ?? []);
+    if (!types.includes('Files')) return;
+    ev.preventDefault();
+    dragOver = true;
+  }
+
+  function onBrowserDragLeave(ev: DragEvent) {
+    // `dragleave` fires on every child node we cross. Only clear the overlay
+    // when the cursor genuinely left the window — relatedTarget is null in
+    // that case in Chromium/WebKit.
+    if (ev.relatedTarget !== null) return;
+    dragOver = false;
+  }
+
+  function onBrowserDrop(ev: DragEvent) {
+    if (!ev.dataTransfer) return;
+    const types = Array.from(ev.dataTransfer.types ?? []);
+    if (!types.includes('Files')) return;
+    ev.preventDefault();
+    dragOver = false;
+    flashBrowserDropHint(
+      "Drag-and-drop opens a repo only in the desktop app — in browser mode, paste the absolute path into 'Open repo'.",
+    );
+  }
+
+  onMount(async () => {
+    browserMode = !isTauriRuntime();
+    if (browserMode && !browserToken()) {
+      browserAuthorized = false;
+      return;
+    }
+    // Pick up wherever we left off (or whatever the MCP server has set since).
+    try {
+      const initial = await currentState();
+      if (initial) await applyState(initial);
+    } catch (err) {
+      if (browserMode) {
+        browserAuthorized = false;
+        errorMessage.set(String(err));
+        return;
+      }
+      throw err;
+    }
+
+    if (!browserMode) {
+      unlistenState = await listen<UiState>('state-changed', (ev) => {
+        void applyState(ev.payload);
+      });
+      // Register Tauri 2 webview-level drag-drop. Reports absolute paths
+      // (which the browser DOM API hides) and fires enter/over/drop/leave.
+      unlistenDragDrop = await getCurrentWebview().onDragDropEvent((event) => {
+        const p = event.payload;
+        if (p.type === 'enter' || p.type === 'over') {
+          dragOver = true;
+        } else if (p.type === 'leave') {
+          dragOver = false;
+        } else if (p.type === 'drop') {
+          dragOver = false;
+          const paths = p.paths ?? [];
+          if (paths.length === 0) return;
+          const first = paths[0];
+          // Heuristic: if the path has no extension, treat it as a directory.
+          // The OS sends absolute paths for both files and folders; on macOS
+          // a folder name without a `.something` suffix is the typical case.
+          const looksLikeDir = extOf(first) === '';
+          void handleDroppedPath(first, looksLikeDir);
+        }
+      });
+    } else {
+      statePoll = setInterval(() => {
+        void currentState()
+          .then((s) => {
+            if (s) return applyState(s);
+            return undefined;
+          })
+          .catch((err) => {
+            errorMessage.set(String(err));
+          });
+      }, BROWSER_STATE_POLL_MS);
+      // Browser-mode visual + hint. We can't get absolute paths here, so
+      // the goal is just: prevent the browser's default file-navigation,
+      // mirror the same drag-over visual the desktop app shows, and tell
+      // the user how to actually open a repo.
+      window.addEventListener('dragenter', onBrowserDragOver);
+      window.addEventListener('dragover', onBrowserDragOver);
+      window.addEventListener('dragleave', onBrowserDragLeave);
+      window.addEventListener('drop', onBrowserDrop);
+    }
   });
 
   onDestroy(() => {
     unlistenState?.();
+    unlistenDragDrop?.();
+    if (statePoll) clearInterval(statePoll);
+    if (browserDropHintTimer) clearTimeout(browserDropHintTimer);
+    if (browserMode) {
+      window.removeEventListener('dragenter', onBrowserDragOver);
+      window.removeEventListener('dragover', onBrowserDragOver);
+      window.removeEventListener('dragleave', onBrowserDragLeave);
+      window.removeEventListener('drop', onBrowserDrop);
+    }
   });
 </script>
 
@@ -240,18 +613,28 @@
         </span>
         <span class="status">
           <span class="dot"></span>
-          {$t('app.repoStats', { classes: $repo.classes, modules: $repo.modules })}
+          {$t('status.repoCount', {
+            files: $repo.classes,
+            filesUnit: $t($repo.classes === 1 ? 'status.files.one' : 'status.files.other'),
+            modules: $repo.modules,
+            modulesUnit: $t($repo.modules === 1 ? 'status.modules.one' : 'status.modules.other'),
+          })}
         </span>
       {:else}
         <span class="status">
           <span class="dot dim"></span>
-          {$t('app.noRepository')}
+          {$t('status.noRepo')}
         </span>
       {/if}
     </div>
     <nav>
       <button
-        class:active={$viewMode === 'classes'}
+        class:active={$viewMode === 'classes' ||
+          $viewMode === 'pdf' ||
+          $viewMode === 'image' ||
+          $viewMode === 'md' ||
+          $viewMode === 'html' ||
+          $viewMode === 'file'}
         disabled={!$repo}
         on:click={() => {
           followingMcp.set(false);
@@ -260,50 +643,22 @@
       >
         {codeTabLabel}
       </button>
-      {#if !$repo || ($repo && $repo.classes > 0)}
-        <button
-          class:active={$viewMode === 'diagram'}
-          disabled={!$repo}
-          on:click={() => {
-            followingMcp.set(false);
-            viewMode.set('diagram');
-          }}
-        >
-          {$t('nav.diagrams')}
-        </button>
-      {/if}
-      {#if !$repo || ($repo && $repo.markdown_count > 0)}
-        <button
-          class:active={$viewMode === 'md' || $viewMode === 'file'}
-          disabled={!$repo}
-          on:click={() => {
-            followingMcp.set(false);
-            viewMode.set('md');
-          }}
-          title={$t('nav.markdownTitle')}
-        >
-          MD
-        </button>
-      {/if}
-      {#if !$repo || ($repo && $repo.html_count > 0)}
-        <button
-          class:active={$viewMode === 'html'}
-          disabled={!$repo}
-          on:click={() => {
-            followingMcp.set(false);
-            viewMode.set('html');
-          }}
-          title={$t('nav.htmlTitle')}
-        >
-          HTML
-        </button>
-      {/if}
+      <button
+        class:active={$viewMode === 'diagram'}
+        disabled={!$repo}
+        on:click={() => {
+          followingMcp.set(false);
+          viewMode.set('diagram');
+        }}
+      >
+        {$t('nav.diagrams')}
+      </button>
       {#if $walkthroughCursor}
         <button
           class:active={$viewMode === 'walkthrough'}
           class="walkthrough-btn"
           on:click={() => viewMode.set('walkthrough')}
-          title={$t('nav.walkthroughTitle')}
+          title={$t('nav.walkthrough')}
         >
           ▶ {$t('nav.walkthrough')}
         </button>
@@ -312,28 +667,29 @@
         <button class="active">{$t('nav.diff')}</button>
       {/if}
       {#if $followingMcp}
-        <span class="follow" title={$t('nav.followingMcpTitle')}>
+        <span class="follow" title={$t('nav.followingMcp.title')}>
           {$t('nav.followingMcp')}
         </span>
       {/if}
+      {#if browserMode}
+        <button on:click={forgetBrowserToken} title={$t('nav.token')}>{$t('nav.token')}</button>
+      {/if}
       <button on:click={pickAndOpen} disabled={loading}>
-        {loading ? '...' : $t('nav.openRepo')}
+        {loading ? $t('status.loading') : $t('nav.openRepo')}
       </button>
-      <select
-        class="language-select"
-        bind:value={$language}
-        aria-label={$t('language.label')}
-        title={$t('language.label')}
+      <button
+        class="lang-toggle"
+        on:click={toggleLang}
+        title={$t('nav.langToggle')}
+        aria-label={$t('nav.langToggle')}
       >
-        {#each languages as lang (lang.code)}
-          <option value={lang.code}>{lang.label}</option>
-        {/each}
-      </select>
+        {$language.toUpperCase()}
+      </button>
       <button
         class="theme-toggle"
         on:click={toggleTheme}
-        title={$t('theme.switchTo', { mode: theme === 'dark' ? $t('theme.light') : $t('theme.dark') })}
-        aria-label={$t('theme.toggle')}
+        title={theme === 'dark' ? $t('nav.themeToggle.toLight') : $t('nav.themeToggle.toDark')}
+        aria-label={theme === 'dark' ? $t('nav.themeToggle.toLight') : $t('nav.themeToggle.toDark')}
       >
         {theme === 'dark' ? '☀' : '☾'}
       </button>
@@ -344,20 +700,45 @@
     <div class="error">⚠ {$errorMessage}</div>
   {/if}
 
-  {#if !$repo}
+  {#if browserDropHint}
+    <div class="drop-hint" role="status">{browserDropHint}</div>
+  {/if}
+
+  {#if browserMode && !browserAuthorized}
+    <section class="empty">
+      <form class="token-panel" on:submit|preventDefault={useBrowserToken}>
+        <img class="welcome-logo" src="/logo.png" alt="ProjectMind" />
+        <h1>{$t('welcome.title')}</h1>
+        <p class="claim">{$t('browserMode.banner')}</p>
+        <label for="browser-token">{$t('browserMode.tokenLabel')}</label>
+        <input
+          id="browser-token"
+          bind:value={tokenInput}
+          autocomplete="off"
+          spellcheck="false"
+          placeholder={$t('browserMode.tokenLabel')}
+        />
+        <button type="submit">{$t('browserMode.tokenSubmit')}</button>
+      </form>
+    </section>
+  {:else if !$repo}
     <section class="empty">
       <div class="welcome">
         <img class="welcome-logo" src="/logo.png" alt="ProjectMind" />
-        <h1>ProjectMind</h1>
-        <p class="claim">{$t('welcome.claim')}</p>
+        <h1>{$t('welcome.title')}</h1>
+        <p class="claim">{$t('welcome.tagline')}</p>
         <p class="by">{$t('welcome.by')}</p>
-        <button on:click={pickAndOpen}>{$t('welcome.open')}</button>
+        <button on:click={pickAndOpen}>{$t('welcome.openButton')}</button>
         <p class="hint">
-          {$t('welcome.hint')}
+          {#if browserMode}
+            {$t('welcome.hint.browser')}
+          {:else}
+            {$t('welcome.hint.tauri')}
+          {/if}
         </p>
       </div>
     </section>
-  {:else if $viewMode === 'classes'}
+  {:else if $viewMode === 'classes' || $viewMode === 'pdf' || $viewMode === 'image' || $viewMode === 'md' || $viewMode === 'html' || $viewMode === 'file'}
     <section class="layout">
       <ModuleSidebar />
       <div
@@ -369,111 +750,200 @@
           max: 480,
           initial: 220,
         }}
-        title={$t('app.resizeTitle')}
+        title="Drag to resize · double-click to reset"
       ></div>
-      <aside class="sidebar">
-        {#if $packageFilter !== null}
-          <div class="path-bar">
-            <span class="path-label">{$t('app.package')}</span>
-            <code class="path-value">{$packageFilter || $t('app.defaultPackage')}</code>
-            <button class="path-clear" on:click={() => packageFilter.set(null)} title={$t('app.clearPackageFilter')}>×</button>
-          </div>
-        {/if}
-        <div class="filter">
-          <button class="chip" class:active={$stereotypeFilter === null} on:click={() => setFilter(null)}>
-            {$t('app.all')} <span class="count">{$filteredClasses.length}</span>
-          </button>
-          {#each Object.entries($stereotypeCounts) as [name, count]}
-            <button
-              class="chip {name}"
-              class:active={$stereotypeFilter === name}
-              on:click={() => setFilter(name)}
-            >
-              {name} <span class="count">{count}</span>
-            </button>
-          {/each}
+      {#if $viewMode === 'md'}
+        <div class="files-fullspan">
+          {#await lazyMarkdownIndex() then mod}
+            <svelte:component this={mod.default} />
+          {/await}
         </div>
-        <ul class="class-list" role="listbox" aria-label={$t('app.classesLabel')}>
-          {#each $filteredClasses as c (`${c.module}::${c.fqn}`)}
-            <li role="option" aria-selected={$selectedClass?.fqn === c.fqn}>
+      {:else if $viewMode === 'html'}
+        <div class="files-fullspan">
+          {#await lazyHtmlIndex() then mod}
+            <svelte:component this={mod.default} />
+          {/await}
+        </div>
+      {:else}
+        <aside class="sidebar">
+          {#if $packageFilter !== null}
+            <div class="path-bar">
+              <span class="path-label">{$t('files.package.label')}</span>
+              <code class="path-value">{$packageFilter || '(default)'}</code>
+              <button class="path-clear" on:click={() => packageFilter.set(null)} title={$t('files.package.clear')}>×</button>
+            </div>
+          {/if}
+          <div class="filter">
+            <button
+              class="chip"
+              class:active={$stereotypeFilter === null && $fileKindFilter === null}
+              on:click={() => setFilter(null)}
+            >
+              {$t('files.filter.all')} <span class="count">{displayItems.length}</span>
+            </button>
+            {#each Object.entries($stereotypeCounts) as [name, count]}
               <button
-                type="button"
-                class="class-row"
-                class:selected={$selectedClass?.fqn === c.fqn}
-                on:click={() => handleSelect(c)}
+                class="chip {name}"
+                class:active={$stereotypeFilter === name}
+                on:click={() => setFilter(name)}
               >
-                <span class="class-name">{c.name}</span>
-                <span class="class-fqn">{c.fqn}</span>
-                <span class="stereotypes">
-                  {#each c.stereotypes as s}
-                    <span class="badge {s}">{s}</span>
-                  {/each}
-                </span>
+                {name} <span class="count">{count}</span>
               </button>
-            </li>
-          {/each}
-        </ul>
-      </aside>
-      <div
-        class="resizer"
-        use:resizable={{
-          storageKey: 'projectmind.layout.code.col2',
-          cssVar: '--code-col-2',
-          min: 220,
-          max: 720,
-          initial: 360,
-        }}
-        title={$t('app.resizeTitle')}
-      ></div>
-      <main class="viewer">
-        {#if $selectedClass}
-          <ClassViewer
-            klass={$selectedClass}
-            source={classSource}
-            meta={classMeta}
-          />
-        {:else}
-          <div class="placeholder">{$t('app.selectClass')}</div>
-        {/if}
-      </main>
+            {/each}
+            {#each fileKindsPresent as kind (kind)}
+              <button
+                class="chip kind"
+                class:active={$fileKindFilter === kind}
+                on:click={() => setKindFilter(kind)}
+              >
+                {kind} <span class="count">{$filteredModuleFiles.filter((f) => f.kind === kind).length}</span>
+              </button>
+            {/each}
+            {#if $repo && $repo.markdown_count > 0}
+              <button
+                class="chip md"
+                on:click={() => {
+                  followingMcp.set(false);
+                  viewMode.set('md');
+                }}
+                title={$t('files.filter.md.title')}
+              >
+                md <span class="count">{$repo.markdown_count}</span>
+              </button>
+            {/if}
+            {#if $repo && $repo.html_count > 0}
+              <button
+                class="chip html"
+                on:click={() => {
+                  followingMcp.set(false);
+                  viewMode.set('html');
+                }}
+                title={$t('files.filter.html.title')}
+              >
+                html <span class="count">{$repo.html_count}</span>
+              </button>
+            {/if}
+          </div>
+          <ul class="class-list" role="listbox" aria-label={$t('files.aria.list')}>
+            {#each displayItems as item (item.kind === 'class' ? `class::${item.entry.module}::${item.entry.fqn}` : `file::${item.entry.abs}`)}
+              {#if item.kind === 'class'}
+                <li role="option" aria-selected={$selectedClass?.fqn === item.entry.fqn}>
+                  <button
+                    type="button"
+                    class="class-row"
+                    class:selected={$selectedClass?.fqn === item.entry.fqn}
+                    on:click={() => handleSelect(item.entry)}
+                  >
+                    <span class="class-name">{item.entry.name}</span>
+                    <span class="class-fqn">{item.entry.fqn}</span>
+                    <span class="stereotypes">
+                      {#each item.entry.stereotypes as s}
+                        <span class="badge {s}">{s}</span>
+                      {/each}
+                    </span>
+                  </button>
+                </li>
+              {:else}
+                <li
+                  role="option"
+                  aria-selected={($viewMode === 'pdf' || $viewMode === 'image') &&
+                    $fileView?.path === item.entry.abs}
+                >
+                  <button
+                    type="button"
+                    class="class-row file-row"
+                    class:selected={($viewMode === 'pdf' || $viewMode === 'image') &&
+                      $fileView?.path === item.entry.abs}
+                    on:click={() => openModuleFile(item.entry)}
+                    title={item.entry.abs}
+                  >
+                    <span class="class-name file-name">{item.entry.rel}</span>
+                    <span class="stereotypes">
+                      <span class="badge file-kind">{item.entry.kind}</span>
+                    </span>
+                  </button>
+                </li>
+              {/if}
+            {/each}
+          </ul>
+        </aside>
+        <div
+          class="resizer"
+          use:resizable={{
+            storageKey: 'projectmind.layout.code.col2',
+            cssVar: '--code-col-2',
+            min: 220,
+            max: 720,
+            initial: 360,
+          }}
+          title="Drag to resize · double-click to reset"
+        ></div>
+        <main class="viewer">
+          {#if $viewMode === 'pdf' && $fileView}
+            <PdfView path={$fileView.path} />
+          {:else if $viewMode === 'image' && $fileView}
+            <ImageView path={$fileView.path} />
+          {:else if $viewMode === 'file' && $fileView}
+            {#await lazyFileView() then mod}
+              <svelte:component
+                this={mod.default}
+                path={$fileView.path}
+                anchor={$fileView.anchor}
+                nonce={$fileView.nonce}
+              />
+            {/await}
+          {:else if $selectedClass}
+            <ClassViewer
+              klass={$selectedClass}
+              source={classSource}
+              meta={classMeta}
+            />
+          {:else}
+            <div class="placeholder">{$t('files.placeholder')}</div>
+          {/if}
+        </main>
+      {/if}
     </section>
   {:else if $viewMode === 'diagram'}
     <section class="diagram-view">
       <div class="diagram-tabs">
-        <button class:active={diagramKind === 'bean-graph'} on:click={() => (diagramKind = 'bean-graph')}>
-          {$t('diagram.beanGraph')}
-        </button>
-        <button class:active={diagramKind === 'package-tree'} on:click={() => (diagramKind = 'package-tree')}>
-          {$t('diagram.packageTree')}
-        </button>
-        <span class="diagram-hint">{$t('diagram.drillHint')}</span>
+        {#each $repo.available_diagrams as d (d)}
+          <button class:active={diagramKind === d} on:click={() => (diagramKind = d as typeof diagramKind)}>
+            {diagramLabel(d)}
+          </button>
+        {/each}
+        <span class="diagram-hint">{$t('diagram.hint')}</span>
       </div>
-      <DiagramView kind={diagramKind} />
+      {#await lazyDiagramView() then mod}
+        <svelte:component this={mod.default} kind={diagramKind} folderLayout={folderMapLayout} />
+      {/await}
     </section>
   {:else if $viewMode === 'walkthrough' && $walkthroughCursor}
-    <WalkthroughView
-      cursorId={$walkthroughCursor.id}
-      cursorStep={$walkthroughCursor.step}
-      nonce={$walkthroughCursor.nonce}
-    />
-  {:else if $viewMode === 'md'}
-    <MarkdownIndex />
-  {:else if $viewMode === 'html'}
-    <HtmlIndex />
-  {:else if $viewMode === 'file' && $fileView}
-    <FileView
-      path={$fileView.path}
-      anchor={$fileView.anchor}
-      nonce={$fileView.nonce}
-    />
+    {#await lazyWalkthroughView() then mod}
+      <svelte:component
+        this={mod.default}
+        cursorId={$walkthroughCursor.id}
+        cursorStep={$walkthroughCursor.step}
+        nonce={$walkthroughCursor.nonce}
+      />
+    {/await}
   {:else if $viewMode === 'diff' && $diffViewRef}
     <DiffView reference={$diffViewRef.reference} to={$diffViewRef.to} />
   {:else}
     <section class="empty">
       <div class="welcome">
-        <p class="hint">{$t('app.noView')}</p>
+        <p class="hint">{$t('welcome.empty')}</p>
       </div>
     </section>
+  {/if}
+
+  {#if dragOver}
+    <div class="drop-overlay" aria-hidden="true">
+      <div class="drop-overlay-inner">
+        <div class="drop-overlay-icon">⤓</div>
+        <div class="drop-overlay-text">{$t('drop.overlay')}</div>
+      </div>
+    </div>
   {/if}
 </main>
 
@@ -517,6 +987,39 @@
     margin-left: auto;
     margin-right: auto;
     box-shadow: 0 8px 32px color-mix(in srgb, #2d2bfe 35%, transparent);
+  }
+
+  .token-panel {
+    display: grid;
+    gap: 12px;
+    width: min(420px, calc(100vw - 40px));
+    padding: 28px;
+    background: var(--bg-1);
+    border: 1px solid var(--bg-3);
+    border-radius: 8px;
+    box-shadow: 0 18px 48px color-mix(in srgb, #000 28%, transparent);
+  }
+
+  .token-panel h1,
+  .token-panel p {
+    margin: 0;
+    text-align: center;
+  }
+
+  .token-panel label {
+    font-size: 12px;
+    color: var(--fg-3);
+  }
+
+  .token-panel input {
+    min-width: 0;
+    padding: 10px 12px;
+    color: var(--fg-1);
+    background: var(--bg-0);
+    border: 1px solid var(--bg-3);
+    border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px;
   }
 
   .title {
@@ -590,21 +1093,14 @@
     line-height: 1;
   }
 
-  .language-select {
-    background: var(--bg-1);
-    color: var(--fg-1);
-    border: 1px solid var(--bg-3);
-    border-radius: 4px;
-    padding: 5px 8px;
-    font: inherit;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  .language-select:hover,
-  .language-select:focus {
-    border-color: var(--accent-2);
-    color: var(--fg-0);
-    outline: none;
+  .lang-toggle {
+    width: 36px;
+    padding: 6px 0;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
   }
 
   .walkthrough-btn {
@@ -689,12 +1185,35 @@
     font-size: 12px;
   }
 
+  .welcome code {
+    font-family: var(--mono);
+    background: var(--bg-2);
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+
   .layout {
     display: grid;
     grid-template-columns:
       var(--code-col-1, 220px) 6px var(--code-col-2, 360px) 6px 1fr;
     flex: 1;
     overflow: hidden;
+  }
+
+  /* When the Files tab hosts MD or HTML browsers (no class-list / viewer
+     split), the embedded component should span the second resizer + the
+     remaining three grid tracks so the right pane is one continuous
+     surface rather than a tiny 360px column. */
+  .files-fullspan {
+    grid-column: 3 / -1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .files-fullspan > :global(*) {
+    flex: 1;
+    min-height: 0;
   }
 
   .resizer {
@@ -846,6 +1365,58 @@
     margin-top: 2px;
   }
 
+  /* File rows reuse the class-row layout but are visually distinguishable
+     by the monospaced label and the extension badge in the stereotypes
+     slot. The .badge.file-kind variant mirrors the muted-grey look used
+     for unrecognised stereotype names. */
+  .class-row.file-row .class-name.file-name {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--fg-1);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .badge.file-kind {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: var(--bg-2);
+    color: var(--fg-2);
+    font-family: var(--mono);
+  }
+
+  /* File-kind filter pill sits next to the stereotype chips. Distinct
+     muted background so it reads as "non-stereotype" without competing
+     with the coloured stereotype chips. */
+  .chip.kind {
+    background: var(--bg-2);
+    color: var(--fg-1);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  /* Markdown / HTML pills jump into a dedicated browser inside the same
+     Files tab. Subtly tinted so they stand apart from stereotype + kind
+     chips without screaming. */
+  .chip.md {
+    background: color-mix(in srgb, var(--accent-2) 18%, var(--bg-2));
+    color: var(--fg-0);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .chip.html {
+    background: color-mix(in srgb, var(--component) 22%, var(--bg-2));
+    color: var(--fg-0);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .chip.md:hover,
+  .chip.html:hover {
+    border-color: var(--accent-2);
+  }
+
   .viewer {
     overflow-y: auto;
     background: var(--bg-0);
@@ -881,5 +1452,67 @@
     margin-left: auto;
     font-size: 11px;
     color: var(--fg-2);
+  }
+
+  /* ----- Drag-and-drop ---------------------------------------------------- */
+
+  /* Full-window overlay shown while a drag is over the app. `pointer-events:
+     none` keeps the underlying UI clickable when no drag is in progress
+     (the overlay only renders when {#if dragOver}, but keeping it
+     non-interactive is also useful for screen-reader / focus traps). */
+  .drop-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--accent-2) 12%, transparent);
+    border: 3px dashed var(--accent-2);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-2) 50%, transparent);
+    backdrop-filter: blur(2px);
+    animation: drop-overlay-fade 120ms ease-out;
+  }
+
+  @keyframes drop-overlay-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .drop-overlay-inner {
+    text-align: center;
+    padding: 28px 36px;
+    background: color-mix(in srgb, var(--bg-1) 92%, transparent);
+    border: 1px solid var(--accent-2);
+    border-radius: 12px;
+    box-shadow: 0 18px 48px color-mix(in srgb, #000 40%, transparent);
+  }
+
+  .drop-overlay-icon {
+    font-size: 36px;
+    line-height: 1;
+    color: var(--accent-2);
+    margin-bottom: 8px;
+  }
+
+  .drop-overlay-text {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--fg-0);
+  }
+
+  /* Browser-mode hint that flashes after a (futile) drop so the user knows
+     why nothing happened and where to go next. */
+  .drop-hint {
+    background: color-mix(in srgb, var(--accent-2) 18%, var(--bg-1));
+    color: var(--fg-0);
+    padding: 8px 16px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--accent-2);
   }
 </style>

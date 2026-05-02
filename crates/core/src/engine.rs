@@ -80,6 +80,33 @@ impl Engine {
         self.frameworks.iter().map(|p| p.info().id).collect()
     }
 
+    /// Diagram kinds that the active plugin set can render against `repo`.
+    /// "folder-map" is always present (it's a core capability); language and
+    /// framework plugins contribute the rest. Languages only contribute when
+    /// the repo has parsed classes — a docs-only repo with no Java/Rust code
+    /// shouldn't advertise "package-tree" since it has no packages to draw.
+    /// Frameworks only contribute when at least one of their supported
+    /// languages produced a class (i.e. the framework has something to enrich).
+    /// The result is sorted + deduplicated for stable UI ordering.
+    pub fn available_diagrams(&self, repo: &Repository) -> Vec<String> {
+        let mut out: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        out.insert("folder-map".to_string());
+        let has_classes = repo.class_count() > 0;
+        if has_classes {
+            for lang in &self.languages {
+                for d in lang.provided_diagrams() {
+                    out.insert((*d).to_string());
+                }
+            }
+            for fw in &self.frameworks {
+                for d in fw.provided_diagrams() {
+                    out.insert((*d).to_string());
+                }
+            }
+        }
+        out.into_iter().collect()
+    }
+
     /// Walk a repository, parse files with registered language plugins, then enrich with
     /// framework plugins.
     ///

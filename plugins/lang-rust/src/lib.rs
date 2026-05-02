@@ -51,6 +51,10 @@ impl LanguagePlugin for RustPlugin {
     fn parse_file(&self, file: &Path, source: &str, module: &mut Module) -> Result<()> {
         parser::parse(file, source, module)
     }
+
+    fn provided_diagrams(&self) -> &[&'static str] {
+        &["package-tree"]
+    }
 }
 
 #[cfg(test)]

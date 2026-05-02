@@ -19,8 +19,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use projectmind_core::file_access;
-use projectmind_core::files::{self, MarkdownFile, MarkdownHit};
+use projectmind_core::files::{self, MarkdownFile, MarkdownHit, ModuleFile};
 use projectmind_core::git::{self, ChangedFile};
 use projectmind_core::heartbeat;
 use projectmind_core::html::{self, HtmlFile, HtmlSnippet};
@@ -35,6 +34,7 @@ use projectmind_lang_java::JavaPlugin;
 use projectmind_lang_rust::RustPlugin;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
+use tauri_plugin_opener::OpenerExt;
 
 /// Application state shared across Tauri command handlers.
 #[derive(Debug)]
@@ -71,6 +71,11 @@ pub struct RepoSummary {
     /// Total HTML/XHTML/JSP/template files plus extracted snippets. The GUI
     /// hides the HTML tab when this is zero.
     pub html_count: usize,
+    /// Diagram kinds available for the active plugin set + repo content.
+    /// The GUI iterates this to render Diagram-tab buttons dynamically
+    /// instead of hard-coding the bean-graph / package-tree / folder-map
+    /// triple.
+    pub available_diagrams: Vec<String>,
 }
 
 /// One class entry exposed to the UI.
@@ -114,6 +119,7 @@ fn open_repo(path: String, state: State<'_, Arc<AppState>>) -> Result<RepoSummar
     let markdown_count = files::list_markdown_files(&repo.root).len();
     let html_count =
         html::list_html_files(&repo.root).len() + html::find_html_snippets(&repo.root).len();
+    let available_diagrams = state.engine.available_diagrams(&repo);
     let summary = RepoSummary {
         root: repo.root.clone(),
         modules: repo.modules.len(),
@@ -122,6 +128,7 @@ fn open_repo(path: String, state: State<'_, Arc<AppState>>) -> Result<RepoSummar
         framework_plugins: state.engine.framework_ids(),
         markdown_count,
         html_count,
+        available_diagrams,
     };
     let root = repo.root.clone();
     *state.repo.write() = Some(repo);
@@ -250,24 +257,28 @@ fn show_diagram(kind: String, state: State<'_, Arc<AppState>>) -> Result<String,
     match kind.as_str() {
         "bean-graph" => Ok(diagram::render_bean_graph(repo, &spring)),
         "package-tree" => Ok(diagram::render_package_tree(repo)),
+        "folder-map" => Ok(diagram::render_folder_map(repo)),
         other => Err(format!("unknown diagram kind: {other}")),
     }
 }
 
-const FILE_VIEW_LIMIT_BYTES: u64 = 10_000_000;
-
-/// Read a repo-scoped UTF-8 text file. Used by the file viewer for `view_file`
+/// Read an arbitrary file as UTF-8 text. Used by the file viewer for `view_file`
 /// intents (markdown, plain source, etc.). Capped at 10 MB to keep the view
-/// responsive; paths outside the opened repository are rejected.
+/// responsive — large binaries are not the target.
 #[tauri::command]
-fn read_file_text(path: String, state: State<'_, Arc<AppState>>) -> Result<String, String> {
-    let guard = state.repo.read();
-    let repo = guard
-        .as_ref()
-        .ok_or_else(|| "no repository open".to_string())?;
+fn read_file_text(path: String) -> Result<String, String> {
     let p = std::path::Path::new(&path);
-    file_access::read_text_file_in_repo(&repo.root, p, FILE_VIEW_LIMIT_BYTES)
-        .map_err(|e| e.to_string())
+    if !p.is_absolute() {
+        return Err(format!("path must be absolute: {path}"));
+    }
+    let bytes = std::fs::read(p).map_err(|e| format!("read {path}: {e}"))?;
+    if bytes.len() > 10_000_000 {
+        return Err(format!(
+            "file too large ({} bytes; limit 10 MB)",
+            bytes.len()
+        ));
+    }
+    String::from_utf8(bytes).map_err(|e| format!("invalid UTF-8 in {path}: {e}"))
 }
 
 /// Return the unified diff between two refs (or `ref` vs working tree). Used
@@ -354,6 +365,26 @@ fn end_walkthrough() -> Result<(), String> {
     Ok(())
 }
 
+/// Open an external URL in the user's default browser. The narration
+/// in walk-through tours often contains GitHub / docs links; we route
+/// those through `tauri-plugin-opener` so they don't accidentally
+/// navigate the embedded webview away from the app shell.
+#[tauri::command]
+fn open_external(app: AppHandle, url: String) -> Result<(), String> {
+    let trimmed = url.trim();
+    if !(trimmed.starts_with("http://")
+        || trimmed.starts_with("https://")
+        || trimmed.starts_with("mailto:"))
+    {
+        return Err(format!(
+            "refusing to open non-http(s)/mailto url: {trimmed}"
+        ));
+    }
+    app.opener()
+        .open_url(trimmed, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 /// Move the active tour's pointer (manual sidebar click). Publishes a
 /// new `UiState` so the LLM can observe where the user navigated to.
 #[tauri::command]
@@ -431,6 +462,28 @@ fn find_html_snippets(root: String) -> Result<Vec<HtmlSnippet>, String> {
         return Err(format!("root is not a directory: {root}"));
     }
     Ok(html::find_html_snippets(p))
+}
+
+/// List PDFs and images that live inside a module's root. Used by the
+/// Code-tab sidebar so non-source assets sit alongside the parsed class
+/// listing. Returns an empty Vec when the module has no matching files.
+#[tauri::command]
+fn list_module_files(
+    module_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<ModuleFile>, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    let module = repo
+        .modules
+        .get(&module_id)
+        .ok_or_else(|| format!("module not found: {module_id}"))?;
+    Ok(files::list_module_files(
+        &module.root,
+        &["pdf", "png", "jpg", "jpeg", "webp", "gif"],
+    ))
 }
 
 /// Best-effort publish: GUI tells the MCP/cooperating processes about its state.
@@ -534,12 +587,14 @@ pub fn run() {
             search_markdown,
             list_html_files,
             find_html_snippets,
+            list_module_files,
             current_walkthrough,
             current_walkthrough_feedback,
             walkthrough_ack,
             walkthrough_request_more,
             set_walkthrough_step,
             end_walkthrough,
+            open_external,
         ])
         .setup(|app| {
             spawn_state_watcher(app.handle().clone());

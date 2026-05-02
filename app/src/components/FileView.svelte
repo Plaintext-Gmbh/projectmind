@@ -3,10 +3,10 @@
   import { marked } from 'marked';
   import mermaid from 'mermaid';
   import { convertFileSrc } from '@tauri-apps/api/core';
-  import { readFileText, listMarkdownFiles } from '../lib/api';
+  import { fileAssetUrl, readFileText, listMarkdownFiles } from '../lib/api';
   import type { MarkdownFile } from '../lib/api';
   import { repo, fileView } from '../lib/store';
-  import { t } from '../lib/i18n';
+  import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
 
   export let path: string;
   /// Optional heading slug to scroll to after rendering. If a slug doesn't
@@ -24,6 +24,8 @@
 
   let content = '';
   let html = '';
+  let mediaUrl = '';
+  let ownedMediaUrl: string | null = null;
   let error: string | null = null;
   let loading = false;
   let host: HTMLDivElement;
@@ -31,11 +33,14 @@
   let toc: TocEntry[] = [];
   let activeHeadingId: string | null = null;
 
-  /// Zoom factor for content text. Persisted via localStorage so reopens keep it.
-  let zoom = readZoom();
-  const ZOOM_MIN = 0.6;
-  const ZOOM_MAX = 2.0;
+  /// Zoom factor for content text. Wheel zoom (Shift+wheel) is bound on the
+  /// scroller via `use:zoomAction`; keyboard zoom (Cmd/Ctrl + + / − / 0) is
+  /// wired to the store further down. Persistence + clamping live in
+  /// shiftWheelZoom.ts.
   const ZOOM_STEP = 0.1;
+  const { zoom, action: zoomAction } = createShiftWheelZoom('projectmind.fileview.zoom', {
+    step: ZOOM_STEP,
+  });
 
   // ----- Markdown picker (project-wide .md files) ---------------------------
   let mdFiles: MarkdownFile[] = [];
@@ -146,10 +151,17 @@
     loading = true;
     error = null;
     html = '';
+    releaseMediaUrl();
+    mediaUrl = '';
     content = '';
     toc = [];
     activeHeadingId = null;
     try {
+      if (isImage(p)) {
+        mediaUrl = await fileAssetUrl(p);
+        if (mediaUrl.startsWith('blob:')) ownedMediaUrl = mediaUrl;
+        return;
+      }
       content = await readFileText(p);
       if (isMarkdown(p)) {
         html = await renderMarkdown(content);
@@ -174,6 +186,21 @@
 
   function isMarkdown(p: string): boolean {
     return /\.(md|markdown|mdx)$/i.test(p);
+  }
+
+  function isImage(p: string): boolean {
+    return /\.(png|jpe?g|gif|webp|svg)$/i.test(p);
+  }
+
+  function fileKind(p: string): string {
+    if (isMarkdown(p)) return 'markdown';
+    if (isImage(p)) return 'image';
+    return 'file';
+  }
+
+  function releaseMediaUrl() {
+    if (ownedMediaUrl) URL.revokeObjectURL(ownedMediaUrl);
+    ownedMediaUrl = null;
   }
 
   async function renderMarkdown(src: string): Promise<string> {
@@ -331,92 +358,92 @@
   }
 
   // ----- Zoom ---------------------------------------------------------------
-
-  function clampZoom(z: number): number {
-    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
-  }
-
-  function readZoom(): number {
-    try {
-      const v = parseFloat(localStorage.getItem('projectmind.fileview.zoom') ?? '');
-      if (Number.isFinite(v) && v > 0) return clampZoom(v);
-    } catch {
-      // localStorage unavailable — fine.
-    }
-    return 1.0;
-  }
-
-  function persistZoom(z: number) {
-    try {
-      localStorage.setItem('projectmind.fileview.zoom', String(z));
-    } catch {
-      // ignore
-    }
-  }
-
-  function setZoom(z: number) {
-    zoom = clampZoom(z);
-    persistZoom(zoom);
-  }
+  // Wheel zoom is handled by `zoomAction` (attached to `scroller`).
+  // Keyboard zoom + the header zoom buttons go through these helpers — they
+  // hand the value back through the store, which clamps + persists.
 
   function zoomIn() {
-    setZoom(zoom + ZOOM_STEP);
+    zoom.update((z) => z + ZOOM_STEP);
   }
   function zoomOut() {
-    setZoom(zoom - ZOOM_STEP);
+    zoom.update((z) => z - ZOOM_STEP);
   }
   function zoomReset() {
-    setZoom(1.0);
-  }
-
-  function onWheel(ev: WheelEvent) {
-    if (!ev.shiftKey) return;
-    if (!scroller || !scroller.isConnected) return;
-    // Only intercept wheel events that originated inside our scroller — the
-    // viewer pane shares the window with the sidebar, and we don't want
-    // shift-scrolling on the file list to zoom the doc.
-    if (!(ev.target instanceof Node) || !scroller.contains(ev.target)) return;
-    ev.preventDefault();
-    if (ev.deltaY < 0) zoomIn();
-    else if (ev.deltaY > 0) zoomOut();
+    zoom.set(1.0);
   }
 
   function onKey(ev: KeyboardEvent) {
     // Only intercept when this view is on screen.
     if (!scroller || !scroller.isConnected) return;
+
+    // Don't hijack arrows when the user is typing in an input — the picker
+    // and the search bar both want their own arrow handling.
+    const tag = (ev.target as HTMLElement | null)?.tagName;
+    const inField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+
     const cmd = ev.metaKey || ev.ctrlKey;
-    if (!cmd) return;
-    // `=` and `+` share a key on most keyboards. `-` is Minus, `0` is Digit0.
-    if (ev.key === '+' || ev.key === '=' || ev.code === 'Equal') {
-      ev.preventDefault();
-      zoomIn();
-    } else if (ev.key === '-' || ev.code === 'Minus') {
-      ev.preventDefault();
-      zoomOut();
-    } else if (ev.key === '0' || ev.code === 'Digit0') {
-      ev.preventDefault();
-      zoomReset();
+    if (cmd) {
+      // `=` and `+` share a key on most keyboards. `-` is Minus, `0` is Digit0.
+      if (ev.key === '+' || ev.key === '=' || ev.code === 'Equal') {
+        ev.preventDefault();
+        zoomIn();
+      } else if (ev.key === '-' || ev.code === 'Minus') {
+        ev.preventDefault();
+        zoomOut();
+      } else if (ev.key === '0' || ev.code === 'Digit0') {
+        ev.preventDefault();
+        zoomReset();
+      }
+      return;
     }
+
+    // Arrow up / down navigate the TOC: jump to the previous / next heading.
+    if (!inField && !pickerOpen && toc.length > 0) {
+      if (ev.key === 'ArrowDown') {
+        ev.preventDefault();
+        navigateToc(1);
+      } else if (ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        navigateToc(-1);
+      }
+    }
+  }
+
+  /// Move the active TOC entry by `delta` (-1 = previous, +1 = next) and
+  /// scroll to it. With no entry yet active, the first ArrowDown lands on
+  /// the first heading; the first ArrowUp lands on the last.
+  function navigateToc(delta: 1 | -1) {
+    const idx = activeHeadingId
+      ? toc.findIndex((t) => t.id === activeHeadingId)
+      : -1;
+    let next: number;
+    if (idx === -1) {
+      next = delta === 1 ? 0 : toc.length - 1;
+    } else {
+      next = Math.min(toc.length - 1, Math.max(0, idx + delta));
+    }
+    const target = toc[next];
+    if (!target) return;
+    onTocClick(target.id);
   }
 
   onMount(() => {
     if (path) void load(path);
     window.addEventListener('keydown', onKey);
-    window.addEventListener('wheel', onWheel, { passive: false });
     document.addEventListener('mousedown', onDocClick);
     void ensureMdFilesLoaded();
   });
 
   onDestroy(() => {
+    releaseMediaUrl();
     window.removeEventListener('keydown', onKey);
-    window.removeEventListener('wheel', onWheel);
     document.removeEventListener('mousedown', onDocClick);
   });
 </script>
 
 <section class="root">
   <header class="bar">
-    <span class="kind">{isMarkdown(path) ? $t('file.markdown') : $t('file.file')}</span>
+    <span class="kind">{fileKind(path)}</span>
     <code class="path" title={path}>{path}</code>
     <div class="spacer"></div>
     {#if mdFiles.length > 0}
@@ -426,10 +453,10 @@
           class="picker-trigger"
           class:active={pickerOpen}
           on:click={togglePicker}
-          title={$t('file.openAnother')}
+          title="Open another markdown file in this project"
         >
           <span class="picker-icon">📄</span>
-          {$t('file.files')}
+          Files
           <span class="picker-count">{mdFiles.length}</span>
           <span class="picker-caret">▾</span>
         </button>
@@ -441,12 +468,12 @@
               on:keydown={onPickerKeydown}
               type="text"
               class="picker-search"
-              placeholder={$t('file.searchMarkdown')}
+              placeholder="Search markdown files…"
               autocomplete="off"
               spellcheck="false"
             />
             {#if pickerFiltered.length === 0}
-              <div class="picker-empty">{$t('file.noMatches')}</div>
+              <div class="picker-empty">No matches</div>
             {:else}
               <ul class="picker-list">
                 {#each pickerFiltered as f, i (f.abs)}
@@ -468,29 +495,29 @@
               </ul>
             {/if}
             <div class="picker-foot">
-              {$t('file.pickerFoot', { filtered: pickerFiltered.length, total: mdFiles.length })}
+              {pickerFiltered.length} / {mdFiles.length} • ↑↓ navigate • Enter open • Esc close
             </div>
           </div>
         {/if}
       </div>
     {/if}
-    <div class="zoom" title={$t('file.zoomTitle')}>
-      <button class="zoom-btn" on:click={zoomOut} aria-label={$t('file.zoomOut')}>−</button>
-      <button class="zoom-pct" on:click={zoomReset} aria-label={$t('file.zoomReset')}
-        >{Math.round(zoom * 100)}%</button
+    <div class="zoom" title="Zoom: Cmd/Ctrl + / − / 0">
+      <button class="zoom-btn" on:click={zoomOut} aria-label="Zoom out">−</button>
+      <button class="zoom-pct" on:click={zoomReset} aria-label="Reset zoom"
+        >{Math.round($zoom * 100)}%</button
       >
-      <button class="zoom-btn" on:click={zoomIn} aria-label={$t('file.zoomIn')}>+</button>
+      <button class="zoom-btn" on:click={zoomIn} aria-label="Zoom in">+</button>
     </div>
   </header>
   {#if loading}
-    <div class="status">{$t('html.loading')}</div>
+    <div class="status">Loading…</div>
   {:else if error}
     <div class="error">⚠ {error}</div>
   {:else}
     <div class="layout" class:has-toc={toc.length > 0}>
       {#if toc.length > 0}
-        <aside class="toc" aria-label={$t('file.tocLabel')}>
-          <div class="toc-title">{$t('file.tocTitle')}</div>
+        <aside class="toc" aria-label="Table of contents">
+          <div class="toc-title">On this page</div>
           <ul>
             {#each toc as t (t.id)}
               <li class="lvl-{t.level}" class:active={activeHeadingId === t.id}>
@@ -505,15 +532,22 @@
       <div
         class="scroller"
         bind:this={scroller}
+        use:zoomAction
         on:scroll={onScroll}
       >
-        <div
-          class="content"
-          bind:this={host}
-          style="font-size: {zoom}em;"
-        >
-          {@html html}
-        </div>
+        {#if mediaUrl}
+          <div class="media-view" style="font-size: {$zoom}em;">
+            <img src={mediaUrl} alt={path} />
+          </div>
+        {:else}
+          <div
+            class="content"
+            bind:this={host}
+            style="font-size: {$zoom}em;"
+          >
+            {@html html}
+          </div>
+        {/if}
       </div>
     </div>
   {/if}
@@ -822,6 +856,23 @@
     max-width: 920px;
     margin: 0 auto;
     transition: font-size 80ms ease;
+  }
+
+  .media-view {
+    min-height: 100%;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 24px 32px 64px;
+    overflow: auto;
+  }
+
+  .media-view img {
+    max-width: 100%;
+    height: auto;
+    border: 1px solid var(--bg-3);
+    border-radius: var(--radius-sm);
+    background: var(--bg-1);
   }
 
   /* Markdown styling */

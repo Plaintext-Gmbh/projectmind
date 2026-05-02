@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { searchMarkdown } from '../lib/api';
   import type { MarkdownFile, MarkdownHit } from '../lib/api';
   import { repo, fileView, viewMode } from '../lib/store';
   import { t } from '../lib/i18n';
+  import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
 
   let hits: MarkdownHit[] = [];
   let loadedFor: string | null = null;
@@ -98,12 +98,11 @@
     });
   }
 
-  onMount(() => {
-    void load($repo?.root ?? null);
-  });
+  // Shift + wheel zoom, persisted under the per-component key.
+  const { zoom, action: zoomAction } = createShiftWheelZoom('projectmind.mdindex.zoom');
 </script>
 
-<section class="root">
+<section class="root" use:zoomAction style="font-size: {$zoom}em;">
   <header class="bar">
     <div class="title-block">
       <h2>{$t('markdown.title')}</h2>

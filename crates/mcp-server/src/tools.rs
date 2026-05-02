@@ -6,7 +6,9 @@
 
 use std::path::PathBuf;
 
+use projectmind_browser_host::{self as browser_host, BrowserHostConfig};
 use projectmind_core::file_access;
+use projectmind_core::files;
 use projectmind_core::state::{self, UiState, ViewIntent};
 use projectmind_core::walkthrough::{self as wt, Walkthrough, WalkthroughStep};
 use projectmind_core::{diagram, git, html};
@@ -79,7 +81,7 @@ fn diagram_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "type": { "type": "string", "enum": ["bean-graph", "package-tree"] }
+            "type": { "type": "string", "enum": ["bean-graph", "package-tree", "folder-map"] }
         },
         "required": ["type"]
     })
@@ -203,6 +205,27 @@ fn file_schema() -> Value {
     })
 }
 
+fn list_module_files_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "module": { "type": "string", "description": "Module id (as returned by module_summary)" }
+        },
+        "required": ["module"]
+    })
+}
+
+fn open_browser_repo_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "path": { "type": "string", "description": "Absolute path to the repository root. Defaults to the currently-open repo or current statefile repo." },
+            "port": { "type": "integer", "minimum": 0, "maximum": 65535, "description": "Port to bind; 0 means choose a free port." },
+            "open_browser": { "type": "boolean", "default": true, "description": "Open the default browser on this machine after starting." }
+        }
+    })
+}
+
 /// Tool registry — also serves as the response of `tools/list`.
 #[allow(clippy::too_many_lines)]
 pub(crate) fn list() -> Value {
@@ -257,6 +280,11 @@ pub(crate) fn list() -> Value {
                 "name": "module_summary",
                 "description": "Per-module summary (classes, stereotype counts).",
                 "inputSchema": no_args_schema()
+            },
+            {
+                "name": "list_module_files",
+                "description": "List PDFs and images (.pdf .png .jpg .jpeg .webp .gif) inside a module's root. Source files (.java .rs) are excluded — those are surfaced by list_classes.",
+                "inputSchema": list_module_files_schema()
             },
             {
                 "name": "relations",
@@ -322,6 +350,21 @@ pub(crate) fn list() -> Value {
                 "name": "walkthrough_feedback",
                 "description": "Read user feedback events recorded against the active tour. Each event is one click on the GUI's Verstanden / Genauer-buttons. Useful when the LLM wants to react to the user (e.g. expand a step that was flagged with `more_detail`).",
                 "inputSchema": walkthrough_feedback_schema()
+            },
+            {
+                "name": "open_browser_repo",
+                "description": "Start the LAN browser host, open a repository, and return tokenized browser URLs. This binds to 0.0.0.0 and requires the returned random token for all API calls.",
+                "inputSchema": open_browser_repo_schema()
+            },
+            {
+                "name": "browser_status",
+                "description": "Return the running LAN browser host status, including tokenized URLs, or null if it has not been started.",
+                "inputSchema": no_args_schema()
+            },
+            {
+                "name": "stop_browser",
+                "description": "Forget the LAN browser host status for this MCP process. The listener exits when the process exits.",
+                "inputSchema": no_args_schema()
             }
         ]
     })
@@ -342,19 +385,23 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "find_class" => find_class(state, parsed.arguments).await,
         "class_outline" => class_outline(state, parsed.arguments).await,
         "module_summary" => module_summary(state).await,
+        "list_module_files" => list_module_files(state, parsed.arguments).await,
         "relations" => relations(state).await,
         "plugin_info" => plugin_info(state).await,
         "list_html" => list_html(state).await,
         "list_html_snippets" => list_html_snippets(state).await,
         "view_class" => view_class(state, parsed.arguments).await,
         "view_diff" => view_diff(parsed.arguments),
-        "view_file" => view_file(state, parsed.arguments).await,
+        "view_file" => view_file(parsed.arguments),
         "view_diagram" => view_diagram(parsed.arguments),
         "walkthrough_start" => walkthrough_start(parsed.arguments),
         "walkthrough_append" => walkthrough_append(parsed.arguments),
         "walkthrough_set_step" => walkthrough_set_step(parsed.arguments),
         "walkthrough_clear" => walkthrough_clear_handler(),
         "walkthrough_feedback" => walkthrough_feedback(parsed.arguments),
+        "open_browser_repo" => open_browser_repo(state, parsed.arguments).await,
+        "browser_status" => browser_status(),
+        "stop_browser" => stop_browser(),
         other => Err(DispatchError::invalid_params(format!(
             "unknown tool: {other}"
         ))),
@@ -524,6 +571,7 @@ async fn show_diagram(state: &Mutex<ServerState>, args: Value) -> DispatchResult
     with_repo(&state, |repo| match args.kind.as_str() {
         "bean-graph" => Ok(text_result(diagram::render_bean_graph(repo, &spring))),
         "package-tree" => Ok(text_result(diagram::render_package_tree(repo))),
+        "folder-map" => Ok(text_result(diagram::render_folder_map(repo))),
         other => Err(DispatchError::invalid_params(format!(
             "unknown diagram: {other}"
         ))),
@@ -647,6 +695,27 @@ async fn module_summary(state: &Mutex<ServerState>) -> DispatchResult {
         }
         Ok(text_result(
             serde_json::to_string_pretty(&modules).unwrap_or_default(),
+        ))
+    })
+}
+
+#[derive(Deserialize)]
+struct ListModuleFilesArgs {
+    module: String,
+}
+
+async fn list_module_files(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
+    let args: ListModuleFilesArgs = serde_json::from_value(args)
+        .map_err(|e| DispatchError::invalid_params(format!("list_module_files: {e}")))?;
+    let state = state.lock().await;
+    with_repo(&state, |repo| {
+        let module = repo.modules.get(&args.module).ok_or_else(|| {
+            DispatchError::invalid_params(format!("module not found: {}", args.module))
+        })?;
+        let entries =
+            files::list_module_files(&module.root, &["pdf", "png", "jpg", "jpeg", "webp", "gif"]);
+        Ok(text_result(
+            serde_json::to_string_pretty(&entries).unwrap_or_else(|_| "[]".into()),
         ))
     })
 }
@@ -780,7 +849,7 @@ struct ViewFileArgs {
     anchor: Option<String>,
 }
 
-async fn view_file(server_state: &Mutex<ServerState>, args: Value) -> DispatchResult {
+fn view_file(args: Value) -> DispatchResult {
     let args: ViewFileArgs = serde_json::from_value(args)
         .map_err(|e| DispatchError::invalid_params(format!("view_file: {e}")))?;
     let path = PathBuf::from(&args.path);
@@ -791,15 +860,13 @@ async fn view_file(server_state: &Mutex<ServerState>, args: Value) -> DispatchRe
         )));
     }
     let prev = state::read().ok().flatten().unwrap_or_default();
-    let repo_root = {
-        let server_state = server_state.lock().await;
-        server_state
-            .repo
-            .as_ref()
-            .map(|repo| repo.root.clone())
-            .or_else(|| prev.repo_root.clone())
-            .ok_or_else(|| DispatchError::invalid_params("view_file: no repository open"))?
-    };
+    // Scope file viewing to the currently-open repo. Without an open repo we
+    // refuse the call; with one, file_access canonicalises the path and
+    // rejects anything that escapes the repo root.
+    let repo_root = prev
+        .repo_root
+        .clone()
+        .ok_or_else(|| DispatchError::invalid_params("view_file: no repository open"))?;
     let path = file_access::canonical_file_in_repo(&repo_root, &path)
         .map_err(|e| DispatchError::invalid_params(format!("view_file: {e}")))?;
     let anchor = args.anchor.clone();
@@ -825,7 +892,7 @@ struct DiagramKindArgs {
 fn view_diagram(args: Value) -> DispatchResult {
     let args: DiagramKindArgs = serde_json::from_value(args)
         .map_err(|e| DispatchError::invalid_params(format!("view_diagram: {e}")))?;
-    if args.kind != "bean-graph" && args.kind != "package-tree" {
+    if args.kind != "bean-graph" && args.kind != "package-tree" && args.kind != "folder-map" {
         return Err(DispatchError::invalid_params(format!(
             "unknown diagram type: {}",
             args.kind
@@ -993,6 +1060,101 @@ fn walkthrough_feedback(args: Value) -> DispatchResult {
         "events": events,
     });
     Ok(text_result(body.to_string()))
+}
+
+#[derive(Deserialize)]
+struct OpenBrowserRepoArgs {
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    port: Option<u16>,
+    #[serde(default = "default_open_browser")]
+    open_browser: bool,
+}
+
+fn default_open_browser() -> bool {
+    true
+}
+
+async fn open_browser_repo(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
+    let args: OpenBrowserRepoArgs = serde_json::from_value(args)
+        .map_err(|e| DispatchError::invalid_params(format!("open_browser_repo: {e}")))?;
+    let path = if let Some(path) = args.path {
+        PathBuf::from(path)
+    } else {
+        let guard = state.lock().await;
+        guard
+            .repo
+            .as_ref()
+            .map(|repo| repo.root.clone())
+            .or_else(|| state::read().ok().flatten().and_then(|s| s.repo_root))
+            .ok_or_else(|| {
+                DispatchError::invalid_params(
+                    "open_browser_repo: no path given and no repository is open",
+                )
+            })?
+    };
+    if !path.is_absolute() {
+        return Err(DispatchError::invalid_params(format!(
+            "open_browser_repo: path must be absolute: {}",
+            path.display()
+        )));
+    }
+
+    let asset_dir = locate_web_dist().map_err(|e| {
+        DispatchError::internal(format!(
+            "open_browser_repo: could not locate frontend dist: {e}"
+        ))
+    })?;
+    let status = browser_host::start(BrowserHostConfig {
+        repo_root: Some(path),
+        port: args.port.unwrap_or(0),
+        asset_dir,
+        open_browser: args.open_browser,
+    })
+    .map_err(|e| DispatchError::internal(format!("open_browser_repo: {e}")))?;
+    Ok(text_result(
+        serde_json::to_string_pretty(&status).unwrap_or_else(|_| "{}".into()),
+    ))
+}
+
+// Both helpers are infallible — they always return a `text_result(...)`.
+// Clippy's `unnecessary_wraps` would flag the `-> DispatchResult` return type,
+// but the dispatch table expects every tool fn to return `DispatchResult`,
+// so suppress the lint locally rather than diverging from the call shape.
+#[allow(clippy::unnecessary_wraps)]
+fn browser_status() -> DispatchResult {
+    Ok(text_result(
+        serde_json::to_string_pretty(&browser_host::status()).unwrap_or_else(|_| "null".into()),
+    ))
+}
+
+#[allow(clippy::unnecessary_wraps)]
+fn stop_browser() -> DispatchResult {
+    browser_host::stop();
+    Ok(text_result(json!({"ok": true}).to_string()))
+}
+
+fn locate_web_dist() -> anyhow::Result<PathBuf> {
+    if let Some(path) = std::env::var_os("PROJECTMIND_WEB_DIST") {
+        let path = PathBuf::from(path);
+        if path.join("index.html").is_file() {
+            return Ok(path);
+        }
+    }
+    let cwd = std::env::current_dir()?;
+    let cwd_candidate = cwd.join("app/dist");
+    if cwd_candidate.join("index.html").is_file() {
+        return Ok(cwd_candidate);
+    }
+    let exe = std::env::current_exe()?;
+    for ancestor in exe.ancestors() {
+        let candidate = ancestor.join("app/dist");
+        if candidate.join("index.html").is_file() {
+            return Ok(candidate);
+        }
+    }
+    anyhow::bail!("set PROJECTMIND_WEB_DIST or run from the ProjectMind repo root")
 }
 
 /// Best-effort statefile write. Failures are logged but never bubble up: the
