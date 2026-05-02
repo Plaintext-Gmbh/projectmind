@@ -45,6 +45,7 @@
   import DiffView from './components/DiffView.svelte';
   import KeyboardHelp from './components/KeyboardHelp.svelte';
   import StatusBar from './components/StatusBar.svelte';
+  import McpToast from './components/McpToast.svelte';
   // Heavy components — pulled in dynamically the first time the user
   // visits the matching tab. mermaid (~640 KB) and marked (~40 KB) ride
   // along with DiagramView / FileView / WalkthroughView etc., so keeping
@@ -1157,6 +1158,7 @@
   {/if}
 
   <KeyboardHelp bind:open={kbdHelpOpen} />
+  <McpToast />
   <StatusBar />
 </main>
 

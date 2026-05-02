@@ -98,5 +98,9 @@
   "keyboard.row.zoom": "Zoom in / out (any viewer)",
   "keyboard.hint": "Tip: typing inside a text field disables these shortcuts.",
   "welcome.recent": "Recent",
-  "welcome.forget": "Remove from list"
+  "welcome.forget": "Remove from list",
+  "mcp.toast.file": "MCP opened file",
+  "mcp.toast.class": "MCP opened class",
+  "mcp.toast.view": "MCP switched view",
+  "mcp.toast.stop": "Stop following MCP"
 }

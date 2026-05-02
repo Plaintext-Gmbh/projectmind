@@ -98,5 +98,9 @@
   "keyboard.row.zoom": "Zoom avant / arrière (tous les visualiseurs)",
   "keyboard.hint": "Astuce : ces raccourcis sont désactivés dans les champs de saisie.",
   "welcome.recent": "Récemment ouverts",
-  "welcome.forget": "Retirer de la liste"
+  "welcome.forget": "Retirer de la liste",
+  "mcp.toast.file": "MCP a ouvert un fichier",
+  "mcp.toast.class": "MCP a ouvert une classe",
+  "mcp.toast.view": "MCP a changé de vue",
+  "mcp.toast.stop": "Arrêter le suivi MCP"
 }
