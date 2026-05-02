@@ -269,7 +269,7 @@ See [`docs/plan/`](docs/plan/) for the full design notes:
 ## Roadmap
 
 - **Phase 1 (done):** MCP server with Java + Spring + Lombok plugins, Rust plugin, package tree, bean graph, folder map, diff view, Markdown + HTML browsers, walkthrough mode, core MCP tools, Tauri shell with bidirectional MCP sync.
-- **Phase 2 (in progress):** Annotation round-trip, draw.io embed, Confluence MCP bridge, dynamic plugin loading from `./plugins/`.
+- **Phase 2 (in progress):** Annotation round-trip, ~~draw.io embed~~ (`.drawio` files render via the embedded diagrams.net viewer), Confluence MCP bridge, dynamic plugin loading from `./plugins/`.
 - **Phase 3:** Plugin marketplace, more languages, JSF / PrimeFaces preview, C4 diagram generator.
 
 ## Contributing
