@@ -747,7 +747,15 @@ fn read_file_bytes_response(
     let ctype = content_type(path);
     write!(
         stream,
-        "HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-store\r\n\r\n",
+        "HTTP/1.1 200 OK\r\n\
+         Content-Type: {ctype}\r\n\
+         Content-Length: {}\r\n\
+         Access-Control-Allow-Origin: *\r\n\
+         Cache-Control: no-store\r\n\
+         X-Content-Type-Options: nosniff\r\n\
+         X-Frame-Options: SAMEORIGIN\r\n\
+         Referrer-Policy: no-referrer\r\n\
+         \r\n",
         bytes.len()
     )?;
     stream.write_all(&bytes)?;
@@ -797,7 +805,14 @@ fn serve_asset(stream: &mut TcpStream, asset_dir: &Path, path: &str) -> anyhow::
     let ctype = content_type(&file);
     write!(
         stream,
-        "HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n\r\n",
+        "HTTP/1.1 200 OK\r\n\
+         Content-Type: {ctype}\r\n\
+         Content-Length: {}\r\n\
+         Cache-Control: no-store\r\n\
+         X-Content-Type-Options: nosniff\r\n\
+         X-Frame-Options: SAMEORIGIN\r\n\
+         Referrer-Policy: no-referrer\r\n\
+         \r\n",
         bytes.len()
     )?;
     stream.write_all(&bytes)?;
@@ -815,7 +830,15 @@ fn json_response(stream: &mut TcpStream, status: u16, value: Value) -> anyhow::R
     };
     write!(
         stream,
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-store\r\n\r\n",
+        "HTTP/1.1 {status} {reason}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Access-Control-Allow-Origin: *\r\n\
+         Cache-Control: no-store\r\n\
+         X-Content-Type-Options: nosniff\r\n\
+         X-Frame-Options: SAMEORIGIN\r\n\
+         Referrer-Policy: no-referrer\r\n\
+         \r\n",
         body.len()
     )?;
     stream.write_all(&body)?;
