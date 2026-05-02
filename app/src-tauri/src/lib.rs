@@ -29,10 +29,10 @@ use projectmind_core::walkthrough::{
 };
 use projectmind_core::{diagram, Engine, Repository};
 use projectmind_framework_lombok::LombokPlugin;
-use projectmind_plugin_api::{Class, Visibility};
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_lang_java::JavaPlugin;
 use projectmind_lang_rust::RustPlugin;
+use projectmind_plugin_api::{Class, Visibility};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_opener::OpenerExt;
