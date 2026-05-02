@@ -672,7 +672,10 @@ async fn class_outline(state: &Mutex<ServerState>, args: Value) -> DispatchResul
                 "is_static": m.is_static,
                 "line_start": m.line_start,
                 "line_end": m.line_end,
-                "annotations": m.annotations.iter().map(|a| a.name.clone()).collect::<Vec<_>>(),
+                "annotations": m.annotations.iter().map(|a| json!({
+                    "name": a.name,
+                    "raw_args": a.raw_args,
+                })).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
             "fields": class.fields.iter().map(|f| json!({
                 "name": f.name,
@@ -680,7 +683,10 @@ async fn class_outline(state: &Mutex<ServerState>, args: Value) -> DispatchResul
                 "visibility": f.visibility,
                 "is_static": f.is_static,
                 "line": f.line,
-                "annotations": f.annotations.iter().map(|a| a.name.clone()).collect::<Vec<_>>(),
+                "annotations": f.annotations.iter().map(|a| json!({
+                    "name": a.name,
+                    "raw_args": a.raw_args,
+                })).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
             "super_types": class.super_types.iter().map(|t| json!({
                 "name": t.name,

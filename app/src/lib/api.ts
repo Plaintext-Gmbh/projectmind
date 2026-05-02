@@ -135,13 +135,21 @@ export async function showClass(
   return invoke('show_class', { fqn });
 }
 
+export interface AnnotationRef {
+  /// Simple name without the leading `@`.
+  name: string;
+  /// Raw arguments inside the parentheses (e.g. `value="/users", method=GET`),
+  /// or null for plain marker annotations like `@Override`.
+  raw_args: string | null;
+}
+
 export interface MethodOutline {
   name: string;
   visibility: 'public' | 'protected' | 'package' | 'private';
   is_static: boolean;
   line_start: number;
   line_end: number;
-  annotations: string[];
+  annotations: AnnotationRef[];
 }
 
 export interface FieldOutline {
@@ -150,7 +158,7 @@ export interface FieldOutline {
   visibility: 'public' | 'protected' | 'package' | 'private';
   is_static: boolean;
   line: number;
-  annotations: string[];
+  annotations: AnnotationRef[];
 }
 
 export interface SuperTypeOutline {
@@ -168,7 +176,7 @@ export interface ClassOutline {
   line_start: number;
   line_end: number;
   stereotypes: string[];
-  annotations: string[];
+  annotations: AnnotationRef[];
   methods: MethodOutline[];
   fields: FieldOutline[];
   /// Declared parent types in source order — drives the inheritance crumb
