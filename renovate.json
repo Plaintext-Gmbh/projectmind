@@ -1,0 +1,57 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits",
+    ":automergeMinor",
+    ":automergeDigest",
+    "group:monorepos",
+    "group:recommended"
+  ],
+  "schedule": ["before 6am on monday"],
+  "timezone": "Europe/Zurich",
+  "labels": ["dependencies", "renovate"],
+  "prConcurrentLimit": 6,
+  "prHourlyLimit": 4,
+  "rangeStrategy": "bump",
+  "rebaseWhen": "behind-base-branch",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on monday"]
+  },
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "automerge": true,
+    "schedule": ["at any time"]
+  },
+  "packageRules": [
+    {
+      "description": "Group GitHub Actions bumps so they land as one PR per week.",
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions",
+      "automerge": true,
+      "automergeType": "branch"
+    },
+    {
+      "description": "Group all tree-sitter grammar/runtime crates — they need to move together.",
+      "matchPackageNames": [
+        "tree-sitter",
+        "tree-sitter-java",
+        "tree-sitter-rust"
+      ],
+      "groupName": "tree-sitter"
+    },
+    {
+      "description": "Tauri ecosystem bumps in lockstep so the desktop shell stays consistent.",
+      "matchPackagePatterns": ["^tauri", "^@tauri-apps/"],
+      "groupName": "tauri"
+    },
+    {
+      "description": "Skip rand and glib — both are transient build-time / Linux-only deps locked by the upstream tauri stack. Patches need to come from there.",
+      "matchPackageNames": ["rand", "glib"],
+      "matchManagers": ["cargo"],
+      "enabled": false
+    }
+  ]
+}

@@ -1,24 +1,131 @@
 name: Release
 
+# Two trigger paths into the same workflow file:
+#
+# 1. **Tag push** (`push.tags = v*.*.*`) — the canonical entry point. Builds
+#    the MCP server + Tauri app for every supported platform and publishes
+#    a GitHub Release with the artefacts attached.
+#
+# 2. **Manual dispatch** with a `bump` input — opens a `release/vX.Y.Z` PR
+#    that bumps every version reference. After you merge that PR and push
+#    the matching tag, path 1 above kicks in and ships the binaries.
+#
+# The `bump` step needs the org-level
+# *Allow GitHub Actions to create and approve pull requests* setting to be
+# on; otherwise it fails with `GraphQL: GitHub Actions is not permitted`.
+# When that's not available, a maintainer can do the same flow by hand:
+#   1. bump versions in Cargo.toml + app/package.json + app/src-tauri/*
+#      + crates/{mcp-server,browser-host}/Cargo.toml
+#   2. open + merge a PR
+#   3. `git tag vX.Y.Z origin/master && git push origin vX.Y.Z`
+
 on:
   push:
     tags:
       - 'v*.*.*'
   workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump (patch / minor / major). Leave empty to skip — useful for re-running the build matrix on the latest tag.'
+        required: false
+        default: 'minor'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
-# Default to read-only. The publish job re-elevates to `contents: write`
-# to upload assets — see below.
 permissions:
   contents: read
 
-# Two parallel matrices that publish into the same GitHub Release at the end:
-#  * `mcp` — the standalone MCP server binary, useful for any LLM CLI that
-#    just wants stdio JSON-RPC. Multiple OS/arch slices.
-#  * `app` — the Tauri desktop bundle (.dmg/.app on macOS, .deb/.AppImage on
-#    Linux, .msi/.exe on Windows). One slice per host platform.
 jobs:
+  # -- Bump path -------------------------------------------------------------
+  # Only fires on workflow_dispatch with a non-empty `bump`. Bumps every
+  # version reference, pushes a release/vX.Y.Z branch, opens a PR. Once the
+  # PR is merged and a tag pushed, the build+publish path below takes over.
+  bump:
+    name: Bump version + open PR
+    if: github.event_name == 'workflow_dispatch' && inputs.bump != ''
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Compute new version
+        id: ver
+        run: |
+          set -euo pipefail
+          current=$(grep -m1 -E '^version = "' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          if [[ ! "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Cannot parse current version: '$current'"; exit 1
+          fi
+          IFS=. read -r maj min pat <<< "$current"
+          case "${{ inputs.bump }}" in
+            major) new="$((maj+1)).0.0" ;;
+            minor) new="${maj}.$((min+1)).0" ;;
+            patch) new="${maj}.${min}.$((pat+1))" ;;
+            *) echo "::error::unknown bump: ${{ inputs.bump }}"; exit 1 ;;
+          esac
+          echo "current=$current"     >> "$GITHUB_OUTPUT"
+          echo "new=$new"             >> "$GITHUB_OUTPUT"
+          echo "tag=v$new"            >> "$GITHUB_OUTPUT"
+          echo "branch=release/v$new" >> "$GITHUB_OUTPUT"
+          echo "::notice::Bumping ${current} → ${new}"
+
+      - name: Update version files
+        env:
+          CURRENT: ${{ steps.ver.outputs.current }}
+          NEW:     ${{ steps.ver.outputs.new }}
+        run: |
+          set -euxo pipefail
+          for f in Cargo.toml app/src-tauri/Cargo.toml crates/mcp-server/Cargo.toml crates/browser-host/Cargo.toml; do
+            sed -i "s/version = \"$CURRENT\"/version = \"$NEW\"/g" "$f"
+          done
+          for f in app/package.json app/src-tauri/tauri.conf.json; do
+            sed -i "s/\"version\": \"$CURRENT\"/\"version\": \"$NEW\"/" "$f"
+          done
+
+      - name: Open release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW: ${{ steps.ver.outputs.new }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          BRANCH: ${{ steps.ver.outputs.branch }}
+        run: |
+          set -euo pipefail
+          git checkout -b "$BRANCH"
+          git add -A
+          git commit -m "chore(release): bump version to ${NEW}"
+          git push -u origin "$BRANCH"
+          body=$(printf '%s\n\n%s\n\n%s\n' \
+            "Automated release bump to **${NEW}**." \
+            "Merge this PR, then push the tag: \`git tag ${TAG} origin/master && git push origin ${TAG}\`. The Release workflow will pick up the tag-push and build+publish the binaries." \
+            "If \`gh pr create\` fails with \"GitHub Actions is not permitted to create or approve pull requests\", enable the corresponding setting under Org → Settings → Actions → General.")
+          gh pr create \
+            --title "chore(release): ${TAG}" \
+            --body  "$body" \
+            --base master --head "$BRANCH"
+
+  # -- Build path ------------------------------------------------------------
+  # Two parallel matrices that publish into the same GitHub Release at the
+  # end:
+  #  * mcp — the standalone MCP server binary.
+  #  * app — the Tauri desktop bundle (.dmg/.app on macOS, .deb/.AppImage on
+  #          Linux, .msi/.exe on Windows).
+
   mcp:
     name: MCP server / ${{ matrix.asset_suffix }}
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -69,6 +176,7 @@ jobs:
 
   app:
     name: Desktop app / ${{ matrix.asset_suffix }}
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -77,20 +185,17 @@ jobs:
       matrix:
         include:
           # macOS universal binary covers both Apple Silicon and Intel in
-          # one bundle so we only need one Mac runner. Tauri accepts
-          # `universal-apple-darwin`, while rustup needs the two real arch
-          # targets.
+          # one bundle so we only need one Mac runner. The `extra_targets`
+          # hack tells rust-toolchain to add the second arch.
           - os: macos-14
             target: universal-apple-darwin
-            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            extra_targets: x86_64-apple-darwin
             asset_suffix: macos-universal
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            rust_targets: x86_64-unknown-linux-gnu
             asset_suffix: linux-x86_64
           - os: windows-2022
             target: x86_64-pc-windows-msvc
-            rust_targets: x86_64-pc-windows-msvc
             asset_suffix: windows-x86_64
 
     steps:
@@ -100,7 +205,7 @@ jobs:
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
           toolchain: stable
-          targets: ${{ matrix.rust_targets }}
+          targets: ${{ matrix.target }}${{ matrix.extra_targets && format(',{0}', matrix.extra_targets) || '' }}
 
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
@@ -145,11 +250,11 @@ jobs:
             projectmind-app-${{ matrix.asset_suffix }}.tar.gz.sha256
           retention-days: 30
 
-  release:
+  publish:
     name: Publish GitHub release
     needs: [mcp, app]
-    runs-on: ubuntu-22.04
     if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
