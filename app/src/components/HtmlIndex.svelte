@@ -5,7 +5,7 @@
     readFileText,
   } from '../lib/api';
   import type { HtmlFile, HtmlSnippet } from '../lib/api';
-  import { repo } from '../lib/store';
+  import { repo, modules, moduleFilter } from '../lib/store';
   import { t } from '../lib/i18n';
   import { resizable } from '../lib/resizable';
   import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
@@ -37,9 +37,31 @@
   let detailLoading = false;
   let detailError: string | null = null;
 
-  $: filteredFiles = filterFiles(files, query);
-  $: filteredSnippets = filterSnippets(snippets, query);
+  /// When a module is selected in the modules sidebar, restrict both files
+  /// and snippets to those whose abs path lives under that module's root.
+  $: selectedModuleRoot = pickModuleRoot($moduleFilter, $modules);
+  $: visibleFiles = restrict(files, selectedModuleRoot, (f) => f.abs);
+  $: visibleSnippets = restrict(snippets, selectedModuleRoot, (s) => s.abs);
+  $: filteredFiles = filterFiles(visibleFiles, query);
+  $: filteredSnippets = filterSnippets(visibleSnippets, query);
   $: void load($repo?.root ?? null);
+
+  function pickModuleRoot(
+    moduleId: string | null,
+    mods: Array<{ id: string; root: string }>,
+  ): string | null {
+    if (!moduleId) return null;
+    return mods.find((m) => m.id === moduleId)?.root ?? null;
+  }
+
+  function restrict<T>(list: T[], root: string | null, abs: (item: T) => string): T[] {
+    if (!root) return list;
+    const prefix = root.endsWith('/') ? root : `${root}/`;
+    return list.filter((item) => {
+      const a = abs(item);
+      return a === root || a.startsWith(prefix);
+    });
+  }
 
   function filterFiles(list: HtmlFile[], q: string): HtmlFile[] {
     if (!q.trim()) return list;
@@ -218,8 +240,22 @@
       <h2>{$t('html.title')}</h2>
       {#if $repo}
         <span class="subtitle">
-          {$t('html.summary', { files: files.length, snippets: snippets.length, root: $repo.root })}
+          {$t('html.summary', {
+            files: visibleFiles.length,
+            snippets: visibleSnippets.length,
+            root: $repo.root,
+          })}
         </span>
+        {#if $moduleFilter}
+          <button
+            class="module-chip"
+            on:click={() => moduleFilter.set(null)}
+            title={$t('index.moduleFilter.clear')}
+          >
+            <span class="chip-label">{$moduleFilter}</span>
+            <span class="chip-x" aria-hidden="true">×</span>
+          </button>
+        {/if}
       {:else}
         <span class="subtitle">{$t('markdown.noRepositoryOpen')}</span>
       {/if}
@@ -253,7 +289,7 @@
         <div class="error">⚠ {error}</div>
       {:else if tab === 'files'}
         {#if filteredFiles.length === 0}
-          <div class="empty">{files.length === 0 ? $t('html.noFiles') : $t('html.noMatches')}</div>
+          <div class="empty">{visibleFiles.length === 0 ? $t('html.noFiles') : $t('html.noMatches')}</div>
         {:else}
           {#each groupedFiles as [dir, entries] (dir)}
             <section class="group">
@@ -281,7 +317,7 @@
           {/each}
         {/if}
       {:else if filteredSnippets.length === 0}
-        <div class="empty">{snippets.length === 0 ? $t('html.noSnippets') : $t('html.noMatches')}</div>
+        <div class="empty">{visibleSnippets.length === 0 ? $t('html.noSnippets') : $t('html.noMatches')}</div>
       {:else}
         {#each groupedSnippets as [rel, entries] (rel)}
           <section class="group">
@@ -414,6 +450,30 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 460px;
+  }
+
+  .module-chip {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 2px;
+    padding: 1px 6px 1px 8px;
+    background: color-mix(in srgb, var(--accent-2) 18%, var(--bg-2));
+    border: 1px solid color-mix(in srgb, var(--accent-2) 40%, var(--bg-3));
+    border-radius: 10px;
+    color: var(--fg-0);
+    font-family: var(--mono);
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .module-chip:hover {
+    border-color: var(--accent-2);
+  }
+  .module-chip .chip-x {
+    color: var(--fg-2);
+    font-size: 13px;
+    line-height: 1;
   }
 
   .tabs {
