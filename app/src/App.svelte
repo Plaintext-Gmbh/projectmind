@@ -452,6 +452,32 @@
     await load(picked);
   }
 
+  // Header repo-switcher dropdown — opens on click of the repo pill, lists
+  // every other recent repo so the user can hop between projects without
+  // going back to the welcome screen.
+  let repoMenuOpen = false;
+
+  function toggleRepoMenu() {
+    repoMenuOpen = !repoMenuOpen;
+  }
+
+  function closeRepoMenu() {
+    repoMenuOpen = false;
+  }
+
+  async function switchToRepo(path: string) {
+    closeRepoMenu();
+    if (get(repo)?.root === path) return;
+    try {
+      await load(path, { silent: true });
+    } catch (err) {
+      // Path no longer loadable (deleted? permissions?) — drop it from the
+      // recents so the dropdown doesn't keep offering a broken target.
+      recents.forget(path);
+      errorMessage.set(String(err));
+    }
+  }
+
   async function useBrowserToken() {
     const token = tokenInput.trim();
     if (!token) return;
@@ -801,10 +827,54 @@
       <img class="logo" src="/logo.png" alt="ProjectMind" />
       <span class="title">ProjectMind</span>
       {#if $repo}
-        <span class="repo" title={$repo.root}>
-          <span class="repo-name">{basename($repo.root)}</span>
-          <span class="repo-path">{$repo.root}</span>
-        </span>
+        <div class="repo-switcher">
+          <button
+            type="button"
+            class="repo"
+            on:click={toggleRepoMenu}
+            title={$repo.root}
+            aria-haspopup="menu"
+            aria-expanded={repoMenuOpen}
+          >
+            <span class="repo-name">{basename($repo.root)}</span>
+            <span class="repo-path">{$repo.root}</span>
+            <span class="repo-caret" aria-hidden="true">▾</span>
+          </button>
+          {#if repoMenuOpen}
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div class="menu-backdrop" on:click={closeRepoMenu}></div>
+            <div class="repo-menu" role="menu">
+              {#if $recentRepos.filter((r) => r.path !== $repo.root).length > 0}
+                <div class="menu-section-label">{$t('welcome.recent') || 'Recent'}</div>
+                {#each $recentRepos.filter((r) => r.path !== $repo.root) as r (r.path)}
+                  <div class="menu-row">
+                    <button
+                      class="menu-row-main"
+                      on:click={() => switchToRepo(r.path)}
+                      title={r.path}
+                    >
+                      <span class="menu-row-name">{r.name}</span>
+                      <span class="menu-row-meta">{r.classes} · {r.modules}m</span>
+                      <span class="menu-row-path">{r.path}</span>
+                    </button>
+                    <button
+                      class="menu-row-x"
+                      on:click|stopPropagation={() => recents.forget(r.path)}
+                      title={$t('welcome.forget') || 'Remove from list'}
+                      aria-label="Remove {r.name} from recent list"
+                    >×</button>
+                  </div>
+                {/each}
+                <div class="menu-divider"></div>
+              {/if}
+              <button
+                class="menu-row-main menu-row-action"
+                on:click={() => { closeRepoMenu(); void pickAndOpen(); }}
+              >{$t('welcome.openButton') || 'Open repo'}…</button>
+            </div>
+          {/if}
+        </div>
         <span class="status">
           <span class="dot"></span>
           {$t('status.repoCount', {
@@ -1291,7 +1361,11 @@
     color: var(--fg-2);
   }
 
-  .repo {
+  .repo-switcher {
+    position: relative;
+  }
+
+  button.repo {
     display: inline-flex;
     align-items: baseline;
     gap: 8px;
@@ -1299,7 +1373,13 @@
     background: var(--bg-2);
     border-radius: 4px;
     border: 1px solid var(--bg-3);
-    cursor: default;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+  }
+
+  button.repo:hover {
+    border-color: var(--accent-2);
   }
 
   .repo-name {
@@ -1318,6 +1398,123 @@
     white-space: nowrap;
     direction: rtl;
     text-align: left;
+  }
+
+  .repo-caret {
+    color: var(--fg-2);
+    font-size: 11px;
+    margin-left: 2px;
+  }
+
+  .menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 49;
+  }
+
+  .repo-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 50;
+    min-width: 320px;
+    max-width: 520px;
+    max-height: 60vh;
+    overflow: auto;
+    padding: 6px;
+    background: var(--bg-1);
+    border: 1px solid var(--bg-3);
+    border-radius: 6px;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32);
+  }
+
+  .menu-section-label {
+    padding: 4px 8px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-2);
+  }
+
+  .menu-row {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+  }
+
+  .menu-row-main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    gap: 0 8px;
+    padding: 6px 8px;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--fg-0);
+    font: inherit;
+  }
+
+  .menu-row-main:hover {
+    background: var(--bg-2);
+  }
+
+  .menu-row-name {
+    grid-column: 1;
+    grid-row: 1;
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  .menu-row-meta {
+    grid-column: 2;
+    grid-row: 1;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg-2);
+  }
+
+  .menu-row-path {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl;
+    text-align: left;
+  }
+
+  .menu-row-x {
+    width: 24px;
+    background: transparent;
+    border: 0;
+    color: var(--fg-2);
+    font-size: 16px;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+
+  .menu-row-x:hover {
+    background: var(--bg-2);
+    color: var(--error);
+  }
+
+  .menu-row-action {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    color: var(--accent-2);
+  }
+
+  .menu-divider {
+    margin: 4px 0;
+    height: 1px;
+    background: var(--bg-3);
   }
 
   .status {
