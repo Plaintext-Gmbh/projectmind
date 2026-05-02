@@ -15,6 +15,7 @@
 pub mod annotations;
 pub mod cargo;
 pub mod diagram;
+pub mod doc_graph;
 pub mod engine;
 pub mod file_access;
 pub mod files;

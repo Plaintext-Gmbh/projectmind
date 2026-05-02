@@ -278,7 +278,12 @@ export async function removeAnnotation(id: number): Promise<void> {
   await invoke('remove_annotation', { id });
 }
 
-export type DiagramKind = 'bean-graph' | 'package-tree' | 'folder-map' | 'inheritance-tree';
+export type DiagramKind =
+  | 'bean-graph'
+  | 'package-tree'
+  | 'folder-map'
+  | 'inheritance-tree'
+  | 'doc-graph';
 
 export async function showDiagram(kind: DiagramKind): Promise<string> {
   if (!isTauriRuntime()) return api<string>(`/api/show_diagram${query({ kind })}`);
