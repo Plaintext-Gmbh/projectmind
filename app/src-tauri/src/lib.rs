@@ -357,6 +357,8 @@ fn show_diagram(kind: String, state: State<'_, Arc<AppState>>) -> Result<String,
         "package-tree" => Ok(diagram::render_package_tree(repo)),
         "folder-map" => Ok(diagram::render_folder_map(repo)),
         "inheritance-tree" => Ok(diagram::render_inheritance_tree(repo)),
+        "doc-graph" => serde_json::to_string(&projectmind_core::doc_graph::build(&repo.root))
+            .map_err(|e| e.to_string()),
         other => Err(format!("unknown diagram kind: {other}")),
     }
 }

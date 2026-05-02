@@ -35,11 +35,60 @@
     nodes: FolderMapNode[];
   }
 
+  interface DocNode {
+    id: string;
+    abs: string;
+    rel: string;
+    title: string;
+    inbound: number;
+    outbound: number;
+    external: number;
+    orphan: boolean;
+  }
+
+  interface DocEdge {
+    from: string;
+    to: string;
+    label: string;
+    href: string;
+  }
+
+  interface DanglingDocLink {
+    from: string;
+    label: string;
+    href: string;
+    resolved: string;
+  }
+
+  interface DocGraph {
+    root: string;
+    nodes: DocNode[];
+    edges: DocEdge[];
+    dangling: DanglingDocLink[];
+    orphan_count: number;
+    dangling_count: number;
+    external_count: number;
+  }
+
   let stage: HTMLDivElement;
   let mermaidSource = '';
   let svg = '';
+  let docGraph: DocGraph | null = null;
+  let selectedDocId: string | null = null;
+  let docGraphLayout: 'network' | 'radial' | 'orphans' = 'network';
   let loading = false;
   let error: string | null = null;
+
+  $: selectedDoc = docGraph?.nodes.find((n) => n.id === selectedDocId) ?? null;
+  $: selectedOutgoing = selectedDocId
+    ? docGraph?.edges.filter((e) => e.from === selectedDocId) ?? []
+    : [];
+  $: selectedIncoming = selectedDocId
+    ? docGraph?.edges.filter((e) => e.to === selectedDocId) ?? []
+    : [];
+  $: selectedDangling = selectedDocId
+    ? docGraph?.dangling.filter((d) => d.from === selectedDocId) ?? []
+    : [];
 
   // ----- Folder-map colour-by state ----------------------------------------
 
@@ -82,7 +131,7 @@
     if (colorBy === v) return;
     colorBy = v;
     writeColorByPref(v);
-    void render(kind, folderLayout);
+    void render(kind, folderLayout, docGraphLayout);
   }
 
   /// Fetch the per-file git facts (recency + author) for the current repo
@@ -142,7 +191,7 @@
   $: applyScale(scale);
 
   $: if (kind) {
-    void render(kind, folderLayout);
+    void render(kind, folderLayout, docGraphLayout);
   }
 
   onMount(() => {
@@ -204,7 +253,11 @@
     viewMode.set('file');
   }
 
-  async function render(k: DiagramKind, layout: 'hierarchy' | 'solar' | 'td') {
+  async function render(
+    k: DiagramKind,
+    layout: 'hierarchy' | 'solar' | 'td',
+    docLayout: 'network' | 'radial' | 'orphans',
+  ) {
     loading = true;
     error = null;
     try {
@@ -216,9 +269,17 @@
       if (wantGitFacts) await ensureGitFactsForCurrentRepo();
 
       const payload = await showDiagram(k);
+      docGraph = null;
       if (k === 'folder-map') {
         mermaidSource = '';
         svg = renderFolderMap(JSON.parse(payload) as FolderMap, layout);
+      } else if (k === 'doc-graph') {
+        mermaidSource = '';
+        docGraph = JSON.parse(payload) as DocGraph;
+        if (selectedDocId && !docGraph.nodes.some((n) => n.id === selectedDocId)) {
+          selectedDocId = null;
+        }
+        svg = renderDocGraph(docGraph, docLayout);
       } else {
         mermaidSource = payload;
         const id = `mermaid-${Date.now()}`;
@@ -516,6 +577,182 @@
     return folderSvg(width, height, rings + edges + body, map);
   }
 
+  function renderDocGraph(
+    graph: DocGraph,
+    layout: 'network' | 'radial' | 'orphans',
+  ): string {
+    if (graph.nodes.length === 0) return emptyDocGraphSvg();
+    const placed = placeDocNodes(graph, layout);
+    const width = 1400;
+    const height = 900;
+    const defs = `<defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+      </marker>
+    </defs>`;
+    const edges = graph.edges
+      .map((e) => {
+        const from = placed.get(e.from);
+        const to = placed.get(e.to);
+        if (!from || !to) return '';
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const len = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+        const fromR = docNodeRadius(from.node) + 4;
+        const toR = docNodeRadius(to.node) + 10;
+        const x1 = from.x + (dx / len) * fromR;
+        const y1 = from.y + (dy / len) * fromR;
+        const x2 = to.x - (dx / len) * toR;
+        const y2 = to.y - (dy / len) * toR;
+        const curve = Math.min(80, Math.max(-80, (from.node.rel.localeCompare(to.node.rel) - 0.5) * 80));
+        const mx = (x1 + x2) / 2 - (dy / len) * curve;
+        const my = (y1 + y2) / 2 + (dx / len) * curve;
+        return `<path class="doc-edge" d="M${x1} ${y1} Q${mx} ${my} ${x2} ${y2}">
+          <title>${esc(e.from)} → ${esc(e.to)} (${esc(e.label)})</title>
+        </path>`;
+      })
+      .join('');
+    const nodes = [...placed.values()]
+      .map(({ node, x, y }) => {
+        const r = docNodeRadius(node);
+        const classes = ['node', 'doc-node'];
+        if (node.orphan) classes.push('orphan');
+        if (node.id === selectedDocId) classes.push('selected');
+        const subtitle = `${node.inbound} in · ${node.outbound} out · ${node.external} external`;
+        return `<g class="${classes.join(' ')}" data-id="${esc(node.id)}" transform="translate(${x} ${y})">
+          <circle r="${r}"/>
+          <text y="${r + 18}" text-anchor="middle">${esc(shortLabel(node.title || node.rel, 22))}</text>
+          <text y="${r + 33}" class="meta" text-anchor="middle">${esc(shortLabel(node.rel, 26))}</text>
+          <title>${esc(node.rel)}\n${esc(subtitle)}</title>
+        </g>`;
+      })
+      .join('');
+    const stats = `<g class="doc-stats" transform="translate(24 30)">
+      <text>docs ${graph.nodes.length}</text>
+      <text y="18">links ${graph.edges.length}</text>
+      <text y="36">orphans ${graph.orphan_count}</text>
+      <text y="54">dangling ${graph.dangling_count}</text>
+      <text y="72">external ${graph.external_count}</text>
+    </g>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">
+      ${defs}
+      <style>
+        .doc-edge{stroke:#64748b;stroke-width:1.6;fill:none;opacity:.58;marker-end:url(#arrow)}
+        .doc-node{cursor:pointer}
+        .doc-node circle{fill:#1f2937;stroke:#38bdf8;stroke-width:2;filter:drop-shadow(0 10px 18px rgba(0,0,0,.35))}
+        .doc-node.orphan circle{stroke:#f59e0b;stroke-dasharray:5 4}
+        .doc-node.selected circle{fill:#0f766e;stroke:#5eead4;stroke-width:4}
+        text{fill:#e5edf8;font:13px ui-sans-serif,system-ui,sans-serif;paint-order:stroke;stroke:#090d14;stroke-width:3px;stroke-linejoin:round}
+        .meta{fill:#9aa8ba;font-size:11px}
+        .doc-stats text{fill:#cbd5e1;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;stroke:none}
+      </style>
+      <rect width="100%" height="100%" fill="#090d14"/>
+      ${edges}
+      ${nodes}
+      ${stats}
+    </svg>`;
+  }
+
+  function placeDocNodes(
+    graph: DocGraph,
+    layout: 'network' | 'radial' | 'orphans',
+  ): Map<string, { node: DocNode; x: number; y: number }> {
+    if (layout === 'orphans') return placeDocOrphans(graph);
+    if (layout === 'radial') return placeDocRadial(graph);
+    return placeDocNetwork(graph);
+  }
+
+  function placeDocNetwork(graph: DocGraph): Map<string, { node: DocNode; x: number; y: number }> {
+    const out = new Map<string, { node: DocNode; x: number; y: number }>();
+    const nodes = [...graph.nodes].sort(
+      (a, b) => b.inbound + b.outbound - (a.inbound + a.outbound) || a.rel.localeCompare(b.rel),
+    );
+    const cx = 700;
+    const cy = 450;
+    nodes.forEach((node, i) => {
+      if (i === 0) {
+        out.set(node.id, { node, x: cx, y: cy });
+        return;
+      }
+      const ring = Math.floor(Math.sqrt(i));
+      const inRingStart = ring * ring;
+      const inRingCount = Math.max(1, (ring + 1) * (ring + 1) - inRingStart);
+      const pos = i - inRingStart;
+      const angle = -Math.PI / 2 + (pos / inRingCount) * Math.PI * 2;
+      const radius = 120 + ring * 105;
+      out.set(node.id, {
+        node,
+        x: cx + Math.cos(angle) * radius,
+        y: cy + Math.sin(angle) * radius,
+      });
+    });
+    return out;
+  }
+
+  function placeDocRadial(graph: DocGraph): Map<string, { node: DocNode; x: number; y: number }> {
+    const out = new Map<string, { node: DocNode; x: number; y: number }>();
+    const root =
+      graph.nodes.find((n) => /^readme\.md$/i.test(n.rel)) ??
+      [...graph.nodes].sort((a, b) => b.outbound + b.inbound - (a.outbound + a.inbound))[0];
+    out.set(root.id, { node: root, x: 700, y: 450 });
+    const linked = new Set(graph.edges.filter((e) => e.from === root.id).map((e) => e.to));
+    const rings = [
+      graph.nodes.filter((n) => linked.has(n.id)),
+      graph.nodes.filter((n) => n.id !== root.id && !linked.has(n.id) && !n.orphan),
+      graph.nodes.filter((n) => n.id !== root.id && n.orphan),
+    ];
+    rings.forEach((ringNodes, ringIdx) => {
+      const radius = 150 + ringIdx * 180;
+      ringNodes
+        .sort((a, b) => a.rel.localeCompare(b.rel))
+        .forEach((node, i) => {
+          const angle = -Math.PI / 2 + (i / Math.max(1, ringNodes.length)) * Math.PI * 2;
+          out.set(node.id, {
+            node,
+            x: 700 + Math.cos(angle) * radius,
+            y: 450 + Math.sin(angle) * radius,
+          });
+        });
+    });
+    return out;
+  }
+
+  function placeDocOrphans(graph: DocGraph): Map<string, { node: DocNode; x: number; y: number }> {
+    const out = new Map<string, { node: DocNode; x: number; y: number }>();
+    const columns = [
+      graph.nodes.filter((n) => n.orphan).sort((a, b) => a.rel.localeCompare(b.rel)),
+      graph.nodes.filter((n) => !n.orphan).sort((a, b) => b.inbound - a.inbound || a.rel.localeCompare(b.rel)),
+    ];
+    columns.forEach((nodes, col) => {
+      const x = col === 0 ? 360 : 980;
+      const gap = Math.min(92, Math.max(44, 780 / Math.max(1, nodes.length)));
+      nodes.forEach((node, i) => {
+        out.set(node.id, { node, x, y: 80 + i * gap });
+      });
+    });
+    return out;
+  }
+
+  function docNodeRadius(n: DocNode): number {
+    return Math.min(46, 16 + Math.sqrt(n.inbound + n.outbound + n.external + 1) * 5);
+  }
+
+  function emptyDocGraphSvg(): string {
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520">
+      <rect width="100%" height="100%" fill="#090d14"/>
+      <text x="450" y="260" text-anchor="middle" fill="#94a3b8" font-size="18" font-family="ui-sans-serif,system-ui">No markdown documents found</text>
+    </svg>`;
+  }
+
+  function openDoc(path: string) {
+    fileView.update((cur) => ({
+      path,
+      anchor: null,
+      nonce: (cur?.nonce ?? 0) + 1,
+    }));
+    viewMode.set('file');
+  }
+
   function groupByParent(nodes: FolderMapNode[]): Map<string, FolderMapNode[]> {
     const out = new Map<string, FolderMapNode[]>();
     for (const n of nodes) {
@@ -580,12 +817,18 @@
   }
 
   function onClick(e: MouseEvent) {
-    if (kind !== 'folder-map') return;
+    if (kind !== 'folder-map' && kind !== 'doc-graph') return;
     const target = e.target as Element | null;
     const node = target?.closest?.('.node') as SVGGElement | null;
-    const path = node?.dataset.path;
-    const nodeKind = node?.dataset.kind;
-    if (path && nodeKind) openFolderNode(path, nodeKind);
+    if (!node) return;
+    if (kind === 'folder-map') {
+      const path = node.dataset.path;
+      const nodeKind = node.dataset.kind;
+      if (path && nodeKind) openFolderNode(path, nodeKind);
+      return;
+    }
+    const docId = node.dataset.id;
+    if (docId) selectedDocId = docId;
   }
 
   function applyScale(s: number) {
@@ -616,7 +859,7 @@
   }
 
   function onMouseDown(e: MouseEvent) {
-    if ((e.target as Element | null)?.closest?.('.node.file')) return;
+    if ((e.target as Element | null)?.closest?.('.node.file,.doc-node')) return;
     if (e.button !== 0) return;
     dragging = true;
     dragStartX = e.clientX;
@@ -691,8 +934,30 @@
       {#if (colorBy === 'recency' || colorBy === 'author') && gitError}
         <span class="hint" style="color: var(--error);" title={gitError}>⚠ git unavailable</span>
       {/if}
+    {:else if kind === 'doc-graph'}
+      <span class="divider"></span>
+      <button
+        class:active={docGraphLayout === 'network'}
+        on:click={() => (docGraphLayout = 'network')}
+        title="Network layout"
+      >N</button>
+      <button
+        class:active={docGraphLayout === 'radial'}
+        on:click={() => (docGraphLayout = 'radial')}
+        title="Radial layout"
+      >R</button>
+      <button
+        class:active={docGraphLayout === 'orphans'}
+        on:click={() => (docGraphLayout = 'orphans')}
+        title="Orphans layout"
+      >O</button>
     {/if}
     <span class="zoom-readout">{Math.round(scale * 100)}%</span>
+    {#if kind === 'doc-graph' && docGraph}
+      <span class="doc-summary">
+        {docGraph.nodes.length} docs · {docGraph.edges.length} links · {docGraph.orphan_count} orphans · {docGraph.dangling_count} dangling
+      </span>
+    {/if}
     <span class="hint">Drag to pan • Shift + wheel to zoom</span>
   </div>
   {#if loading}
@@ -722,6 +987,61 @@
       >
         {@html svg}
       </div>
+      {#if kind === 'doc-graph' && docGraph}
+        <aside class="doc-panel">
+          {#if selectedDoc}
+            <header>
+              <h3>{selectedDoc.title}</h3>
+              <button on:click={() => openDoc(selectedDoc.abs)}>Open</button>
+            </header>
+            <div class="doc-path" title={selectedDoc.rel}>{selectedDoc.rel}</div>
+            <div class="metrics">
+              <span>{selectedDoc.inbound} in</span>
+              <span>{selectedDoc.outbound} out</span>
+              <span>{selectedDoc.external} external</span>
+            </div>
+            {#if selectedIncoming.length > 0}
+              <h4>Linked from</h4>
+              <ul>
+                {#each selectedIncoming.slice(0, 8) as edge}
+                  <li>
+                    <button on:click={() => (selectedDocId = edge.from)}>{edge.from}</button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+            {#if selectedOutgoing.length > 0}
+              <h4>Links to</h4>
+              <ul>
+                {#each selectedOutgoing.slice(0, 8) as edge}
+                  <li>
+                    <button on:click={() => (selectedDocId = edge.to)}>{edge.to}</button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+            {#if selectedDangling.length > 0}
+              <h4>Dangling</h4>
+              <ul>
+                {#each selectedDangling.slice(0, 6) as link}
+                  <li title={link.resolved}>{link.href}</li>
+                {/each}
+              </ul>
+            {/if}
+          {:else}
+            <header>
+              <h3>Documentation graph</h3>
+            </header>
+            <div class="metrics stacked">
+              <span>{docGraph.nodes.length} documents</span>
+              <span>{docGraph.edges.length} internal links</span>
+              <span>{docGraph.orphan_count} orphans</span>
+              <span>{docGraph.dangling_count} dangling links</span>
+              <span>{docGraph.external_count} external links</span>
+            </div>
+          {/if}
+        </aside>
+      {/if}
     </div>
   {/if}
 </div>
@@ -774,6 +1094,12 @@
     text-align: right;
   }
 
+  .doc-summary {
+    font-size: 11px;
+    color: var(--fg-2);
+    padding-left: 6px;
+  }
+
   .hint {
     margin-left: auto;
     font-size: 11px;
@@ -809,6 +1135,109 @@
   .diagram :global(svg) {
     max-width: none;
     display: block;
+  }
+
+  .doc-panel {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    width: min(340px, calc(100% - 28px));
+    max-height: calc(100% - 28px);
+    overflow: auto;
+    padding: 14px;
+    background: color-mix(in srgb, var(--bg-1) 94%, transparent);
+    border: 1px solid var(--bg-3);
+    border-radius: 6px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  }
+
+  .doc-panel header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .doc-panel h3,
+  .doc-panel h4 {
+    margin: 0;
+    color: var(--fg-0);
+  }
+
+  .doc-panel h3 {
+    font-size: 14px;
+    line-height: 1.25;
+  }
+
+  .doc-panel h4 {
+    margin-top: 14px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-2);
+  }
+
+  .doc-panel button {
+    font-size: 12px;
+  }
+
+  .doc-path {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+  }
+
+  .metrics span {
+    padding: 3px 6px;
+    border-radius: 4px;
+    background: var(--bg-2);
+    color: var(--fg-1);
+    font-size: 11px;
+  }
+
+  .metrics.stacked {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .doc-panel ul {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 0;
+  }
+
+  .doc-panel li {
+    margin: 2px 0;
+    color: var(--fg-1);
+    font-family: var(--mono);
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .doc-panel li button {
+    width: 100%;
+    padding: 4px 6px;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--mono);
+    background: transparent;
+    border: 0;
+    color: var(--accent-2);
   }
 
   .placeholder {

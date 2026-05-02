@@ -589,6 +589,10 @@ async fn show_diagram(state: &Mutex<ServerState>, args: Value) -> DispatchResult
         "package-tree" => Ok(text_result(diagram::render_package_tree(repo))),
         "folder-map" => Ok(text_result(diagram::render_folder_map(repo))),
         "inheritance-tree" => Ok(text_result(diagram::render_inheritance_tree(repo))),
+        "doc-graph" => Ok(text_result(
+            serde_json::to_string(&projectmind_core::doc_graph::build(&repo.root))
+                .map_err(|e| DispatchError::internal(format!("doc-graph failed: {e}")))?,
+        )),
         other => Err(DispatchError::invalid_params(format!(
             "unknown diagram: {other}"
         ))),

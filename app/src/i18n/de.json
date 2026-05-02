@@ -47,6 +47,7 @@
   "diagram.packageTree": "Paketbaum",
   "diagram.folderMap": "Ordner-Karte",
   "diagram.inheritanceTree": "Vererbungsbaum",
+  "diagram.docGraph": "Dokumentgraph",
   "diagram.drillHint": "Klicke auf einen Knoten, um hineinzuspringen",
   "diagram.zoomIn": "Vergrößern",
   "diagram.zoomOut": "Verkleinern",

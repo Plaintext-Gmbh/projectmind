@@ -47,6 +47,7 @@
   "diagram.packageTree": "Package tree",
   "diagram.folderMap": "Folder map",
   "diagram.inheritanceTree": "Inheritance tree",
+  "diagram.docGraph": "Doc graph",
   "diagram.drillHint": "Click a node to drill into it",
   "diagram.zoomIn": "Zoom in",
   "diagram.zoomOut": "Zoom out",

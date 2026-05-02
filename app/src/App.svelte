@@ -316,6 +316,7 @@
       case 'package-tree': return $t('diagram.packageTree');
       case 'folder-map': return $t('diagram.folderMap');
       case 'inheritance-tree': return $t('diagram.inheritanceTree');
+      case 'doc-graph': return $t('diagram.docGraph');
       default: return kind; // unknown plugin-contributed diagram — show id
     }
   }

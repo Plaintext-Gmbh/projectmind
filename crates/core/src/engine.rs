@@ -180,6 +180,12 @@ impl Engine {
     pub fn available_diagrams(&self, repo: &Repository) -> Vec<String> {
         let mut out: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         out.insert("folder-map".to_string());
+        // doc-graph is always meaningful when the repo has at least one
+        // markdown file. Unconditional on plugins because it's purely a
+        // filesystem scan, not language-specific parsing.
+        if !crate::files::list_markdown_files(&repo.root).is_empty() {
+            out.insert("doc-graph".to_string());
+        }
         let has_classes = repo.class_count() > 0;
         if has_classes {
             for lang in &self.languages {
