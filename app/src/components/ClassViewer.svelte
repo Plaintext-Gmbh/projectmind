@@ -34,23 +34,27 @@
   let outlineFqn: string | null = null;
   // Persist the panel's open/closed state across class switches and reloads.
   const OUTLINE_KEY = 'projectmind.classviewer.outlineOpen';
-  let outlineOpen = readOutlineOpen();
+  const GUTTER_KEY = 'projectmind.classviewer.gutterOpen';
+  let outlineOpen = readBoolPref(OUTLINE_KEY, true);
+  // Gutter defaults to *open* too — same data, same discovery rationale as
+  // the side panel. Cheap to suppress with the toolbar toggle if it ever
+  // gets in the way.
+  let gutterOpen = readBoolPref(GUTTER_KEY, true);
   let sourceEl: HTMLPreElement | null = null;
   let lastFlash: number | null = null;
 
-  function readOutlineOpen(): boolean {
+  function readBoolPref(key: string, defaultValue: boolean): boolean {
     try {
-      const v = localStorage.getItem(OUTLINE_KEY);
-      // Default to *open* — the panel exists to be discovered.
-      return v === null ? true : v === '1';
+      const v = localStorage.getItem(key);
+      return v === null ? defaultValue : v === '1';
     } catch {
-      return true;
+      return defaultValue;
     }
   }
 
-  function writeOutlineOpen(v: boolean) {
+  function writeBoolPref(key: string, v: boolean) {
     try {
-      localStorage.setItem(OUTLINE_KEY, v ? '1' : '0');
+      localStorage.setItem(key, v ? '1' : '0');
     } catch {
       // ignore
     }
@@ -58,7 +62,12 @@
 
   function toggleOutline() {
     outlineOpen = !outlineOpen;
-    writeOutlineOpen(outlineOpen);
+    writeBoolPref(OUTLINE_KEY, outlineOpen);
+  }
+
+  function toggleGutter() {
+    gutterOpen = !gutterOpen;
+    writeBoolPref(GUTTER_KEY, gutterOpen);
   }
 
   // Whenever the selected class changes, refetch its outline. We dedupe by
@@ -109,6 +118,93 @@
     }
   }
 
+  // ----- Annotated gutter -------------------------------------------------
+
+  // What we render on a single line of the gutter. The class-level entry
+  // also carries stereotypes (so we can show framework-recognised badges
+  // like `service` / `controller` next to the class declaration); per-member
+  // entries carry the visibility glyph instead. `annotations` is the full
+  // list — first one shows up as the primary chip, the rest live in the
+  // tooltip.
+  type GutterItem = {
+    kind: 'class' | 'method' | 'field';
+    name?: string;
+    visibility?: MethodOutline['visibility'];
+    isStatic?: boolean;
+    annotations: string[];
+    stereotypes?: string[];
+  };
+
+  // Reactive map keyed by source-line number. Only includes lines that have
+  // *something* to show — method/field declarations and the class header.
+  $: gutterByLine = (() => {
+    const map = new Map<number, GutterItem>();
+    if (!outline) return map;
+    if (outline.stereotypes.length > 0 || outline.annotations.length > 0) {
+      map.set(outline.line_start, {
+        kind: 'class',
+        annotations: outline.annotations,
+        stereotypes: outline.stereotypes,
+      });
+    }
+    for (const m of outline.methods) {
+      // Don't clobber the class-level marker if a method coincidentally
+      // shares a line (very rare in practice — would only happen on a
+      // single-line class). Class wins because it tells the bigger story.
+      if (map.has(m.line_start)) continue;
+      map.set(m.line_start, {
+        kind: 'method',
+        name: m.name,
+        visibility: m.visibility,
+        isStatic: m.is_static,
+        annotations: m.annotations,
+      });
+    }
+    for (const f of outline.fields) {
+      if (map.has(f.line)) continue;
+      map.set(f.line, {
+        kind: 'field',
+        name: f.name,
+        visibility: f.visibility,
+        isStatic: f.is_static,
+        annotations: f.annotations,
+      });
+    }
+    return map;
+  })();
+
+  function gutterTooltip(item: GutterItem): string {
+    const parts: string[] = [];
+    if (item.kind === 'class') {
+      if (item.stereotypes && item.stereotypes.length > 0) {
+        parts.push(`stereotypes: ${item.stereotypes.join(', ')}`);
+      }
+    } else if (item.name) {
+      parts.push(
+        `${item.visibility ?? ''}${item.isStatic ? ' static' : ''} ${item.name}`.trim(),
+      );
+    }
+    if (item.annotations.length > 0) {
+      parts.push('@' + item.annotations.join(' @'));
+    }
+    return parts.join(' · ');
+  }
+
+  // The badge shown on the row itself — annotation first, then stereotype
+  // for class-level rows that have no annotation. Returns `null` when
+  // there's nothing meaningful to display.
+  function gutterChip(item: GutterItem): { text: string; kind: 'anno' | 'stereo' } | null {
+    if (item.annotations.length > 0) {
+      const extra = item.annotations.length > 1 ? `+${item.annotations.length - 1}` : '';
+      return { text: `@${item.annotations[0]}${extra}`, kind: 'anno' };
+    }
+    if (item.kind === 'class' && item.stereotypes && item.stereotypes.length > 0) {
+      const extra = item.stereotypes.length > 1 ? `+${item.stereotypes.length - 1}` : '';
+      return { text: `⌗${item.stereotypes[0]}${extra}`, kind: 'stereo' };
+    }
+    return null;
+  }
+
   onMount(() => {
     return () => {
       if (lastFlash !== null) clearTimeout(lastFlash);
@@ -131,7 +227,18 @@
       {/if}
       <button
         type="button"
-        class="outline-toggle"
+        class="header-toggle"
+        class:active={gutterOpen}
+        on:click={toggleGutter}
+        title={gutterOpen ? $t('gutter.hide') : $t('gutter.show')}
+        aria-label={gutterOpen ? $t('gutter.hide') : $t('gutter.show')}
+        aria-pressed={gutterOpen}
+      >
+        ◧
+      </button>
+      <button
+        type="button"
+        class="header-toggle"
         class:active={outlineOpen}
         on:click={toggleOutline}
         title={outlineOpen ? $t('outline.hide') : $t('outline.show')}
@@ -144,14 +251,25 @@
   </div>
 
   <div class="body" class:has-outline={outlineOpen}>
-    <pre class="source" bind:this={sourceEl}><code>{#each lines as line, i (i)}{@const lineNo = i + 1}<span
+    <pre
+      class="source"
+      class:has-gutter={gutterOpen && gutterByLine.size > 0}
+      bind:this={sourceEl}
+    ><code>{#each lines as line, i (i)}{@const lineNo = i + 1}{@const item = gutterByLine.get(lineNo)}{@const chip = item ? gutterChip(item) : null}<span
           class="line"
           data-line-no={lineNo}
           class:highlight={highlightRanges.length === 0 &&
             lineNo >= defaultFrom &&
             lineNo <= defaultTo}
           class:wt-highlight={highlightRanges.length > 0 && inWalkthroughRange(lineNo)}
-        ><span class="lineno">{lineNo}</span><span class="content">{line}</span>
+        ><span class="lineno">{lineNo}</span>{#if gutterOpen && gutterByLine.size > 0}<span
+            class="gutter"
+            class:has-item={item !== undefined}
+            title={item ? gutterTooltip(item) : ''}
+          >{#if item}{#if item.kind !== 'class' && item.visibility}<span class="vis"
+                  >{visibilityGlyph(item.visibility)}{item.isStatic ? 's' : ''}</span
+                >{/if}{#if chip}<span class="chip {chip.kind}">{chip.text}</span>{/if}{/if}</span
+          >{/if}<span class="content">{line}</span>
 </span>{/each}</code></pre>
 
     {#if outlineOpen}
@@ -260,7 +378,7 @@
     color: var(--fg-2);
   }
 
-  .outline-toggle {
+  .header-toggle {
     margin-left: 4px;
     padding: 3px 8px;
     background: var(--bg-2);
@@ -271,10 +389,10 @@
     line-height: 1;
     cursor: pointer;
   }
-  .outline-toggle:hover {
+  .header-toggle:hover {
     background: var(--bg-3);
   }
-  .outline-toggle.active {
+  .header-toggle.active {
     border-color: var(--accent-2);
     color: var(--accent-2);
   }
@@ -338,6 +456,57 @@
     text-align: right;
     margin-right: 12px;
     user-select: none;
+  }
+
+  /* ----- Annotated gutter --------------------------------------------- */
+
+  /* The gutter is an inline-block column that sits between `lineno` and
+     `content`. We reserve a fixed width even on lines without an item so
+     the source code doesn't reflow as the user scrolls past member
+     declarations. Width chosen to fit the most common annotation chips
+     (`@Service`, `@Override`, `@Autowired`) without truncating. */
+  .gutter {
+    display: inline-block;
+    width: 138px;
+    margin-right: 8px;
+    vertical-align: baseline;
+    user-select: none;
+    font-family: var(--mono);
+    color: var(--fg-2);
+    /* We render the chip + glyph as plain inline content so the existing
+       `<pre>` whitespace handling still works for `.content`. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .gutter .vis {
+    display: inline-block;
+    width: 16px;
+    text-align: center;
+    color: var(--fg-2);
+  }
+
+  .gutter .chip {
+    display: inline-block;
+    padding: 0 6px;
+    border-radius: 8px;
+    font-size: 0.85em;
+    line-height: 1.3;
+    background: color-mix(in srgb, var(--accent-2) 18%, var(--bg-2));
+    color: var(--fg-0);
+    border: 1px solid color-mix(in srgb, var(--accent-2) 35%, transparent);
+  }
+
+  .gutter .chip.stereo {
+    background: color-mix(in srgb, var(--component, var(--accent-2)) 22%, var(--bg-2));
+    border-color: color-mix(in srgb, var(--component, var(--accent-2)) 40%, transparent);
+  }
+
+  /* When no item lives on a line we still reserve the column so the code
+     stays aligned, but we render nothing — keeps the gutter quiet. */
+  .gutter:not(.has-item) {
+    visibility: hidden;
   }
 
   .content {
