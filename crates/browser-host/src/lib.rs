@@ -653,8 +653,8 @@ pub struct ClassOutline {
     pub line_end: u32,
     /// Stereotypes attached by framework plugins.
     pub stereotypes: Vec<String>,
-    /// Class-level annotation names (without `@`).
-    pub annotations: Vec<String>,
+    /// Class-level annotations.
+    pub annotations: Vec<AnnotationRef>,
     /// Methods, in source order.
     pub methods: Vec<MethodOutline>,
     /// Fields, in source order.
@@ -662,6 +662,17 @@ pub struct ClassOutline {
     /// Declared parent types: `extends` then `implements` / trait-impl
     /// targets. Drives the inheritance crumb in the GUI header.
     pub super_types: Vec<SuperTypeOutline>,
+}
+
+/// One annotation as it appears in the class outline. `raw_args` is the
+/// literal text inside the parentheses (e.g. `value="/users", method=GET`),
+/// or `null` for plain marker annotations like `@Override`.
+#[derive(Debug, Serialize)]
+pub struct AnnotationRef {
+    /// Simple name without the leading `@`.
+    pub name: String,
+    /// Raw call-arguments text, when the source declared any.
+    pub raw_args: Option<String>,
 }
 
 /// One declared parent type for the class outline.
@@ -686,8 +697,8 @@ pub struct MethodOutline {
     pub line_start: u32,
     /// 1-based end line of the method definition.
     pub line_end: u32,
-    /// Annotation names.
-    pub annotations: Vec<String>,
+    /// Annotations declared on this method.
+    pub annotations: Vec<AnnotationRef>,
 }
 
 /// One field entry in the class outline.
@@ -704,8 +715,8 @@ pub struct FieldOutline {
     pub is_static: bool,
     /// 1-based line where the field is declared.
     pub line: u32,
-    /// Annotation names.
-    pub annotations: Vec<String>,
+    /// Annotations declared on this field.
+    pub annotations: Vec<AnnotationRef>,
 }
 
 fn open_repo_locked(state: &mut HostState, path: &Path) -> anyhow::Result<RepoSummary> {
@@ -831,6 +842,13 @@ fn visibility_str(v: projectmind_plugin_api::Visibility) -> String {
     .to_string()
 }
 
+fn annotation_ref(a: &projectmind_plugin_api::Annotation) -> AnnotationRef {
+    AnnotationRef {
+        name: a.name.clone(),
+        raw_args: a.raw_args.clone(),
+    }
+}
+
 fn build_class_outline(class: &projectmind_plugin_api::Class) -> ClassOutline {
     ClassOutline {
         fqn: class.fqn.clone(),
@@ -840,7 +858,7 @@ fn build_class_outline(class: &projectmind_plugin_api::Class) -> ClassOutline {
         line_start: class.line_start,
         line_end: class.line_end,
         stereotypes: class.stereotypes.clone(),
-        annotations: class.annotations.iter().map(|a| a.name.clone()).collect(),
+        annotations: class.annotations.iter().map(annotation_ref).collect(),
         methods: class
             .methods
             .iter()
@@ -850,7 +868,7 @@ fn build_class_outline(class: &projectmind_plugin_api::Class) -> ClassOutline {
                 is_static: m.is_static,
                 line_start: m.line_start,
                 line_end: m.line_end,
-                annotations: m.annotations.iter().map(|a| a.name.clone()).collect(),
+                annotations: m.annotations.iter().map(annotation_ref).collect(),
             })
             .collect(),
         fields: class
@@ -862,7 +880,7 @@ fn build_class_outline(class: &projectmind_plugin_api::Class) -> ClassOutline {
                 visibility: visibility_str(f.visibility),
                 is_static: f.is_static,
                 line: f.line,
-                annotations: f.annotations.iter().map(|a| a.name.clone()).collect(),
+                annotations: f.annotations.iter().map(annotation_ref).collect(),
             })
             .collect(),
         super_types: class

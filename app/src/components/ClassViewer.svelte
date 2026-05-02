@@ -1,7 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
-  import type { ClassEntry, ClassOutline, MethodOutline, FieldOutline } from '../lib/api';
+  import type {
+    ClassEntry,
+    ClassOutline,
+    MethodOutline,
+    FieldOutline,
+    AnnotationRef,
+  } from '../lib/api';
   import { classOutline as fetchOutline } from '../lib/api';
   import { classes, selectedClass } from '../lib/store';
   import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
@@ -133,7 +139,7 @@
     name?: string;
     visibility?: MethodOutline['visibility'];
     isStatic?: boolean;
-    annotations: string[];
+    annotations: AnnotationRef[];
     stereotypes?: string[];
   };
 
@@ -175,6 +181,15 @@
     return map;
   })();
 
+  /// Render a single annotation as `@Name` plus its raw arg list when present
+  /// (e.g. `@RequestMapping(value="/users", method=GET)`). The args text is
+  /// passed through verbatim — it's the same string the language plugin
+  /// extracted from source.
+  function formatAnnotation(a: AnnotationRef): string {
+    const args = a.raw_args ?? '';
+    return args.length > 0 ? `@${a.name}(${args})` : `@${a.name}`;
+  }
+
   function gutterTooltip(item: GutterItem): string {
     const parts: string[] = [];
     if (item.kind === 'class') {
@@ -187,9 +202,12 @@
       );
     }
     if (item.annotations.length > 0) {
-      parts.push('@' + item.annotations.join(' @'));
+      // Newline separator so each annotation lands on its own row in the
+      // browser's title-tooltip rendering. Falls back to ` · ` joins on
+      // platforms that strip newlines from `title=` (rare).
+      parts.push(item.annotations.map(formatAnnotation).join('\n'));
     }
-    return parts.join(' · ');
+    return parts.join('\n');
   }
 
   // The badge shown on the row itself — annotation first, then stereotype
@@ -198,7 +216,7 @@
   function gutterChip(item: GutterItem): { text: string; kind: 'anno' | 'stereo' } | null {
     if (item.annotations.length > 0) {
       const extra = item.annotations.length > 1 ? `+${item.annotations.length - 1}` : '';
-      return { text: `@${item.annotations[0]}${extra}`, kind: 'anno' };
+      return { text: `@${item.annotations[0].name}${extra}`, kind: 'anno' };
     }
     if (item.kind === 'class' && item.stereotypes && item.stereotypes.length > 0) {
       const extra = item.stereotypes.length > 1 ? `+${item.stereotypes.length - 1}` : '';
@@ -353,12 +371,15 @@
                       type="button"
                       class="outline-row"
                       on:click={() => jumpToLine(m.line_start)}
-                      title={`${m.visibility}${m.is_static ? ' static' : ''} ${m.name} · L${m.line_start}-${m.line_end}`}
+                      title={[
+                        `${m.visibility}${m.is_static ? ' static' : ''} ${m.name} · L${m.line_start}-${m.line_end}`,
+                        ...m.annotations.map(formatAnnotation),
+                      ].join('\n')}
                     >
                       <span class="vis">{visibilityGlyph(m.visibility)}</span>
                       <span class="name">{m.name}{m.is_static ? '·s' : ''}</span>
                       {#if m.annotations.length > 0}
-                        <span class="anno">@{m.annotations[0]}{m.annotations.length > 1 ? `+${m.annotations.length - 1}` : ''}</span>
+                        <span class="anno">@{m.annotations[0].name}{m.annotations.length > 1 ? `+${m.annotations.length - 1}` : ''}</span>
                       {/if}
                       <span class="line-no">{m.line_start}</span>
                     </button>
@@ -377,7 +398,10 @@
                       type="button"
                       class="outline-row"
                       on:click={() => jumpToLine(f.line)}
-                      title={`${f.visibility}${f.is_static ? ' static' : ''} ${f.name}: ${f.type} · L${f.line}`}
+                      title={[
+                        `${f.visibility}${f.is_static ? ' static' : ''} ${f.name}: ${f.type} · L${f.line}`,
+                        ...f.annotations.map(formatAnnotation),
+                      ].join('\n')}
                     >
                       <span class="vis">{visibilityGlyph(f.visibility)}</span>
                       <span class="name">{f.name}</span>

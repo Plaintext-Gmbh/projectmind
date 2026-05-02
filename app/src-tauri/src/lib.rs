@@ -110,6 +110,16 @@ pub struct ClassDetails {
     pub source: String,
 }
 
+/// One annotation as it appears in the class outline. `raw_args` is the
+/// literal text inside the parentheses (`value="/users", method=GET`)
+/// when the source declared call-style arguments; `null` for plain
+/// marker annotations like `@Override`.
+#[derive(Debug, Serialize)]
+pub struct AnnotationRef {
+    pub name: String,
+    pub raw_args: Option<String>,
+}
+
 /// Structural outline of a class — methods, fields, annotations, no source.
 /// Used by the GUI's `ClassViewer` to render a side-panel with click-to-jump
 /// navigation. The same data is exposed via the `class_outline` MCP tool.
@@ -122,7 +132,7 @@ pub struct ClassOutline {
     pub line_start: u32,
     pub line_end: u32,
     pub stereotypes: Vec<String>,
-    pub annotations: Vec<String>,
+    pub annotations: Vec<AnnotationRef>,
     pub methods: Vec<MethodOutline>,
     pub fields: Vec<FieldOutline>,
     /// Declared parent types: `extends` targets first, then `implements` /
@@ -144,7 +154,7 @@ pub struct MethodOutline {
     pub is_static: bool,
     pub line_start: u32,
     pub line_end: u32,
-    pub annotations: Vec<String>,
+    pub annotations: Vec<AnnotationRef>,
 }
 
 #[derive(Debug, Serialize)]
@@ -155,7 +165,7 @@ pub struct FieldOutline {
     pub visibility: String,
     pub is_static: bool,
     pub line: u32,
-    pub annotations: Vec<String>,
+    pub annotations: Vec<AnnotationRef>,
 }
 
 /// Tauri command: open a repository.
@@ -569,6 +579,17 @@ fn visibility_str(v: Visibility) -> String {
     .to_string()
 }
 
+/// Convert a parsed [`projectmind_plugin_api::Annotation`] into the leaner
+/// `AnnotationRef` the GUI consumes. Drops the optional `fqn` (rarely
+/// resolved by Phase 1 plugins, never used by the frontend) and keeps the
+/// simple name + raw argument text.
+fn annotation_ref(a: &projectmind_plugin_api::Annotation) -> AnnotationRef {
+    AnnotationRef {
+        name: a.name.clone(),
+        raw_args: a.raw_args.clone(),
+    }
+}
+
 /// Build a [`ClassOutline`] from a parsed [`Class`]. Pure data shaping — no
 /// I/O, no source reading. Reused by the Tauri command and (in `browser-host`)
 /// by the HTTP endpoint serving the same payload.
@@ -581,7 +602,7 @@ fn build_class_outline(class: &Class) -> ClassOutline {
         line_start: class.line_start,
         line_end: class.line_end,
         stereotypes: class.stereotypes.clone(),
-        annotations: class.annotations.iter().map(|a| a.name.clone()).collect(),
+        annotations: class.annotations.iter().map(annotation_ref).collect(),
         methods: class
             .methods
             .iter()
@@ -591,7 +612,7 @@ fn build_class_outline(class: &Class) -> ClassOutline {
                 is_static: m.is_static,
                 line_start: m.line_start,
                 line_end: m.line_end,
-                annotations: m.annotations.iter().map(|a| a.name.clone()).collect(),
+                annotations: m.annotations.iter().map(annotation_ref).collect(),
             })
             .collect(),
         fields: class
@@ -603,7 +624,7 @@ fn build_class_outline(class: &Class) -> ClassOutline {
                 visibility: visibility_str(f.visibility),
                 is_static: f.is_static,
                 line: f.line,
-                annotations: f.annotations.iter().map(|a| a.name.clone()).collect(),
+                annotations: f.annotations.iter().map(annotation_ref).collect(),
             })
             .collect(),
         super_types: class
