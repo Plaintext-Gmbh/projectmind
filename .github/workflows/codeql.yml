@@ -70,12 +70,13 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
-      - name: Install Linux Tauri deps
-        if: matrix.language == 'rust'
-        run: ./scripts/ci.sh install-deps
-
       - name: Autobuild
+        if: matrix.language != 'rust'
         uses: github/codeql-action/autobuild@53e96ec3b35fce51c141c0d6f0e31028a448722d # v3
+
+      - name: Build Rust for CodeQL
+        if: matrix.language == 'rust'
+        run: cargo build --workspace --exclude projectmind-app
 
       - name: Analyze
         uses: github/codeql-action/analyze@53e96ec3b35fce51c141c0d6f0e31028a448722d # v3

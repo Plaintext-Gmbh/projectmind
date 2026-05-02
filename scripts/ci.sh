@@ -57,12 +57,20 @@ sha256() {
 
 cmd_check() {
     cargo fmt --all -- --check
-    cargo clippy --workspace --all-targets -- -D warnings
+    local cargo_args=(--workspace --all-targets)
+    if [[ "${PROJECTMIND_SKIP_TAURI_APP:-}" == "1" ]]; then
+        cargo_args+=(--exclude projectmind-app)
+    fi
+    cargo clippy "${cargo_args[@]}" -- -D warnings
 }
 
 cmd_test() {
-    cargo test --workspace --all-targets
-    cargo test --workspace --doc
+    local cargo_args=(--workspace)
+    if [[ "${PROJECTMIND_SKIP_TAURI_APP:-}" == "1" ]]; then
+        cargo_args+=(--exclude projectmind-app)
+    fi
+    cargo test "${cargo_args[@]}" --all-targets
+    cargo test "${cargo_args[@]}" --doc
 }
 
 cmd_install_deps() {

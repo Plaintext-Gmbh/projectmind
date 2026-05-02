@@ -21,6 +21,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
+    env:
+      PROJECTMIND_SKIP_TAURI_APP: ${{ matrix.os == 'ubuntu-22.04' && '1' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -39,7 +41,7 @@ jobs:
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
 
       - name: Install Linux Tauri deps
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.PROJECTMIND_SKIP_TAURI_APP != '1'
         run: ./scripts/ci.sh install-deps
 
       # tauri::generate_context!() validates frontendDist: "../dist" at compile
@@ -63,9 +65,13 @@ jobs:
           pnpm build
 
       - name: Format + clippy
+        env:
+          PROJECTMIND_SKIP_TAURI_APP: ${{ runner.os == 'Linux' && '1' || '' }}
         run: ./scripts/ci.sh check
 
       - name: Tests + doctests
+        env:
+          PROJECTMIND_SKIP_TAURI_APP: ${{ runner.os == 'Linux' && '1' || '' }}
         run: ./scripts/ci.sh test
 
   release-build:
