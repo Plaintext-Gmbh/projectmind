@@ -34,7 +34,7 @@ use projectmind_lang_java::JavaPlugin;
 use projectmind_lang_rust::RustPlugin;
 use projectmind_plugin_api::{Class, TypeRefKind, Visibility};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 /// Application state shared across Tauri command handlers.
@@ -725,7 +725,25 @@ fn spawn_state_watcher(handle: AppHandle) {
 pub fn run() {
     tracing_subscriber::fmt::try_init().ok();
     let state = Arc::new(AppState::new());
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    // Single-instance guard: when an `open -a ProjectMind.app` (or equivalent)
+    // fires while we're already running, the second process forwards its
+    // launch args here and exits. We focus the existing window so the user
+    // sees the running instance reacting instead of a stray new window.
+    // Belt-and-suspenders with the MCP heartbeat check in `launch::ensure_gui_running`.
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(
+            |app: &AppHandle, _args: Vec<String>, _cwd: String| {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            },
+        ));
+    }
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(state)
