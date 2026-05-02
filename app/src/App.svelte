@@ -23,6 +23,8 @@
     walkthroughCursor,
     diffViewRef,
     followingMcp,
+    moduleSidebarVisible,
+    classSidebarVisible,
   } from './lib/store';
   import {
     openRepo,
@@ -948,19 +950,32 @@
       </div>
     </section>
   {:else if $viewMode === 'classes' || $viewMode === 'pdf' || $viewMode === 'image' || $viewMode === 'md' || $viewMode === 'html' || $viewMode === 'file'}
-    <section class="layout">
-      <ModuleSidebar />
-      <div
-        class="resizer"
-        use:resizable={{
-          storageKey: 'projectmind.layout.code.col1',
-          cssVar: '--code-col-1',
-          min: 140,
-          max: 480,
-          initial: 220,
-        }}
-        title="Drag to resize · double-click to reset"
-      ></div>
+    <section
+      class="layout"
+      class:modules-collapsed={!$moduleSidebarVisible}
+      class:files-collapsed={!$classSidebarVisible}
+    >
+      {#if $moduleSidebarVisible}
+        <ModuleSidebar />
+        <div
+          class="resizer"
+          use:resizable={{
+            storageKey: 'projectmind.layout.code.col1',
+            cssVar: '--code-col-1',
+            min: 140,
+            max: 480,
+            initial: 220,
+          }}
+          title="Drag to resize · double-click to reset"
+        ></div>
+      {:else}
+        <button
+          class="pane-rail"
+          on:click={() => moduleSidebarVisible.set(true)}
+          title={$t('layout.modules.show')}
+          aria-label={$t('layout.modules.show')}
+        >›</button>
+      {/if}
       {#if $viewMode === 'md'}
         <div class="files-fullspan">
           {#await lazyMarkdownIndex() then mod}
@@ -973,8 +988,21 @@
             <svelte:component this={mod.default} />
           {/await}
         </div>
+      {:else if !$classSidebarVisible}
+        <button
+          class="pane-rail"
+          on:click={() => classSidebarVisible.set(true)}
+          title={$t('layout.files.show')}
+          aria-label={$t('layout.files.show')}
+        >›</button>
       {:else}
         <aside class="sidebar">
+          <button
+            class="pane-collapse"
+            on:click={() => classSidebarVisible.set(false)}
+            title={$t('layout.files.hide')}
+            aria-label={$t('layout.files.hide')}
+          >‹</button>
           {#if $packageFilter !== null}
             <div class="path-bar">
               <span class="path-label">{$t('files.package.label')}</span>
@@ -1564,6 +1592,16 @@
     overflow: hidden;
   }
 
+  .layout.modules-collapsed {
+    grid-template-columns: 28px var(--code-col-2, 360px) 6px 1fr;
+  }
+  .layout.files-collapsed {
+    grid-template-columns: var(--code-col-1, 220px) 6px 28px 1fr;
+  }
+  .layout.modules-collapsed.files-collapsed {
+    grid-template-columns: 28px 28px 1fr;
+  }
+
   /* When the Files tab hosts MD or HTML browsers (no class-list / viewer
      split), the embedded component should span the second resizer + the
      remaining three grid tracks so the right pane is one continuous
@@ -1574,6 +1612,27 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
+  }
+  .layout.modules-collapsed .files-fullspan {
+    grid-column: 2 / -1;
+  }
+
+  .pane-rail {
+    background: var(--bg-1);
+    border: none;
+    border-right: 1px solid var(--bg-3);
+    color: var(--fg-2);
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pane-rail:hover {
+    background: var(--bg-2);
+    color: var(--accent-2);
   }
   .files-fullspan > :global(*) {
     flex: 1;
@@ -1604,6 +1663,29 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    position: relative;
+  }
+
+  .pane-collapse {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--bg-3);
+    border-radius: 4px;
+    background: var(--bg-1);
+    color: var(--fg-2);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 2;
+  }
+  .pane-collapse:hover {
+    background: var(--bg-2);
+    color: var(--accent-2);
+    border-color: var(--accent-2);
   }
 
   .path-bar {

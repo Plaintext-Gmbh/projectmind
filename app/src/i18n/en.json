@@ -126,5 +126,9 @@
   "outline.hide": "Hide outline",
   "outline.inheritance": "Inheritance",
   "gutter.show": "Show annotated gutter",
-  "gutter.hide": "Hide annotated gutter"
+  "gutter.hide": "Hide annotated gutter",
+  "layout.modules.show": "Show modules sidebar",
+  "layout.modules.hide": "Hide modules sidebar",
+  "layout.files.show": "Show files sidebar",
+  "layout.files.hide": "Hide files sidebar"
 }
