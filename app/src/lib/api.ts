@@ -188,6 +188,27 @@ export async function listChangesSince(reference: string, to?: string): Promise<
   return invoke<ChangedFile[]>('list_changes_since', { reference, to });
 }
 
+export interface FileRecency {
+  /// Repository-relative path.
+  path: string;
+  /// Seconds since UNIX epoch when the most recent touching commit was authored.
+  last_commit_secs: number;
+  /// Seconds elapsed between that commit and the time `file_recency` ran.
+  secs_ago: number;
+  /// Short (7-char) commit hash of the most recent touching commit.
+  sha: string;
+  /// First line of that commit's message.
+  summary: string;
+}
+
+/// Per-file recency index for the open repo. Drives change-map visualisations
+/// (heatmap by recency, author overlay, diff overlay, timeline river — see #63).
+/// Sorted newest-first; capped at 5,000 entries.
+export async function fileRecency(): Promise<FileRecency[]> {
+  if (!isTauriRuntime()) return api<FileRecency[]>('/api/file_recency');
+  return invoke<FileRecency[]>('file_recency');
+}
+
 export type DiagramKind = 'bean-graph' | 'package-tree' | 'folder-map';
 
 export async function showDiagram(kind: DiagramKind): Promise<string> {
