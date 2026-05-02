@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import type { ClassEntry, ClassOutline, MethodOutline, FieldOutline } from '../lib/api';
   import { classOutline as fetchOutline } from '../lib/api';
+  import { classes, selectedClass } from '../lib/store';
   import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
   import { t } from '../lib/i18n';
 
@@ -205,6 +207,50 @@
     return null;
   }
 
+  // ----- Inheritance crumb ------------------------------------------------
+
+  // Strip generic argument lists for the crumb label so we don't blow up the
+  // header on `Map<String, List<User>>`. Keeps a leading qualifier when one
+  // is present (`java.io.Serializable` stays readable).
+  function shortTypeName(raw: string): string {
+    const cut = raw.indexOf('<');
+    const head = cut === -1 ? raw : raw.slice(0, cut);
+    return head.trim();
+  }
+
+  // Resolve a parent-type name against the loaded class list. Handles three
+  // cases in order of confidence:
+  //   1. Already an FQN that matches an entry directly.
+  //   2. Same-package match against the current class.
+  //   3. Simple name with exactly one global match (unambiguous).
+  // Returns the matching FQN or null when no resolution is confident.
+  function superTypeFqn(rawName: string): string | null {
+    const head = shortTypeName(rawName);
+    const all = get(classes);
+    if (all.some((c) => c.fqn === head)) return head;
+    const simple = head.includes('.') ? head.slice(head.lastIndexOf('.') + 1) : head;
+    // Same-package match wins over global single-match: a `User` referenced
+    // from `com.example.UserService` should resolve to `com.example.User`
+    // ahead of any other `…User` elsewhere.
+    const dotIdx = klass.fqn.lastIndexOf('.');
+    const myPkg = dotIdx === -1 ? '' : klass.fqn.slice(0, dotIdx);
+    if (myPkg !== '') {
+      const samePkg = all.find((c) => c.fqn === `${myPkg}.${simple}`);
+      if (samePkg) return samePkg.fqn;
+    }
+    const matches = all.filter((c) => c.name === simple);
+    if (matches.length === 1) return matches[0].fqn;
+    return null;
+  }
+
+  function jumpToSuperType(rawName: string) {
+    const fqn = superTypeFqn(rawName);
+    if (!fqn) return;
+    const target = get(classes).find((c) => c.fqn === fqn);
+    if (target) selectedClass.set(target);
+  }
+
+
   onMount(() => {
     return () => {
       if (lastFlash !== null) clearTimeout(lastFlash);
@@ -214,7 +260,25 @@
 
 <div class="root" use:zoomAction style="font-size: {$zoom}em;">
   <div class="header">
-    <div>
+    <div class="title-block">
+      {#if outline && outline.super_types.length > 0}
+        <nav class="crumb" aria-label={$t('outline.inheritance')}>
+          {#each outline.super_types as t, i (t.kind + ':' + t.name + ':' + i)}
+            {#if i > 0}
+              <span class="crumb-sep" aria-hidden="true">·</span>
+            {/if}
+            <span class="crumb-kind {t.kind}" title={t.kind}>{t.kind === 'extends' ? '↑' : '◇'}</span>
+            <button
+              type="button"
+              class="crumb-name"
+              class:linked={superTypeFqn(t.name) !== null}
+              on:click={() => jumpToSuperType(t.name)}
+              title={superTypeFqn(t.name) ? superTypeFqn(t.name) : t.name}
+            >{shortTypeName(t.name)}</button>
+          {/each}
+          <span class="crumb-arrow" aria-hidden="true">→</span>
+        </nav>
+      {/if}
       <h2>{klass.name}</h2>
       <p class="fqn">{klass.fqn}</p>
     </div>
@@ -352,6 +416,10 @@
     flex-shrink: 0;
   }
 
+  .title-block {
+    min-width: 0;
+  }
+
   h2 {
     margin: 0;
     font-size: 18px;
@@ -363,6 +431,68 @@
     font-family: var(--mono);
     font-size: 12px;
     color: var(--fg-2);
+  }
+
+  /* ----- Inheritance crumb -------------------------------------------- */
+
+  /* Sits above the class name, one short line, monospaced so a long parent
+     list doesn't make the header dance. Resolved (linked) parents look like
+     ordinary buttons with an underline on hover; unresolved names render
+     as muted text the user can still hover for the full type. */
+  .crumb {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 0 0 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg-2);
+  }
+
+  .crumb-kind {
+    display: inline-block;
+    width: 14px;
+    text-align: center;
+    color: var(--fg-2);
+  }
+  .crumb-kind.extends {
+    color: var(--accent-2);
+  }
+  .crumb-kind.implements {
+    color: var(--component, var(--accent-2));
+  }
+
+  .crumb-name {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    color: var(--fg-2);
+    font: inherit;
+    cursor: default;
+  }
+  .crumb-name.linked {
+    color: var(--fg-1);
+    cursor: pointer;
+  }
+  .crumb-name.linked:hover {
+    color: var(--accent-2);
+    text-decoration: underline;
+  }
+  .crumb-name:focus-visible {
+    outline: 1px solid var(--accent-2);
+    outline-offset: 2px;
+  }
+
+  .crumb-sep {
+    color: var(--fg-2);
+    user-select: none;
+  }
+
+  .crumb-arrow {
+    margin-left: 2px;
+    color: var(--fg-2);
+    user-select: none;
   }
 
   .meta {

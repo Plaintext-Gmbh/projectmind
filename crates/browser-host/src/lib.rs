@@ -655,6 +655,18 @@ pub struct ClassOutline {
     pub methods: Vec<MethodOutline>,
     /// Fields, in source order.
     pub fields: Vec<FieldOutline>,
+    /// Declared parent types: `extends` then `implements` / trait-impl
+    /// targets. Drives the inheritance crumb in the GUI header.
+    pub super_types: Vec<SuperTypeOutline>,
+}
+
+/// One declared parent type for the class outline.
+#[derive(Debug, Serialize)]
+pub struct SuperTypeOutline {
+    /// Type name as written in source.
+    pub name: String,
+    /// `"extends"` or `"implements"`.
+    pub kind: String,
 }
 
 /// One method entry in the class outline.
@@ -847,6 +859,17 @@ fn build_class_outline(class: &projectmind_plugin_api::Class) -> ClassOutline {
                 is_static: f.is_static,
                 line: f.line,
                 annotations: f.annotations.iter().map(|a| a.name.clone()).collect(),
+            })
+            .collect(),
+        super_types: class
+            .super_types
+            .iter()
+            .map(|t| SuperTypeOutline {
+                name: t.name.clone(),
+                kind: match t.kind {
+                    projectmind_plugin_api::TypeRefKind::Extends => "extends".to_string(),
+                    projectmind_plugin_api::TypeRefKind::Implements => "implements".to_string(),
+                },
             })
             .collect(),
     }

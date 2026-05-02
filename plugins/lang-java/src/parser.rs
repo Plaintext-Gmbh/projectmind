@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use projectmind_plugin_api::{
-    Annotation, Class, ClassKind, Field, Method, Module, Result, Visibility,
+    Annotation, Class, ClassKind, Field, Method, Module, Result, TypeRef, TypeRefKind, Visibility,
 };
 use tree_sitter::{Node, Parser, Tree};
 
@@ -91,6 +91,7 @@ fn build_class(
         methods: Vec::new(),
         fields: Vec::new(),
         stereotypes: Vec::new(),
+        super_types: collect_super_types(node, bytes),
         extras: std::collections::BTreeMap::default(),
     };
 
@@ -154,6 +155,83 @@ fn build_fields(node: Node<'_>, bytes: &[u8]) -> Vec<Field> {
         }
     }
     out
+}
+
+/// Pull `extends` / `implements` targets off a `class_declaration`,
+/// `interface_declaration`, `enum_declaration`, or `record_declaration`.
+///
+/// Tree-sitter-java doesn't expose these as named fields — instead they live
+/// as direct children with these node kinds:
+/// - `superclass` — the `extends X` clause on classes (always at most one).
+/// - `super_interfaces` — the `implements A, B` list on classes / enums / records.
+/// - `extends_interfaces` — the `extends A, B` list on interfaces (treated as
+///   `Implements` here since it's nominal multi-inheritance, the closer
+///   semantic match to Java's runtime model than `Extends`).
+///
+/// We grab plain text per type, stripping generic argument lists so the
+/// crumb stays readable (`Map<String,User>` → `Map`).
+fn collect_super_types(node: Node<'_>, bytes: &[u8]) -> Vec<TypeRef> {
+    let mut out = Vec::new();
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "superclass" => {
+                for n in flatten_type_list(child) {
+                    out.push(TypeRef {
+                        name: simple_type_text(n, bytes),
+                        kind: TypeRefKind::Extends,
+                    });
+                }
+            }
+            // `super_interfaces` for class / enum / record `implements`.
+            // `extends_interfaces` for interface `extends` (nominal
+            // multi-inheritance — same shape as `implements`).
+            "super_interfaces" | "extends_interfaces" => {
+                for n in flatten_type_list(child) {
+                    out.push(TypeRef {
+                        name: simple_type_text(n, bytes),
+                        kind: TypeRefKind::Implements,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Walk a `superclass` / `interfaces` / `extends_interfaces` subtree and
+/// return every `type_identifier` / `scoped_type_identifier` /
+/// `generic_type` node — one per declared parent.
+fn flatten_type_list<'a>(root: Node<'a>) -> Vec<Node<'a>> {
+    let mut out = Vec::new();
+    let mut cursor = root.walk();
+    let mut stack: Vec<Node<'a>> = root.children(&mut cursor).collect();
+    while let Some(n) = stack.pop() {
+        match n.kind() {
+            "type_identifier" | "scoped_type_identifier" | "generic_type" => out.push(n),
+            _ => {
+                let mut c = n.walk();
+                stack.extend(n.children(&mut c));
+            }
+        }
+    }
+    // Tree-sitter visits left-to-right; our DFS pop order reverses that, so
+    // flip back to source order.
+    out.reverse();
+    out
+}
+
+/// Render a type node as a short readable string. For `generic_type` we
+/// keep only the head (`Map` instead of `Map<String, User>`); for scoped
+/// names we keep the full dotted path (`java.io.Serializable`).
+fn simple_type_text(node: Node<'_>, bytes: &[u8]) -> String {
+    if node.kind() == "generic_type" {
+        if let Some(head) = node.named_child(0) {
+            return node_text(head, bytes).to_string();
+        }
+    }
+    node_text(node, bytes).to_string()
 }
 
 fn collect_annotations(node: Node<'_>, bytes: &[u8]) -> Vec<Annotation> {
@@ -267,6 +345,61 @@ mod tests {
         assert_eq!(class.methods.len(), 1);
         assert_eq!(class.methods[0].name, "greet");
         assert_eq!(class.methods[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn extracts_super_types_for_class() {
+        let src = r"
+            package com.example;
+            public class UserService extends AbstractService implements Service, java.io.Serializable {}
+        ";
+        let m = parse_one(src);
+        let c = m.classes.get("com.example.UserService").unwrap();
+        let names: Vec<_> = c.super_types.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"AbstractService"));
+        assert!(names.contains(&"Service"));
+        assert!(names.contains(&"java.io.Serializable"));
+        // First entry is the extends target.
+        assert_eq!(c.super_types[0].name, "AbstractService");
+        assert_eq!(
+            c.super_types[0].kind,
+            projectmind_plugin_api::TypeRefKind::Extends
+        );
+        // Implements entries follow.
+        let impls: Vec<_> = c
+            .super_types
+            .iter()
+            .filter(|t| t.kind == projectmind_plugin_api::TypeRefKind::Implements)
+            .map(|t| t.name.as_str())
+            .collect();
+        assert_eq!(impls.len(), 2);
+    }
+
+    #[test]
+    fn extracts_super_types_for_interface() {
+        let src = r"
+            package com.example;
+            public interface MyRepo extends Repo, AutoCloseable {}
+        ";
+        let m = parse_one(src);
+        let c = m.classes.get("com.example.MyRepo").unwrap();
+        // Interface `extends` is treated as nominal multi-inheritance — same
+        // shape as `implements` so the GUI renders both with a single style.
+        assert_eq!(c.super_types.len(), 2);
+        for st in &c.super_types {
+            assert_eq!(st.kind, projectmind_plugin_api::TypeRefKind::Implements);
+        }
+    }
+
+    #[test]
+    fn strips_generic_args_from_super_types() {
+        let src = r"
+            package com.example;
+            public class Bag implements java.util.List<String> {}
+        ";
+        let m = parse_one(src);
+        let c = m.classes.get("com.example.Bag").unwrap();
+        assert_eq!(c.super_types[0].name, "java.util.List");
     }
 
     #[test]

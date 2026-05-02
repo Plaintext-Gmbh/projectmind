@@ -32,7 +32,7 @@ use projectmind_framework_lombok::LombokPlugin;
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_lang_java::JavaPlugin;
 use projectmind_lang_rust::RustPlugin;
-use projectmind_plugin_api::{Class, Visibility};
+use projectmind_plugin_api::{Class, TypeRefKind, Visibility};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_opener::OpenerExt;
@@ -125,6 +125,16 @@ pub struct ClassOutline {
     pub annotations: Vec<String>,
     pub methods: Vec<MethodOutline>,
     pub fields: Vec<FieldOutline>,
+    /// Declared parent types: `extends` targets first, then `implements` /
+    /// trait-impl targets. Drives the inheritance crumb in the GUI header.
+    pub super_types: Vec<SuperTypeOutline>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SuperTypeOutline {
+    pub name: String,
+    /// `"extends"` or `"implements"`.
+    pub kind: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -585,6 +595,17 @@ fn build_class_outline(class: &Class) -> ClassOutline {
                 is_static: f.is_static,
                 line: f.line,
                 annotations: f.annotations.iter().map(|a| a.name.clone()).collect(),
+            })
+            .collect(),
+        super_types: class
+            .super_types
+            .iter()
+            .map(|t| SuperTypeOutline {
+                name: t.name.clone(),
+                kind: match t.kind {
+                    TypeRefKind::Extends => "extends".to_string(),
+                    TypeRefKind::Implements => "implements".to_string(),
+                },
             })
             .collect(),
     }

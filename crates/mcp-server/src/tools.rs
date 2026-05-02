@@ -666,6 +666,10 @@ async fn class_outline(state: &Mutex<ServerState>, args: Value) -> DispatchResul
                 "line": f.line,
                 "annotations": f.annotations.iter().map(|a| a.name.clone()).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
+            "super_types": class.super_types.iter().map(|t| json!({
+                "name": t.name,
+                "kind": t.kind,
+            })).collect::<Vec<_>>(),
         });
         Ok(text_result(
             serde_json::to_string_pretty(&body).unwrap_or_default(),

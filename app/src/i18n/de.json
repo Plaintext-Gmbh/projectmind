@@ -109,6 +109,7 @@
   "outline.empty": "Keine Methoden oder Felder",
   "outline.show": "Übersicht einblenden",
   "outline.hide": "Übersicht ausblenden",
+  "outline.inheritance": "Vererbung",
   "gutter.show": "Annotierten Gutter einblenden",
   "gutter.hide": "Annotierten Gutter ausblenden"
 }

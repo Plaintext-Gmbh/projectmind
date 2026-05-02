@@ -109,6 +109,7 @@
   "outline.empty": "No methods or fields",
   "outline.show": "Show outline",
   "outline.hide": "Hide outline",
+  "outline.inheritance": "Inheritance",
   "gutter.show": "Show annotated gutter",
   "gutter.hide": "Hide annotated gutter"
 }

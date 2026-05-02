@@ -153,6 +153,13 @@ export interface FieldOutline {
   annotations: string[];
 }
 
+export interface SuperTypeOutline {
+  /// Type name as written in source ("AbstractEntity", "Display", "java.io.Serializable").
+  name: string;
+  /// "extends" or "implements" (Rust trait-impls land as "implements" too).
+  kind: 'extends' | 'implements';
+}
+
 export interface ClassOutline {
   fqn: string;
   name: string;
@@ -164,6 +171,9 @@ export interface ClassOutline {
   annotations: string[];
   methods: MethodOutline[];
   fields: FieldOutline[];
+  /// Declared parent types in source order — drives the inheritance crumb
+  /// rendered above the class name.
+  super_types: SuperTypeOutline[];
 }
 
 export async function classOutline(fqn: string): Promise<ClassOutline> {

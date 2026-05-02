@@ -24,7 +24,7 @@
 use std::path::{Path, PathBuf};
 
 use projectmind_plugin_api::{
-    Annotation, Class, ClassKind, Field, Method, Module, Result, Visibility,
+    Annotation, Class, ClassKind, Field, Method, Module, Result, TypeRef, TypeRefKind, Visibility,
 };
 use tree_sitter::{Node, Parser, Tree};
 
@@ -102,6 +102,7 @@ fn build_class(
         methods: Vec::new(),
         fields: collect_fields(node, bytes),
         stereotypes: Vec::new(),
+        super_types: Vec::new(),
         extras: std::collections::BTreeMap::default(),
     };
 
@@ -194,14 +195,21 @@ fn apply_impl(
         return;
     };
 
-    // `impl Trait for Type` — record the trait as an annotation on the type.
+    // `impl Trait for Type` — record the trait both as an annotation
+    // (legacy: stereotype filtering) and as a super-type (new: inheritance
+    // crumb in the GUI). Keeping the annotation path lets existing
+    // stereotype-filter UI keep working.
     if let Some(trait_node) = impl_node.child_by_field_name("trait") {
         let trait_simple = simple_type_name(trait_node, bytes);
         let raw = node_text(trait_node, bytes).to_string();
         class.annotations.push(Annotation {
-            name: trait_simple,
-            fqn: Some(raw),
+            name: trait_simple.clone(),
+            fqn: Some(raw.clone()),
             raw_args: None,
+        });
+        class.super_types.push(TypeRef {
+            name: raw,
+            kind: TypeRefKind::Implements,
         });
     }
 
