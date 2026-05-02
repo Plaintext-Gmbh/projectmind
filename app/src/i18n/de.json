@@ -87,5 +87,14 @@
   "diff.kind": "diff",
   "diff.workingTree": "Arbeitsbaum",
   "diff.computing": "Diff wird berechnet...",
-  "diff.noChanges": "Keine Änderungen."
+  "diff.noChanges": "Keine Änderungen.",
+  "keyboard.title": "Tastaturkürzel",
+  "keyboard.section.navigation": "Navigation",
+  "keyboard.section.zoom": "Zoom",
+  "keyboard.row.back": "Zurück",
+  "keyboard.row.forward": "Vorwärts",
+  "keyboard.row.help": "Diese Übersicht anzeigen",
+  "keyboard.row.close": "Schliessen",
+  "keyboard.row.zoom": "Zoom rein / raus (alle Viewer)",
+  "keyboard.hint": "Hinweis: in Eingabefeldern sind diese Shortcuts deaktiviert."
 }

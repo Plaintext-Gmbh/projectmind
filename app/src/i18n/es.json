@@ -87,5 +87,14 @@
   "diff.kind": "diff",
   "diff.workingTree": "arbol de trabajo",
   "diff.computing": "Calculando diff...",
-  "diff.noChanges": "Sin cambios."
+  "diff.noChanges": "Sin cambios.",
+  "keyboard.title": "Atajos de teclado",
+  "keyboard.section.navigation": "Navegación",
+  "keyboard.section.zoom": "Zoom",
+  "keyboard.row.back": "Atrás",
+  "keyboard.row.forward": "Adelante",
+  "keyboard.row.help": "Mostrar este resumen",
+  "keyboard.row.close": "Cerrar",
+  "keyboard.row.zoom": "Acercar / alejar (cualquier visor)",
+  "keyboard.hint": "Consejo: estos atajos se desactivan dentro de campos de texto."
 }
