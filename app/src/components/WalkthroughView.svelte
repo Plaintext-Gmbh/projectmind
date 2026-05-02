@@ -32,6 +32,7 @@
   import DiffView from './DiffView.svelte';
   import { readZoom, writeZoom, clampZoom, wheelDelta } from '../lib/shiftWheelZoom';
   import { openUrl } from '../lib/openUrl';
+  import { expandStepRefs } from '../lib/walkthroughText';
 
   export let cursorId: string;
   export let cursorStep: number;
@@ -298,9 +299,12 @@
     }
   }
 
-  // Render markdown narration to HTML once per step.
+  // Render markdown narration to HTML once per step. The narration is
+  // pre-processed to expand `[step:N]` and `[step:N|label]` shortcuts
+  // into plain markdown links pointing at `pm:step:<N-1>` — the existing
+  // pm-link click handler below picks them up.
   $: narrationHtml = step?.narration
-    ? marked.parse(step.narration, { gfm: true, breaks: false })
+    ? marked.parse(expandStepRefs(step.narration), { gfm: true, breaks: false })
     : '';
 
   // Keyboard shortcuts: ←/→ to navigate.
@@ -336,13 +340,16 @@
   }
 
   /// Click-handler for `<a>` tags inside the narration body. The LLM may
-  /// embed three kinds of links in its markdown:
+  /// embed several kinds of links in its markdown:
   ///
   ///   - `https://…` / `http://…` / `mailto:…` → open in system browser
   ///   - `#anchor` → leave the browser default in place (smooth scroll)
   ///   - `pm:class:com.example.Foo` → open the class viewer
   ///   - `pm:file:/abs/path/Foo.java` (optionally `#L10-L20`) → open file
   ///   - `pm:diff:refA..refB` → open diff viewer
+  ///   - `pm:step:N` (0-based) → jump to another step in this tour. Easier
+  ///     to author via the `[step:N]` and `[step:N|label]` markdown
+  ///     shortcuts (see `lib/walkthroughText.ts`).
   ///
   /// Anything else is preventDefaulted (no accidental navigation away from
   /// the app shell) and logged to the console.
@@ -407,6 +414,16 @@
         diffViewRef.set({ reference: spec, to: null });
       }
       viewMode.set('diff');
+      return;
+    }
+    if (rest.startsWith('step:') || rest.startsWith('step/')) {
+      const idx = Number.parseInt(rest.slice(5), 10);
+      if (Number.isFinite(idx)) {
+        // `goTo` clamps to [0, total-1], so we can pass even out-of-range
+        // values without an explicit guard. Keeps the narration robust to
+        // typos.
+        void goTo(idx);
+      }
       return;
     }
     console.warn('walkthrough: unrecognised pm: link', href);
