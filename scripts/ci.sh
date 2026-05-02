@@ -176,8 +176,8 @@ cmd_app_package() {
     fi
 
     # Tauri scatters bundle artefacts across format-specific subdirs
-    # (bundle/dmg/, bundle/macos/, bundle/deb/, bundle/appimage/, bundle/msi/,
-    # bundle/nsis/). Pick whatever distributable formats actually got produced
+    # (bundle/dmg/, bundle/macos/, bundle/deb/, bundle/rpm/, bundle/appimage/,
+    # bundle/msi/, bundle/nsis/). Pick whatever distributable formats actually got produced
     # and pack them plus LICENSE + README into one archive. This keeps the
     # workflow simple: ONE artefact per target, asset_suffix telling Mac/Linux/Win
     # apart.
@@ -186,7 +186,8 @@ cmd_app_package() {
         bundles+=("$f")
     done < <(find "$bundle_dir" -type f \
         \( -name "*.dmg" -o -name "*.app.tar.gz" -o -name "*.deb" \
-           -o -name "*.AppImage" -o -name "*.msi" -o -name "*.exe" \) \
+           -o -name "*.rpm" -o -name "*.AppImage" \
+           -o -name "*.msi" -o -name "*.exe" \) \
         2>/dev/null | sort)
 
     if [[ ${#bundles[@]} -eq 0 ]]; then
@@ -199,7 +200,9 @@ cmd_app_package() {
     # Build a flat archive: every bundle artefact at the archive root.
     local args=()
     for f in "${bundles[@]}"; do
-        args+=( -C "$(dirname "$f")" "$(basename "$f")" )
+        local dir
+        dir="$(cd "$(dirname "$f")" && pwd)"
+        args+=( -C "$dir" "$(basename "$f")" )
     done
     tar czf "$archive" "${args[@]}" -C "$ROOT_DIR" LICENSE README.md
     sha256 "$archive" > "$archive.sha256"
