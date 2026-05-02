@@ -171,6 +171,10 @@ struct HostState {
     engine: Engine,
     repo: Option<Repository>,
     repo_root: Option<PathBuf>,
+    /// Per-repo annotation store. (Re-)opened by `open_repo_locked` when
+    /// the active repo changes; `None` otherwise. Same shape as the
+    /// Tauri side.
+    annotations: Option<projectmind_core::annotations::JsonAnnotationStore>,
 }
 
 impl HostState {
@@ -184,6 +188,7 @@ impl HostState {
             engine,
             repo: None,
             repo_root: None,
+            annotations: None,
         }
     }
 }
@@ -416,6 +421,52 @@ fn route_api(
             let repo = repo(&guard)?;
             Ok(serde_json::to_value(git::file_recency(&repo.root)?)?)
         }
+        ("GET", "/api/list_annotations") => {
+            use projectmind_plugin_api::storage::AnnotationStore;
+            let store = guard
+                .annotations
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("no repository open"))?;
+            let recs = match query.get("file") {
+                Some(f) => store.list(f),
+                None => store.all(),
+            }
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            Ok(serde_json::to_value(recs)?)
+        }
+        ("POST", "/api/add_annotation") => {
+            use projectmind_plugin_api::storage::{AnnotationRecord, AnnotationStore};
+            let input: AnnotationInput = serde_json::from_slice(body)?;
+            let store = guard
+                .annotations
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("no repository open"))?;
+            let record = AnnotationRecord {
+                id: 0,
+                file: input.file,
+                line_from: input.line_from,
+                line_to: input.line_to,
+                label: input.label,
+                link: input.link,
+                extras: serde_json::Map::default(),
+            };
+            let id = store
+                .add(record)
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            Ok(json!({ "id": id }))
+        }
+        ("POST", "/api/remove_annotation") => {
+            use projectmind_plugin_api::storage::AnnotationStore;
+            let input: RemoveAnnotationInput = serde_json::from_slice(body)?;
+            let store = guard
+                .annotations
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("no repository open"))?;
+            store
+                .remove(input.id)
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            Ok(json!({ "ok": true }))
+        }
         ("GET", "/api/show_diagram") => {
             let kind = required(query, "kind")?;
             let repo = repo(&guard)?;
@@ -559,6 +610,24 @@ struct FeedbackArgs {
 struct StepArgs {
     id: String,
     step: u32,
+}
+
+/// Body of `POST /api/add_annotation`. Mirrors the Tauri-side
+/// `AnnotationInput`. Caller-supplied id is ignored — the store
+/// allocates a fresh one.
+#[derive(Deserialize)]
+struct AnnotationInput {
+    file: String,
+    line_from: u32,
+    line_to: u32,
+    label: String,
+    #[serde(default)]
+    link: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RemoveAnnotationInput {
+    id: u64,
 }
 
 /// Public summary of an opened repository.
@@ -742,6 +811,13 @@ fn open_repo_locked(state: &mut HostState, path: &Path) -> anyhow::Result<RepoSu
         tabs,
     };
     state.repo_root = Some(repo.root.clone());
+    state.annotations = match projectmind_core::annotations::JsonAnnotationStore::open(&repo.root) {
+        Ok(store) => Some(store),
+        Err(err) => {
+            tracing::warn!(error = %err, "failed to open annotations store");
+            None
+        }
+    };
     state::write(UiState {
         repo_root: Some(repo.root.clone()),
         view: ViewIntent::default(),

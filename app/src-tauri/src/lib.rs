@@ -42,6 +42,11 @@ use tauri_plugin_opener::OpenerExt;
 pub struct AppState {
     pub engine: Engine,
     pub repo: RwLock<Option<Repository>>,
+    /// Per-repo annotation store. Lazily created when `open_repo` lands;
+    /// reset to `None` when a different repo is opened. Read-mostly so
+    /// list / all queries never block adds, but mutations briefly take
+    /// a write lock.
+    pub annotations: RwLock<Option<projectmind_core::annotations::JsonAnnotationStore>>,
 }
 
 impl AppState {
@@ -54,6 +59,7 @@ impl AppState {
         Self {
             engine,
             repo: RwLock::new(None),
+            annotations: RwLock::new(None),
         }
     }
 }
@@ -191,6 +197,18 @@ fn open_repo(path: String, state: State<'_, Arc<AppState>>) -> Result<RepoSummar
     };
     let root = repo.root.clone();
     *state.repo.write() = Some(repo);
+    // (Re-)open the per-repo annotation store. A failure to load is
+    // surfaced to logs but doesn't fail the open — the GUI just won't
+    // have annotation features for this repo.
+    match projectmind_core::annotations::JsonAnnotationStore::open(&root) {
+        Ok(store) => {
+            *state.annotations.write() = Some(store);
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "failed to open annotations store; continuing without one");
+            *state.annotations.write() = None;
+        }
+    }
     // Publish so the MCP server (and any other consumer) sees what we just opened.
     // Preserve the existing view intent when the repo path is unchanged — this
     // happens when applyState() loads the repo in response to an MCP-driven
@@ -341,6 +359,64 @@ fn show_diagram(kind: String, state: State<'_, Arc<AppState>>) -> Result<String,
         "inheritance-tree" => Ok(diagram::render_inheritance_tree(repo)),
         other => Err(format!("unknown diagram kind: {other}")),
     }
+}
+
+#[derive(Debug, Serialize, serde::Deserialize)]
+pub struct AnnotationInput {
+    pub file: String,
+    pub line_from: u32,
+    pub line_to: u32,
+    pub label: String,
+    #[serde(default)]
+    pub link: Option<String>,
+}
+
+#[tauri::command]
+fn list_annotations(
+    file: Option<String>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<projectmind_plugin_api::storage::AnnotationRecord>, String> {
+    use projectmind_plugin_api::storage::AnnotationStore;
+    let guard = state.annotations.read();
+    let store = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    match file {
+        Some(f) => store.list(&f).map_err(|e| e.to_string()),
+        None => store.all().map_err(|e| e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn add_annotation(
+    annotation: AnnotationInput,
+    state: State<'_, Arc<AppState>>,
+) -> Result<u64, String> {
+    use projectmind_plugin_api::storage::{AnnotationRecord, AnnotationStore};
+    let mut guard = state.annotations.write();
+    let store = guard
+        .as_mut()
+        .ok_or_else(|| "no repository open".to_string())?;
+    let record = AnnotationRecord {
+        id: 0,
+        file: annotation.file,
+        line_from: annotation.line_from,
+        line_to: annotation.line_to,
+        label: annotation.label,
+        link: annotation.link,
+        extras: serde_json::Map::default(),
+    };
+    store.add(record).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_annotation(id: u64, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    use projectmind_plugin_api::storage::AnnotationStore;
+    let mut guard = state.annotations.write();
+    let store = guard
+        .as_mut()
+        .ok_or_else(|| "no repository open".to_string())?;
+    store.remove(id).map_err(|e| e.to_string())
 }
 
 /// Read an arbitrary file as UTF-8 text. Used by the file viewer for `view_file`
@@ -737,6 +813,9 @@ pub fn run() {
             class_outline,
             list_changes_since,
             file_recency,
+            list_annotations,
+            add_annotation,
+            remove_annotation,
             show_diagram,
             show_diff,
             read_file_text,

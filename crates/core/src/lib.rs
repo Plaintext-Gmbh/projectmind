@@ -12,6 +12,7 @@
 
 #![warn(missing_docs)]
 
+pub mod annotations;
 pub mod cargo;
 pub mod diagram;
 pub mod engine;
