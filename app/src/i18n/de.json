@@ -104,6 +104,7 @@
   "mcp.toast.file": "MCP hat Datei geöffnet",
   "mcp.toast.class": "MCP hat Klasse geöffnet",
   "mcp.toast.view": "MCP hat Ansicht gewechselt",
+  "mcp.toast.walkthrough": "MCP hat Tour gestartet",
   "mcp.toast.stop": "MCP-Sync stoppen",
   "outline.title": "Übersicht",
   "outline.methods": "Methoden",
