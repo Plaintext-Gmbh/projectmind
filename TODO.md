@@ -112,13 +112,13 @@ require touching frontend code.
 ## Distribution (recently shipped)
 
 ### ~~Cross-platform local + GitHub release pipeline~~ ✅ done
-`./build dist` produces a distributable bundle for the host platform (Mac
-universal app + dmg, Linux .deb/.AppImage, Windows .msi/.exe) without
-GitHub Actions. The release workflow has separate `mcp` and `app` jobs
-that build for macOS / Linux / Windows. `scripts/install.{sh,ps1}` are
-one-shot installers that fetch the right asset from GitHub Releases and
-drop binaries in standard locations; the README has a `curl … | sh` and
-PowerShell `iwr | iex` quickstart.
+`./build` is now a small local helper for development, CI checks, MCP
+smoke builds and host app bundles. Version bumps, tags and published
+release artefacts live in GitHub Actions via Auto-Release. The release
+workflow has separate `mcp` and `app` jobs for macOS / Linux / Windows.
+`scripts/install.{sh,ps1}` are one-shot installers that fetch the right
+asset from GitHub Releases and drop binaries in standard locations; the
+README has a `curl … | sh` and PowerShell `iwr | iex` quickstart.
 
 ## Notes
 

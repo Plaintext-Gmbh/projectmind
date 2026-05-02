@@ -211,30 +211,32 @@ The agent will pick the right tool calls from the list above.
 
 The latest release on the
 [Releases page](https://github.com/Plaintext-Gmbh/projectmind/releases/latest)
-ships `projectmind-mcp` for **Linux x86_64** and **macOS arm64** (each as
-a `.tar.gz` plus a `.sha256`). macOS x86_64 is built when a runner is
-available. New releases are produced by either pushing a `v*.*.*` tag
-or running the **Auto-Release** workflow manually from the Actions tab
-(it bumps the version, opens a PR, merges, tags, and publishes in one
-shot).
+ships `projectmind-mcp` and desktop app bundles where the GitHub runners
+can build them. New releases are produced by the **Auto-Release** workflow
+from the Actions tab; it bumps the version, opens a PR, merges, tags, and
+publishes in one shot.
 
 ## Tests / development
 
-The same commands CI runs are wrapped in `scripts/ci.sh`:
+For day-to-day work, use the small `./build` helper:
 
 ```bash
-./scripts/ci.sh check    # cargo fmt --check + cargo clippy
-./scripts/ci.sh test     # cargo test --workspace --all-targets + --doc
-./scripts/ci.sh all      # check + test
+./build dev      # Tauri app with hot reload
+./build check    # cargo fmt --check + cargo clippy
+./build test     # cargo test --workspace --all-targets + doctests
+./build ci       # check + test
+./build mcp      # release-build and smoke-test projectmind-mcp
+./build app      # desktop app bundle for this machine
+./build dist     # app bundle plus tar.gz + sha256 package
 ```
 
-If you'd rather invoke cargo directly:
+The lower-level CI wrapper is still available when you need exactly the
+workflow commands:
 
 ```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --all-targets
-cargo test --workspace --doc
+./scripts/ci.sh check
+./scripts/ci.sh test
+./scripts/ci.sh all
 ```
 
 CI runs on **Ubuntu 22.04** and **macOS 14** for every push and pull request, plus a Linux release-build smoke test.
