@@ -98,5 +98,9 @@
   "keyboard.row.zoom": "Zoom rein / raus (alle Viewer)",
   "keyboard.hint": "Hinweis: in Eingabefeldern sind diese Shortcuts deaktiviert.",
   "welcome.recent": "Zuletzt geöffnet",
-  "welcome.forget": "Aus Liste entfernen"
+  "welcome.forget": "Aus Liste entfernen",
+  "mcp.toast.file": "MCP hat Datei geöffnet",
+  "mcp.toast.class": "MCP hat Klasse geöffnet",
+  "mcp.toast.view": "MCP hat Ansicht gewechselt",
+  "mcp.toast.stop": "MCP-Sync stoppen"
 }

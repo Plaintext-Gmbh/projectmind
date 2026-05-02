@@ -98,5 +98,9 @@
   "keyboard.row.zoom": "Zoom avanti / indietro (qualsiasi viewer)",
   "keyboard.hint": "Suggerimento: queste scorciatoie sono disabilitate nei campi di testo.",
   "welcome.recent": "Aperti di recente",
-  "welcome.forget": "Rimuovi dalla lista"
+  "welcome.forget": "Rimuovi dalla lista",
+  "mcp.toast.file": "MCP ha aperto un file",
+  "mcp.toast.class": "MCP ha aperto una classe",
+  "mcp.toast.view": "MCP ha cambiato vista",
+  "mcp.toast.stop": "Interrompi sincronizzazione MCP"
 }
