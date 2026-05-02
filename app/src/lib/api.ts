@@ -223,6 +223,61 @@ export async function fileRecency(): Promise<FileRecency[]> {
   return invoke<FileRecency[]>('file_recency');
 }
 
+/// One persisted user annotation. Mirrors `AnnotationRecord` on the Rust
+/// side; lines are 1-based and inclusive on both ends.
+export interface AnnotationRecord {
+  id: number;
+  /// Repository-relative path, forward-slash separators.
+  file: string;
+  line_from: number;
+  line_to: number;
+  /// Short label (e.g. ticket id, "TODO: simplify", reviewer note).
+  label: string;
+  /// Optional external link the user wants the marker to jump to.
+  link: string | null;
+  /// Free-form metadata reserved for future plugins / integrations.
+  extras: Record<string, unknown>;
+}
+
+/// Payload for adding a new annotation. The store assigns the id; any
+/// caller-supplied id is ignored.
+export interface AnnotationInput {
+  file: string;
+  line_from: number;
+  line_to: number;
+  label: string;
+  link?: string | null;
+}
+
+/// Fetch annotations for the open repo. Pass a repo-relative `file` to
+/// scope the response to one file; omit it for every annotation in the
+/// repo.
+export async function listAnnotations(file?: string): Promise<AnnotationRecord[]> {
+  if (!isTauriRuntime()) {
+    return api<AnnotationRecord[]>(`/api/list_annotations${query({ file })}`);
+  }
+  return invoke<AnnotationRecord[]>('list_annotations', { file });
+}
+
+/// Add an annotation. Returns the id the store allocated.
+export async function addAnnotation(annotation: AnnotationInput): Promise<number> {
+  if (!isTauriRuntime()) {
+    const result = await post<{ id: number }>('/api/add_annotation', annotation);
+    return result.id;
+  }
+  return invoke<number>('add_annotation', { annotation });
+}
+
+/// Remove an annotation by id. Idempotent: removing an unknown id succeeds
+/// silently.
+export async function removeAnnotation(id: number): Promise<void> {
+  if (!isTauriRuntime()) {
+    await post<{ ok: boolean }>('/api/remove_annotation', { id });
+    return;
+  }
+  await invoke('remove_annotation', { id });
+}
+
 export type DiagramKind = 'bean-graph' | 'package-tree' | 'folder-map' | 'inheritance-tree';
 
 export async function showDiagram(kind: DiagramKind): Promise<string> {
