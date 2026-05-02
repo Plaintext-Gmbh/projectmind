@@ -7,17 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-02
+
+The first release that bundles the Phase-1 UI work that had been sitting
+on an unmerged local branch — folder maps, drag-and-drop, walkthrough
+sync, lazy-load perf — plus the Phase-2 draw.io embed and the multi-
+language i18n that went in via Codex.
+
 ### Added
 
+- **LAN browser host** (`crates/browser-host/`) — optional
+  `open_browser_repo` / `browser_status` / `stop_browser` MCP tools spin
+  up a token-protected HTTP server that serves the SPA from any LAN-
+  reachable client. Self-contained crate; not wired into the desktop
+  shell.
+- **Folder-map diagram** — third diagram kind alongside bean-graph and
+  package-tree, with hierarchy / solar / top-down layouts.
+- **PDF + image files in the module sidebar** — module sidebar +
+  class-list aggregate non-source files; click jumps straight to a
+  PDF viewer with shift+wheel zoom + pan, or an image viewer.
+- **Walkthrough sync** — bidirectional MCP↔GUI sync of walkthrough
+  cursor, per-view zoom, and code-link interception inside the tour.
+- **Plugin-contributed diagram registry** — the Diagrams tab now lists
+  whatever the active framework / language plugins contributed.
+- **Drag-and-drop** — drop any file in the Tauri shell to open its
+  parent directory as a repo, with the file already selected.
+- **Files tab** absorbs the Markdown + HTML browsers — no more separate
+  "Classes" wording when a repo has no parsed classes.
 - **draw.io viewer** (`app/src/components/DrawIoView.svelte`) — `.drawio`
   files open in an embedded `diagrams.net` iframe via the viewer's
-  `proto=json` channel. The Svelte component reads the file content via
-  `read_file_text`, the iframe announces `init` over `postMessage`, and
-  the host responds with `{action: "load", xml}`. Wired into App.svelte
-  next to the existing PDF / image / Markdown viewers, lazy-loaded so
-  non-drawio sessions don't pay for the iframe scaffolding. The same
-  shift+wheel zoom helper as the other viewers makes the diagram easy
-  to read on Hi-DPI displays.
+  `proto=json` channel. Lazy-loaded next to the PDF / image / Markdown
+  viewers; reuses `createShiftWheelZoom` for zoom parity.
+- **5-language i18n** — DE / EN / FR / IT / ES via Codex's
+  `app/src/lib/i18n.ts`, with a header-level language toggle.
+- **Tauri desktop bundles in the release** — Linux x86_64, macOS
+  universal, and Windows x86_64 `.dmg / .deb / .AppImage / .msi`
+  alongside the MCP server tarballs.
+- **Cross-platform install scripts** — `scripts/install.sh` (POSIX) and
+  `scripts/install.ps1` (Windows) pick the right pre-built bundle.
+
+### Changed
+
+- **Markdown index** gets index zoom, TOC arrow-navigation, macOS
+  shift-wheel axis-swap fix.
+- **Shift+wheel zoom** consolidated into one helper
+  (`app/src/lib/shiftWheelZoom.ts`) and applied to every viewer
+  (FileView / ClassViewer / DiffView / HtmlIndex / MarkdownIndex /
+  WalkthroughView / DrawIoView).
+- **Mermaid + marked** lazy-loaded as their own chunks via Vite
+  `manualChunks` — the welcome screen + Files tab no longer pay the
+  Mermaid tax.
+
+### Fixed
+
+- **PDF view** shift+wheel zoom now actually fires (an invisible
+  wheel-catcher overlay sits above the rendered PDF so wheel events
+  don't reach the canvas first).
+- **Tour** code-links no longer leave the tour pane; PDF pan inside
+  the tour scroller respects the parent zoom.
+- **Module-files store** gets re-fetched when the modules list
+  populates after `open_repo`, and aggregates across every module
+  when the filter is null.
+- **`view_file`** scoped to the currently-open repo
+  (`file_access::canonical_file_in_repo`) — matches the security
+  fix from #22 even after the cherry-picked code reverted it.
+
+### Roadmap
+
+- Phase 2 progress: draw.io embed shipped; annotation round-trip,
+  Confluence MCP bridge, and dynamic plugin loading still open.
 
 ## [0.2.0] — 2026-05-01
 
