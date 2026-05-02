@@ -223,7 +223,7 @@ export async function fileRecency(): Promise<FileRecency[]> {
   return invoke<FileRecency[]>('file_recency');
 }
 
-export type DiagramKind = 'bean-graph' | 'package-tree' | 'folder-map';
+export type DiagramKind = 'bean-graph' | 'package-tree' | 'folder-map' | 'inheritance-tree';
 
 export async function showDiagram(kind: DiagramKind): Promise<string> {
   if (!isTauriRuntime()) return api<string>(`/api/show_diagram${query({ kind })}`);

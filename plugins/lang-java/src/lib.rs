@@ -46,7 +46,11 @@ impl LanguagePlugin for JavaPlugin {
     }
 
     fn provided_diagrams(&self) -> &[&'static str] {
-        &["package-tree"]
+        // package-tree groups by Java package, inheritance-tree draws
+        // extends / implements edges. The latter is most useful for Java
+        // (deep class hierarchies) but core renders both languages with
+        // the same plumbing.
+        &["package-tree", "inheritance-tree"]
     }
 }
 

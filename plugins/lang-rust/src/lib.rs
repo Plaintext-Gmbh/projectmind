@@ -53,7 +53,11 @@ impl LanguagePlugin for RustPlugin {
     }
 
     fn provided_diagrams(&self) -> &[&'static str] {
-        &["package-tree"]
+        // Rust trait-impls already populate `super_types` (lifted from
+        // `impl Trait for X`), so the inheritance-tree renders sensibly
+        // for Rust crates too — even though there's no class hierarchy
+        // proper, "trait composition" reads the same way.
+        &["package-tree", "inheritance-tree"]
     }
 }
 

@@ -130,7 +130,7 @@
     setLanguage(codes[(idx + 1) % codes.length]);
   }
 
-  let diagramKind: 'bean-graph' | 'package-tree' | 'folder-map' = 'bean-graph';
+  let diagramKind: DiagramKind = 'bean-graph';
   let folderMapLayout: 'hierarchy' | 'solar' | 'td' = 'solar';
 
   // ----- Navigation history -------------------------------------------------
@@ -315,6 +315,7 @@
       case 'bean-graph': return $t('diagram.beanGraph');
       case 'package-tree': return $t('diagram.packageTree');
       case 'folder-map': return $t('diagram.folderMap');
+      case 'inheritance-tree': return $t('diagram.inheritanceTree');
       default: return kind; // unknown plugin-contributed diagram — show id
     }
   }
@@ -554,7 +555,8 @@
           if (
             v.diagram_kind === 'bean-graph' ||
             v.diagram_kind === 'package-tree' ||
-            v.diagram_kind === 'folder-map'
+            v.diagram_kind === 'folder-map' ||
+            v.diagram_kind === 'inheritance-tree'
           ) {
             diagramKind = v.diagram_kind;
           }

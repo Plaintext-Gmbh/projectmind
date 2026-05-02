@@ -588,6 +588,7 @@ async fn show_diagram(state: &Mutex<ServerState>, args: Value) -> DispatchResult
         "bean-graph" => Ok(text_result(diagram::render_bean_graph(repo, &spring))),
         "package-tree" => Ok(text_result(diagram::render_package_tree(repo))),
         "folder-map" => Ok(text_result(diagram::render_folder_map(repo))),
+        "inheritance-tree" => Ok(text_result(diagram::render_inheritance_tree(repo))),
         other => Err(DispatchError::invalid_params(format!(
             "unknown diagram: {other}"
         ))),
