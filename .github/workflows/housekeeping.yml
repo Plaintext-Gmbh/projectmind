@@ -1,0 +1,63 @@
+name: Housekeeping
+
+# Manually-triggered chores. Pick a task from the dropdown:
+#
+#  * **clean-logs** — delete every completed Action run except the latest 20.
+#    Use this when the Actions tab gets noisy from failed dependabot runs or
+#    abandoned PR check histories. Currently-running and queued runs are left
+#    alone.
+#
+# Add new tasks by extending the `task` choice and the corresponding step.
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 'Task to run'
+        required: true
+        default: 'clean-logs'
+        type: choice
+        options:
+          - clean-logs
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  run:
+    name: ${{ inputs.task }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: clean-logs — keep latest 20 runs
+        if: inputs.task == 'clean-logs'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Collect every completed run id (paginated). Sort by created_at
+          # descending so the slice past the keep-window is what we delete.
+          mapfile -t ids < <(
+            gh api --paginate "repos/${REPO}/actions/runs?per_page=100" \
+              --jq '.workflow_runs
+                    | map(select(.conclusion != null))
+                    | sort_by(.created_at) | reverse
+                    | .[].id'
+          )
+          total=${#ids[@]}
+          keep=20
+          if [ "$total" -le "$keep" ]; then
+            echo "::notice::only ${total} completed runs — nothing to delete"
+            exit 0
+          fi
+          deleted=0
+          failed=0
+          for id in "${ids[@]:$keep}"; do
+            if gh api -X DELETE "repos/${REPO}/actions/runs/${id}" 2>/dev/null; then
+              deleted=$((deleted + 1))
+            else
+              failed=$((failed + 1))
+            fi
+          done
+          echo "::notice::deleted=${deleted} failed=${failed} kept=${keep} total_before=${total}"
