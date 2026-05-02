@@ -2,7 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { get } from 'svelte/store';
   import mermaid from 'mermaid';
-  import { showDiagram } from '../lib/api';
+  import { showDiagram, fileRecency } from '../lib/api';
   import type { ClassEntry, DiagramKind } from '../lib/api';
   import {
     classes,
@@ -12,6 +12,7 @@
     packageFilter,
     stereotypeFilter,
     viewMode,
+    repo,
   } from '../lib/store';
 
   export let kind: DiagramKind;
@@ -39,6 +40,71 @@
   let svg = '';
   let loading = false;
   let error: string | null = null;
+
+  // ----- Folder-map colour-by state ----------------------------------------
+
+  // 'structure' (default) keeps the existing per-kind palette; 'recency'
+  // tints each leaf by how long ago it was last touched, with folders
+  // inheriting the most-recent timestamp from their descendants. Persisted
+  // per-browser so the user's preference sticks across sessions.
+  type ColorBy = 'structure' | 'recency';
+  const COLOR_BY_KEY = 'projectmind.diagram.folderMap.colorBy';
+  let colorBy: ColorBy = readColorByPref();
+  // path (forward-slash, repo-relative) → seconds since the most recent
+  // commit that touched the file. `null` means "haven't loaded yet";
+  // an empty Map means "loaded, repo has no git history".
+  let recencyByPath: Map<string, number> | null = null;
+  let recencyForRoot: string | null = null;
+  let recencyError: string | null = null;
+
+  function readColorByPref(): ColorBy {
+    try {
+      const v = localStorage.getItem(COLOR_BY_KEY);
+      return v === 'recency' ? 'recency' : 'structure';
+    } catch {
+      return 'structure';
+    }
+  }
+
+  function writeColorByPref(v: ColorBy) {
+    try {
+      localStorage.setItem(COLOR_BY_KEY, v);
+    } catch {
+      // ignore
+    }
+  }
+
+  function setColorBy(v: ColorBy) {
+    if (colorBy === v) return;
+    colorBy = v;
+    writeColorByPref(v);
+    void render(kind, folderLayout);
+  }
+
+  /// Fetch the recency index for the current repo if we haven't already, then
+  /// re-render. Best-effort: failure is non-fatal, the heatmap just stays in
+  /// "structure" mode and surfaces the error in the toolbar.
+  async function ensureRecencyForCurrentRepo(): Promise<void> {
+    const root = $repo?.root ?? null;
+    if (!root) return;
+    if (recencyForRoot === root && recencyByPath !== null) return;
+    try {
+      const items = await fileRecency();
+      const map = new Map<string, number>();
+      for (const item of items) {
+        // Normalise Windows backslashes so the lookup matches the
+        // forward-slash ids the folder-map renderer uses.
+        map.set(item.path.replace(/\\/g, '/'), item.secs_ago);
+      }
+      recencyByPath = map;
+      recencyForRoot = root;
+      recencyError = null;
+    } catch (err) {
+      recencyError = String(err);
+      recencyByPath = new Map();
+      recencyForRoot = root;
+    }
+  }
 
   // viewport state
   let scale = 1;
@@ -125,6 +191,12 @@
     loading = true;
     error = null;
     try {
+      // Fire the recency fetch in parallel with showDiagram. Only blocks
+      // when the user is actually looking at the folder map in recency
+      // mode — otherwise the result is unused but cached for next time.
+      const wantRecency = k === 'folder-map' && colorBy === 'recency';
+      if (wantRecency) await ensureRecencyForCurrentRepo();
+
       const payload = await showDiagram(k);
       if (k === 'folder-map') {
         mermaidSource = '';
@@ -166,9 +238,92 @@
   }
 
   function renderFolderMap(map: FolderMap, layout: 'hierarchy' | 'solar' | 'td'): string {
+    // Build the fill resolver once per render, then capture it in the
+    // closure. The three layout renderers below all consult `currentFillFor`
+    // when emitting circles.
+    currentFillFor = buildFillFor(map);
     if (layout === 'solar') return renderFolderSolar(map);
     if (layout === 'td') return renderFolderTopDown(map);
     return renderFolderHierarchy(map);
+  }
+
+  // Captured by each layout renderer so we don't have to thread the resolver
+  // through three function signatures. Reset at the top of every render.
+  let currentFillFor: ((id: string, kind: 'root' | 'folder' | 'file') => string | null) =
+    () => null;
+
+  function buildFillFor(
+    map: FolderMap,
+  ): (id: string, kind: 'root' | 'folder' | 'file') => string | null {
+    if (colorBy !== 'recency' || !recencyByPath || recencyByPath.size === 0) {
+      return () => null;
+    }
+    // Aggregate per id: a folder is "as recent as" its most-recent
+    // descendant (min secs_ago over the subtree). One DFS pass populates
+    // both leaf and folder entries.
+    const byParent = new Map<string, FolderMapNode[]>();
+    for (const n of map.nodes) {
+      if (!n.parent) continue;
+      const arr = byParent.get(n.parent) ?? [];
+      arr.push(n);
+      byParent.set(n.parent, arr);
+    }
+    const recencyById = new Map<string, number>();
+    const recency = recencyByPath;
+    function visit(node: FolderMapNode): number | null {
+      if (node.kind === 'file') {
+        const s = recency.get(node.id);
+        if (s !== undefined) recencyById.set(node.id, s);
+        return s ?? null;
+      }
+      const children = byParent.get(node.id) ?? [];
+      let best: number | null = null;
+      for (const c of children) {
+        const v = visit(c);
+        if (v !== null && (best === null || v < best)) best = v;
+      }
+      if (best !== null) recencyById.set(node.id, best);
+      return best;
+    }
+    const rootNode = map.nodes.find((n) => n.parent === null);
+    if (rootNode) visit(rootNode);
+
+    return (id) => {
+      const s = recencyById.get(id);
+      if (s === undefined) return null;
+      return recencyColor(s);
+    };
+  }
+
+  /// Map a "seconds since last commit" value onto an HSL colour. Brand-new
+  /// edits land in hot orange (~hue 18°); a year-old file decays into cool
+  /// grey-blue (~hue 220°). Saturation drops with age so old code recedes
+  /// visually. Log scale because the interesting structure lives in the
+  /// last few days vs. the long tail of stale files.
+  function recencyColor(secs_ago: number): string {
+    const day = 86_400;
+    const safe = Math.max(secs_ago, 60);
+    // t=0 at <1 day, t≈0.33 at ~10 days, t≈0.67 at ~year, t≥1 at 1000+ days.
+    const t = Math.min(1, Math.max(0, Math.log10(safe / day) / 3));
+    const hue = 18 + (220 - 18) * t;
+    const sat = 78 - 50 * t;
+    const light = 52 - 18 * t;
+    return `hsl(${hue.toFixed(0)}, ${sat.toFixed(0)}%, ${light.toFixed(0)}%)`;
+  }
+
+  /// Helper used by all three folder-map layouts. Returns the `<circle>`
+  /// element string — without a fill override when colour-by is `structure`,
+  /// with an inline fill (and a tinted, lighter stroke) in `recency` mode.
+  function circleSvg(
+    n: FolderMapNode,
+    r: number,
+  ): string {
+    const fill = currentFillFor(n.id, n.kind);
+    if (fill === null) {
+      return `<circle r="${r}"/>`;
+    }
+    // Stroke is the same hue ~25% lighter so the rim still reads.
+    return `<circle r="${r}" style="fill:${fill};stroke:color-mix(in srgb, ${fill} 60%, white);"/>`;
   }
 
   function renderFolderHierarchy(map: FolderMap): string {
@@ -208,7 +363,7 @@
       .map(({ n, x, y }) => {
         const radius = nodeRadius(n);
         return `<g class="node ${n.kind}" data-path="${esc(n.path)}" data-kind="${n.kind}" transform="translate(${x} ${y})">
-          <circle r="${radius}"/>
+          ${circleSvg(n, radius)}
           <text x="${radius + 8}" y="-3">${esc(shortLabel(n.label, 22))}</text>
           <text x="${radius + 8}" y="13" class="meta">${n.kind} · ${n.weight}</text>
         </g>`;
@@ -258,7 +413,7 @@
       .map(({ n, x, y }) => {
         const radius = nodeRadius(n);
         return `<g class="node ${n.kind}" data-path="${esc(n.path)}" data-kind="${n.kind}" transform="translate(${x} ${y})">
-          <circle r="${radius}"/>
+          ${circleSvg(n, radius)}
           <text y="${radius + 17}" text-anchor="middle">${esc(shortLabel(n.label, 14))}</text>
           <text y="${radius + 31}" class="meta" text-anchor="middle">${n.kind} · ${n.weight}</text>
         </g>`;
@@ -306,7 +461,7 @@
       .map(({ n, x, y }) => {
         const r = nodeRadius(n);
         return `<g class="node ${n.kind}" data-path="${esc(n.path)}" data-kind="${n.kind}" transform="translate(${x} ${y})">
-          <circle r="${r}"/>
+          ${circleSvg(n, r)}
           <text y="${r + 16}" text-anchor="middle">${esc(shortLabel(n.label, 18))}</text>
         </g>`;
       })
@@ -467,6 +622,22 @@
         on:click={() => (folderLayout = 'td')}
         title="Top-down layout"
       >TD</button>
+      <span class="divider"></span>
+      <button
+        class:active={colorBy === 'structure'}
+        on:click={() => setColorBy('structure')}
+        title="Colour by node kind (default)"
+        aria-pressed={colorBy === 'structure'}
+      >S</button>
+      <button
+        class:active={colorBy === 'recency'}
+        on:click={() => setColorBy('recency')}
+        title="Colour by last commit recency — recent files glow, stale ones recede"
+        aria-pressed={colorBy === 'recency'}
+      >R</button>
+      {#if colorBy === 'recency' && recencyError}
+        <span class="hint" style="color: var(--error);" title={recencyError}>⚠ git unavailable</span>
+      {/if}
     {/if}
     <span class="zoom-readout">{Math.round(scale * 100)}%</span>
     <span class="hint">Drag to pan • Shift + wheel to zoom</span>
