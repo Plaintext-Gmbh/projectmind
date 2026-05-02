@@ -12,6 +12,8 @@
   "nav.followingMcp": "folgt MCP",
   "nav.followingMcpTitle": "Die GUI folgt einem MCP-View-Intent. Klicke auf einen Tab, um manuell weiterzumachen.",
   "nav.openRepo": "Repo öffnen",
+  "nav.back": "Zurück",
+  "nav.forward": "Vorwärts",
   "theme.toggle": "Theme umschalten",
   "theme.switchTo": "Zu {mode} wechseln",
   "theme.light": "hell",

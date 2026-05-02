@@ -50,6 +50,9 @@
   import { resizable } from './lib/resizable';
   import { t, language, setLanguage, languages } from './lib/i18n';
   import { loadComponent } from './lib/lazyLoad';
+  import * as nav from './lib/navigation';
+  import { canBack as nav_canBack, canForward as nav_canForward } from './lib/navigation';
+  import type { HistoryEntry, DiagramKind, FolderMapLayout } from './lib/navigation';
   const lazyDiagramView = () =>
     loadComponent('DiagramView', () => import('./components/DiagramView.svelte'));
   const lazyFileView = () =>
@@ -124,6 +127,144 @@
 
   let diagramKind: 'bean-graph' | 'package-tree' | 'folder-map' = 'bean-graph';
   let folderMapLayout: 'hierarchy' | 'solar' | 'td' = 'solar';
+
+  // ----- Navigation history -------------------------------------------------
+  // Browser-style ←/→ over every user-visible state change. The reactive
+  // block at the bottom builds a HistoryEntry from the current store + local
+  // values; `nav.push` is a no-op when the new entry equals the current one,
+  // so re-clicking the same class doesn't pollute the back trail.
+  function buildHistoryEntry(): HistoryEntry {
+    const fv = get(fileView);
+    const wt = get(walkthroughCursor);
+    const dv = get(diffViewRef);
+    const cls = get(selectedClass);
+    return {
+      viewMode: get(viewMode),
+      selectedFqn: cls?.fqn ?? null,
+      filePath: fv?.path ?? null,
+      fileAnchor: fv?.anchor ?? null,
+      diagramKind: diagramKind as DiagramKind,
+      folderMapLayout: folderMapLayout as FolderMapLayout,
+      diffRef: dv?.reference ?? null,
+      diffTo: dv?.to ?? null,
+      walkthroughId: wt?.id ?? null,
+      walkthroughStep: wt?.step ?? null,
+      moduleFilter: get(moduleFilter),
+      packageFilter: get(packageFilter),
+      stereotypeFilter: get(stereotypeFilter),
+      fileKindFilter: get(fileKindFilter),
+      label: describeEntry(get(viewMode), cls?.fqn ?? null, fv?.path ?? null, diagramKind),
+      ts: Date.now(),
+    };
+  }
+
+  function describeEntry(
+    mode: string,
+    fqn: string | null,
+    file: string | null,
+    diagram: string,
+  ): string {
+    if (mode === 'classes' && fqn) return `Class · ${fqn.split('.').pop()}`;
+    if (mode === 'classes') return 'Code';
+    if (mode === 'diagram') return `Diagram · ${diagram}`;
+    if (mode === 'md') return 'Markdown';
+    if (mode === 'html') return 'HTML';
+    if (mode === 'file' && file) return `File · ${file.split('/').pop()}`;
+    if (mode === 'pdf' && file) return `PDF · ${file.split('/').pop()}`;
+    if (mode === 'image' && file) return `Image · ${file.split('/').pop()}`;
+    if (mode === 'diff') return 'Diff';
+    if (mode === 'walkthrough') return 'Walkthrough';
+    return mode;
+  }
+
+  function applyHistoryEntry(entry: HistoryEntry) {
+    // Order matters: filters first, then containers, then leaves —
+    // mirrors how the GUI normally settles on a new view.
+    moduleFilter.set(entry.moduleFilter);
+    packageFilter.set(entry.packageFilter);
+    stereotypeFilter.set(entry.stereotypeFilter);
+    fileKindFilter.set(entry.fileKindFilter);
+    if (entry.diagramKind) diagramKind = entry.diagramKind;
+    if (entry.folderMapLayout) folderMapLayout = entry.folderMapLayout;
+    if (entry.selectedFqn) {
+      const match = get(classes).find((c) => c.fqn === entry.selectedFqn);
+      selectedClass.set(match ?? null);
+    } else {
+      selectedClass.set(null);
+    }
+    if (entry.filePath) {
+      fileView.update((cur) => ({
+        path: entry.filePath as string,
+        anchor: entry.fileAnchor ?? null,
+        nonce: (cur?.nonce ?? 0) + 1,
+      }));
+    } else {
+      fileView.set(null);
+    }
+    if (entry.walkthroughId !== null && entry.walkthroughStep !== null) {
+      walkthroughCursor.update((cur) => ({
+        id: entry.walkthroughId as string,
+        step: entry.walkthroughStep as number,
+        nonce: (cur?.nonce ?? 0) + 1,
+      }));
+    } else {
+      walkthroughCursor.set(null);
+    }
+    if (entry.diffRef) {
+      diffViewRef.set({ reference: entry.diffRef, to: entry.diffTo });
+    } else {
+      diffViewRef.set(null);
+    }
+    viewMode.set(entry.viewMode as never);
+  }
+
+  function navBack() {
+    nav.back(applyHistoryEntry);
+  }
+
+  function navForward() {
+    nav.forward(applyHistoryEntry);
+  }
+
+  function onNavKey(ev: KeyboardEvent) {
+    // Don't steal navigation keys while the user is typing in a field.
+    const t = ev.target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    // ⌘[ / ⌘] (macOS) and Alt+← / Alt+→ (everywhere else) match Finder + browser conventions.
+    const cmdOrAlt = ev.metaKey || ev.altKey;
+    if (cmdOrAlt && (ev.key === '[' || ev.key === 'ArrowLeft')) {
+      ev.preventDefault();
+      navBack();
+    } else if (cmdOrAlt && (ev.key === ']' || ev.key === 'ArrowRight')) {
+      ev.preventDefault();
+      navForward();
+    }
+  }
+  // Reactive auto-push: any time a navigation-relevant store / local var
+  // changes, snapshot it and hand it to nav.push. nav.push de-dupes against
+  // the current entry, so re-clicks of the same class don't fill the back
+  // trail with copies of the same state. nav.push is also a no-op while a
+  // back/forward navigation is being applied.
+  $: void _autoPushOnNavChange(
+    $viewMode,
+    $selectedClass,
+    $fileView,
+    diagramKind,
+    folderMapLayout,
+    $diffViewRef,
+    $walkthroughCursor,
+    $moduleFilter,
+    $packageFilter,
+    $stereotypeFilter,
+    $fileKindFilter,
+    $repo,
+  );
+  function _autoPushOnNavChange(..._: unknown[]) {
+    if (!get(repo)) return; // no repo → nothing to remember
+    nav.push(buildHistoryEntry());
+  }
+  // ----- end navigation history ---------------------------------------------
+
   let classSource = '';
   let classMeta: { file: string; line_start: number; line_end: number } | null = null;
   let loading = false;
@@ -541,6 +682,7 @@
   }
 
   onMount(async () => {
+    window.addEventListener('keydown', onNavKey);
     browserMode = !isTauriRuntime();
     if (browserMode && !browserToken()) {
       browserAuthorized = false;
@@ -606,6 +748,7 @@
   });
 
   onDestroy(() => {
+    window.removeEventListener('keydown', onNavKey);
     unlistenState?.();
     unlistenDragDrop?.();
     if (statePoll) clearInterval(statePoll);
@@ -622,6 +765,22 @@
 <main>
   <header>
     <div class="brand">
+      <div class="nav-history" role="group" aria-label="Navigation history">
+        <button
+          class="nav-arrow"
+          disabled={!$nav_canBack || !$repo}
+          on:click={navBack}
+          title="{$t('nav.back') || 'Back'} (⌘[ / Alt+←)"
+          aria-label={$t('nav.back') || 'Back'}
+        >‹</button>
+        <button
+          class="nav-arrow"
+          disabled={!$nav_canForward || !$repo}
+          on:click={navForward}
+          title="{$t('nav.forward') || 'Forward'} (⌘] / Alt+→)"
+          aria-label={$t('nav.forward') || 'Forward'}
+        >›</button>
+      </div>
       <img class="logo" src="/logo.png" alt="ProjectMind" />
       <span class="title">ProjectMind</span>
       {#if $repo}
@@ -978,6 +1137,38 @@
     display: flex;
     align-items: center;
     gap: 12px;
+  }
+
+  .nav-history {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-right: 4px;
+  }
+  .nav-arrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: transparent;
+    border: 1px solid var(--bg-3);
+    border-radius: 6px;
+    color: var(--fg-1);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 80ms ease, color 80ms ease, border-color 80ms ease;
+  }
+  .nav-arrow:hover:not(:disabled) {
+    background: var(--bg-2);
+    border-color: var(--accent-2);
+    color: var(--accent-2);
+  }
+  .nav-arrow:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
   }
 
   .logo {

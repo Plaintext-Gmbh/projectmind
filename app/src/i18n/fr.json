@@ -12,6 +12,8 @@
   "nav.followingMcp": "suit MCP",
   "nav.followingMcpTitle": "L'interface suit une intention MCP. Cliquez sur un onglet pour continuer manuellement.",
   "nav.openRepo": "Ouvrir un depot",
+  "nav.back": "Retour",
+  "nav.forward": "Suivant",
   "theme.toggle": "Basculer le theme",
   "theme.switchTo": "Passer au mode {mode}",
   "theme.light": "clair",
