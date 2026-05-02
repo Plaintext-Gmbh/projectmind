@@ -62,6 +62,19 @@ try {
         Invoke-WebRequest -UseBasicParsing -Uri "$DownloadBase/$asset" -OutFile (Join-Path $Tmp $asset)
     }
 
+    # Soft variant: returns $true on success, $false on 404/transport error
+    # without raising. Used for the desktop app archive, which is allowed to
+    # be missing on releases that ship MCP-only.
+    function Download-Optional($asset) {
+        Info "downloading $asset"
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri "$DownloadBase/$asset" -OutFile (Join-Path $Tmp $asset) -ErrorAction Stop
+            return $true
+        } catch {
+            return $false
+        }
+    }
+
     # ---- MCP server ------------------------------------------------------
     if ($env:PM_NO_MCP -ne '1') {
         $McpArchive = "projectmind-mcp-$McpSuffix.tar.gz"
@@ -86,7 +99,16 @@ try {
     # ---- Desktop app -----------------------------------------------------
     if ($env:PM_NO_APP -ne '1') {
         $AppArchive = "projectmind-app-$AppSuffix.tar.gz"
-        Download $AppArchive
+        if (-not (Download-Optional $AppArchive)) {
+            Warn "no desktop app bundle in this release ($Tag) — skipping."
+            Warn "  the MCP server above is fully functional on its own; re-run"
+            Warn "  this script once a release that ships $AppArchive is out, or"
+            Warn "  set `$env:PM_NO_APP='1' to silence this warning."
+            $env:PM_NO_APP = '1'
+        }
+    }
+
+    if ($env:PM_NO_APP -ne '1') {
         $AppExtract = Join-Path $Tmp 'app'
         New-Item -ItemType Directory -Force -Path $AppExtract | Out-Null
         tar -xzf (Join-Path $Tmp $AppArchive) -C $AppExtract

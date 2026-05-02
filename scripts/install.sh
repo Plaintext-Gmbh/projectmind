@@ -106,6 +106,18 @@ download() {
     esac
 }
 
+# Soft variant: returns non-zero on 404 / fetch error instead of bringing the
+# whole script down (set -e). Used for the desktop-app archive, which is
+# allowed to be missing on releases that ship MCP-only.
+download_optional() {
+    asset="$1"
+    info "downloading $asset"
+    case "$DL" in
+        curl*) curl -fsSL --fail "${DOWNLOAD_BASE}/${asset}" -o "${TMP}/${asset}" 2>/dev/null ;;
+        wget*) wget -q "${DOWNLOAD_BASE}/${asset}" -O "${TMP}/${asset}" 2>/dev/null ;;
+    esac
+}
+
 # ---- MCP server ------------------------------------------------------------
 if [ "${PM_NO_MCP:-0}" != "1" ]; then
     MCP_ARCHIVE="projectmind-mcp-${MCP_SUFFIX}.tar.gz"
@@ -123,7 +135,17 @@ fi
 # ---- Desktop app -----------------------------------------------------------
 if [ "${PM_NO_APP:-0}" != "1" ]; then
     APP_ARCHIVE="projectmind-app-${APP_SUFFIX}.tar.gz"
-    download "$APP_ARCHIVE"
+    if ! download_optional "$APP_ARCHIVE"; then
+        warn "no desktop app bundle in this release ($TAG) — skipping."
+        warn "  • the MCP server above is fully functional on its own."
+        warn "  • re-run this script once a release that ships ${APP_ARCHIVE} is out,"
+        warn "    or pass PM_NO_APP=1 to silence this warning, or build the Tauri shell"
+        warn "    from source (see https://github.com/${REPO}#build-the-tauri-shell-optional-gui)."
+        PM_NO_APP=1
+    fi
+fi
+
+if [ "${PM_NO_APP:-0}" != "1" ]; then
     mkdir -p "${TMP}/app"
     tar xzf "${TMP}/${APP_ARCHIVE}" -C "${TMP}/app"
     case "$OS" in
