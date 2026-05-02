@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **draw.io viewer** (`app/src/components/DrawIoView.svelte`) — `.drawio`
+  files open in an embedded `diagrams.net` iframe via the viewer's
+  `proto=json` channel. The Svelte component reads the file content via
+  `read_file_text`, the iframe announces `init` over `postMessage`, and
+  the host responds with `{action: "load", xml}`. Wired into App.svelte
+  next to the existing PDF / image / Markdown viewers, lazy-loaded so
+  non-drawio sessions don't pay for the iframe scaffolding. The same
+  shift+wheel zoom helper as the other viewers makes the diagram easy
+  to read on Hi-DPI displays.
+
 ## [0.2.0] — 2026-05-01
 
 First release after the rebrand from `plaintext-ide` to **ProjectMind**

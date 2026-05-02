@@ -54,6 +54,8 @@
     loadComponent('DiagramView', () => import('./components/DiagramView.svelte'));
   const lazyFileView = () =>
     loadComponent('FileView', () => import('./components/FileView.svelte'));
+  const lazyDrawIoView = () =>
+    loadComponent('DrawIoView', () => import('./components/DrawIoView.svelte'));
   const lazyHtmlIndex = () =>
     loadComponent('HtmlIndex', () => import('./components/HtmlIndex.svelte'));
   const lazyMarkdownIndex = () =>
@@ -883,6 +885,10 @@
             <PdfView path={$fileView.path} />
           {:else if $viewMode === 'image' && $fileView}
             <ImageView path={$fileView.path} />
+          {:else if $viewMode === 'file' && $fileView && /\.drawio$/i.test($fileView.path ?? '')}
+            {#await lazyDrawIoView() then mod}
+              <svelte:component this={mod.default} path={$fileView.path} />
+            {/await}
           {:else if $viewMode === 'file' && $fileView}
             {#await lazyFileView() then mod}
               <svelte:component
