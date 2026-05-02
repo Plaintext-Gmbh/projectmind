@@ -77,17 +77,20 @@ jobs:
       matrix:
         include:
           # macOS universal binary covers both Apple Silicon and Intel in
-          # one bundle so we only need one Mac runner. The `extra_targets`
-          # hack tells rust-toolchain to add the second arch.
+          # one bundle so we only need one Mac runner. Tauri accepts
+          # `universal-apple-darwin`, while rustup needs the two real arch
+          # targets.
           - os: macos-14
             target: universal-apple-darwin
-            extra_targets: x86_64-apple-darwin
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
             asset_suffix: macos-universal
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+            rust_targets: x86_64-unknown-linux-gnu
             asset_suffix: linux-x86_64
           - os: windows-2022
             target: x86_64-pc-windows-msvc
+            rust_targets: x86_64-pc-windows-msvc
             asset_suffix: windows-x86_64
 
     steps:
@@ -97,7 +100,7 @@ jobs:
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
           toolchain: stable
-          targets: ${{ matrix.target }}${{ matrix.extra_targets && format(',{0}', matrix.extra_targets) || '' }}
+          targets: ${{ matrix.rust_targets }}
 
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
