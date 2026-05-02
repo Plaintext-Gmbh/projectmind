@@ -348,6 +348,172 @@ fn rel_id(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+/// Render a repository-wide inheritance tree as Mermaid.
+///
+/// Every parsed class with at least one declared parent (`extends` or
+/// `implements` / Rust trait-impl) becomes a node; an arrow goes from the
+/// **parent** down to the **child** so visually higher = more abstract.
+/// Classes are grouped by module subgraph; a parent type that resolves to
+/// a class in the same repo becomes an internal node, otherwise a "ghost"
+/// node is created in a synthetic `__external__` subgraph so external
+/// supertypes (Object, Serializable, …) are still drawn but visually
+/// separated.
+///
+/// Mermaid `flowchart TD` because vertical reads more naturally as
+/// inheritance — pulling parents to the top and children to the bottom
+/// matches how Java / Rust developers already mentally lay it out.
+pub fn render_inheritance_tree(repo: &Repository) -> String {
+    use projectmind_plugin_api::TypeRefKind;
+
+    // Build a quick lookup of every parsed class by both its FQN and its
+    // simple name, plus the module it lives in. Same-FQN match wins;
+    // simple-name fallback uses the most-popular candidate when ambiguous
+    // (rarely happens in well-organised repos but keeps the renderer
+    // robust for samples). Resolution mirrors the GUI's crumb logic so
+    // clicks land on the same class the user expects.
+    let mut by_fqn: BTreeMap<String, &str> = BTreeMap::new();
+    let mut by_simple: BTreeMap<String, Vec<(&str, &str)>> = BTreeMap::new(); // simple → (fqn, module_id)
+    for module in repo.modules.values() {
+        for class in module.classes.values() {
+            by_fqn.insert(class.fqn.clone(), module.id.as_str());
+            by_simple
+                .entry(class.name.clone())
+                .or_default()
+                .push((class.fqn.as_str(), module.id.as_str()));
+        }
+    }
+
+    // Collect every edge first so we can decide which classes are involved
+    // (only emit nodes for classes that participate, plus their resolved or
+    // ghost parents). Edge tuple: (parent_id, child_fqn, kind).
+    let mut edges: Vec<(String, String, TypeRefKind)> = Vec::new();
+    let mut external_parents: BTreeMap<String, String> = BTreeMap::new(); // ghost-id → label
+    for module in repo.modules.values() {
+        for class in module.classes.values() {
+            if class.super_types.is_empty() {
+                continue;
+            }
+            for parent in &class.super_types {
+                let head = parent.name.split('<').next().unwrap_or(&parent.name).trim();
+                let resolved = resolve_super(head, &class.fqn, &by_fqn, &by_simple);
+                let parent_id = match resolved {
+                    Some(fqn) => fqn,
+                    None => {
+                        let ghost = format!("__ext::{head}");
+                        external_parents
+                            .entry(ghost.clone())
+                            .or_insert_with(|| head.to_string());
+                        ghost
+                    }
+                };
+                edges.push((parent_id, class.fqn.clone(), parent.kind));
+            }
+        }
+    }
+
+    let mut out = String::from("flowchart TD\n");
+    if edges.is_empty() {
+        out.push_str("    empty[(no inheritance edges)]\n");
+        return out;
+    }
+
+    // Bucket internal classes by module so we can group them in subgraphs.
+    // Only include classes that actually appear in an edge (parent or
+    // child) — keeps the diagram focused on connected types.
+    let mut participating: BTreeMap<String, BTreeMap<String, &projectmind_plugin_api::Class>> =
+        BTreeMap::new();
+    let mut on_edge: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for (p, c, _) in &edges {
+        on_edge.insert(p.clone());
+        on_edge.insert(c.clone());
+    }
+    for module in repo.modules.values() {
+        for class in module.classes.values() {
+            if !on_edge.contains(&class.fqn) {
+                continue;
+            }
+            participating
+                .entry(module.id.clone())
+                .or_default()
+                .insert(class.fqn.clone(), class);
+        }
+    }
+
+    for (mod_id, classes) in &participating {
+        let mod_node = escape_id(mod_id);
+        let _ = writeln!(out, "    subgraph {mod_node}[\"{}\"]", short_module(mod_id));
+        for class in classes.values() {
+            let id = escape_id(&class.fqn);
+            let _ = writeln!(out, "        {id}[\"{}\"]", class.name);
+        }
+        out.push_str("    end\n");
+    }
+
+    if !external_parents.is_empty() {
+        out.push_str("    subgraph __ext__[\"external supertypes\"]\n");
+        for (id, label) in &external_parents {
+            let node = escape_id(id);
+            let _ = writeln!(out, "        {node}([\"{label}\"])");
+        }
+        out.push_str("    end\n");
+    }
+
+    // Edges. extends → solid arrow; implements → dotted arrow. Mermaid
+    // syntax: `A --> B` solid, `A -.-> B` dotted.
+    for (parent, child, kind) in &edges {
+        let p = escape_id(parent);
+        let c = escape_id(child);
+        let arrow = match kind {
+            TypeRefKind::Extends => "-->",
+            TypeRefKind::Implements => "-.->",
+        };
+        let _ = writeln!(out, "    {p} {arrow} {c}");
+    }
+
+    // Per-class drill-down clicks (parent ghosts are not clickable).
+    for class_fqn in on_edge.iter().filter(|f| by_fqn.contains_key(*f)) {
+        let id = escape_id(class_fqn);
+        let mod_id = by_fqn.get(class_fqn).copied().unwrap_or("");
+        let _ = writeln!(
+            out,
+            "    click {id} call onNodeClick(\"class\",\"{m}\",\"{f}\")",
+            m = js_arg(mod_id),
+            f = js_arg(class_fqn)
+        );
+    }
+
+    out
+}
+
+/// Resolve a parent-type name to a class FQN, mirroring the GUI's three-tier
+/// strategy: exact FQN, same-package match, then unique-by-simple-name.
+/// Returns the resolved FQN as a String or None if no confident match.
+fn resolve_super(
+    name: &str,
+    child_fqn: &str,
+    by_fqn: &BTreeMap<String, &str>,
+    by_simple: &BTreeMap<String, Vec<(&str, &str)>>,
+) -> Option<String> {
+    if by_fqn.contains_key(name) {
+        return Some(name.to_string());
+    }
+    let simple = name.rsplit('.').next().unwrap_or(name);
+    // Same-package wins over a global single match.
+    if let Some(dot) = child_fqn.rfind('.') {
+        let pkg = &child_fqn[..dot];
+        let candidate = format!("{pkg}.{simple}");
+        if by_fqn.contains_key(&candidate) {
+            return Some(candidate);
+        }
+    }
+    if let Some(matches) = by_simple.get(simple) {
+        if matches.len() == 1 {
+            return Some(matches[0].0.to_string());
+        }
+    }
+    None
+}
+
 /// Escape a string for use as a Mermaid `click ... call fn("...")` argument.
 /// Mermaid passes the literal text to JS, so we prevent quote/backslash injection.
 fn js_arg(raw: &str) -> String {
@@ -536,5 +702,113 @@ mod tests {
             out.contains("call onNodeClick(\"class\",\"g:m1\",\"a.A\")"),
             "missing class click in:\n{out}"
         );
+    }
+
+    fn class_with_supers(
+        fqn: &str,
+        supers: &[(projectmind_plugin_api::TypeRefKind, &str)],
+    ) -> Class {
+        Class {
+            fqn: fqn.into(),
+            name: simple_name(fqn).into(),
+            super_types: supers
+                .iter()
+                .map(|(kind, name)| projectmind_plugin_api::TypeRef {
+                    name: (*name).to_string(),
+                    kind: *kind,
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn inheritance_tree_resolves_internal_supers_and_uses_arrow_styles() {
+        use projectmind_plugin_api::TypeRefKind::{Extends, Implements};
+        let mut repo = Repository::default();
+        let mut m1 = Module {
+            id: "g:m1".into(),
+            ..Default::default()
+        };
+        // a.User extends a.AbstractEntity, implements common.Marker.
+        // AbstractEntity is in the same module, Marker isn't parsed → ghost.
+        m1.classes.insert(
+            "a.AbstractEntity".into(),
+            class_with_supers("a.AbstractEntity", &[]),
+        );
+        m1.classes.insert(
+            "a.User".into(),
+            class_with_supers(
+                "a.User",
+                &[(Extends, "AbstractEntity"), (Implements, "Marker")],
+            ),
+        );
+        repo.insert_module(m1);
+
+        let out = render_inheritance_tree(&repo);
+        // Internal extends: solid arrow from parent → child.
+        assert!(
+            out.contains("a_AbstractEntity --> a_User"),
+            "expected solid extends arrow:\n{out}"
+        );
+        // External implements: dotted arrow from ghost → child. The ghost
+        // node label must be the bare type name (no `__ext::` prefix
+        // visible to the user); the id post-escape is `__ext__Marker`.
+        assert!(
+            out.contains("\"Marker\""),
+            "expected external label:\n{out}"
+        );
+        assert!(
+            out.contains("__ext__Marker -.-> a_User"),
+            "expected dotted implements arrow from external:\n{out}"
+        );
+        // Module subgraph + external subgraph both present.
+        assert!(
+            out.contains("subgraph __ext__"),
+            "external subgraph missing:\n{out}"
+        );
+    }
+
+    #[test]
+    fn inheritance_tree_drops_classes_with_no_super_types() {
+        // A class with no parents and no children shouldn't appear in the
+        // diagram — it has nothing to say. Keeps the picture focused on
+        // hierarchies the user can actually navigate.
+        let mut repo = Repository::default();
+        let mut m1 = Module {
+            id: "g:m1".into(),
+            ..Default::default()
+        };
+        m1.classes
+            .insert("a.Loner".into(), class_with_supers("a.Loner", &[]));
+        repo.insert_module(m1);
+        let out = render_inheritance_tree(&repo);
+        assert!(
+            out.contains("no inheritance edges"),
+            "expected empty marker:\n{out}"
+        );
+    }
+
+    #[test]
+    fn inheritance_tree_strips_generic_args_from_super_names() {
+        use projectmind_plugin_api::TypeRefKind::Implements;
+        let mut repo = Repository::default();
+        let mut m1 = Module {
+            id: "g:m1".into(),
+            ..Default::default()
+        };
+        m1.classes.insert(
+            "a.Bag".into(),
+            class_with_supers("a.Bag", &[(Implements, "List<String>")]),
+        );
+        repo.insert_module(m1);
+        let out = render_inheritance_tree(&repo);
+        // Generic args stripped: ghost label is bare `List`, id is the
+        // post-escape `__ext__List` (escape_id replaces `:` with `_`).
+        assert!(
+            out.contains("__ext__List"),
+            "expected stripped generic ghost id:\n{out}"
+        );
+        assert!(out.contains("\"List\""), "expected bare label:\n{out}");
     }
 }

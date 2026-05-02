@@ -33,6 +33,8 @@
   "app.noView": "No view selected. Pick Code, Diagrams or HTML above, or send an MCP intent.",
   "diagram.beanGraph": "Bean graph",
   "diagram.packageTree": "Package tree",
+  "diagram.folderMap": "Folder map",
+  "diagram.inheritanceTree": "Inheritance tree",
   "diagram.drillHint": "Click a node to drill into it",
   "diagram.zoomIn": "Zoom in",
   "diagram.zoomOut": "Zoom out",

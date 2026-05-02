@@ -33,6 +33,8 @@
   "app.noView": "Keine Ansicht ausgewählt. Wähle oben Code, Diagramme oder HTML oder sende einen MCP-Intent.",
   "diagram.beanGraph": "Bean-Graph",
   "diagram.packageTree": "Paketbaum",
+  "diagram.folderMap": "Ordner-Karte",
+  "diagram.inheritanceTree": "Vererbungsbaum",
   "diagram.drillHint": "Klicke auf einen Knoten, um hineinzuspringen",
   "diagram.zoomIn": "Vergrößern",
   "diagram.zoomOut": "Verkleinern",

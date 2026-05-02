@@ -424,6 +424,7 @@ fn route_api(
                 "bean-graph" => Ok(json!(diagram::render_bean_graph(repo, &spring))),
                 "package-tree" => Ok(json!(diagram::render_package_tree(repo))),
                 "folder-map" => Ok(json!(diagram::render_folder_map(repo))),
+                "inheritance-tree" => Ok(json!(diagram::render_inheritance_tree(repo))),
                 other => anyhow::bail!("unknown diagram kind: {other}"),
             }
         }
