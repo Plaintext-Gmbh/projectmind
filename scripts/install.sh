@@ -50,7 +50,7 @@ case "$OS" in
         APP_SUFFIX="macos-universal"
         case "$ARCH" in
             arm64)  MCP_SUFFIX="macos-arm64" ;;
-            x86_64) MCP_SUFFIX="macos-x86_64" ;;
+            x86_64) MCP_SUFFIX="" ;;
             *) fail "unsupported macOS arch: $ARCH" ;;
         esac
         ;;
@@ -120,6 +120,7 @@ download_optional() {
 
 # ---- MCP server ------------------------------------------------------------
 if [ "${PM_NO_MCP:-0}" != "1" ]; then
+    [ -n "${MCP_SUFFIX:-}" ] || fail "macOS Intel MCP builds are no longer published — set PM_NO_MCP=1 to install only the universal desktop app"
     MCP_ARCHIVE="projectmind-mcp-${MCP_SUFFIX}.tar.gz"
     download "$MCP_ARCHIVE"
     mkdir -p "${TMP}/mcp"
