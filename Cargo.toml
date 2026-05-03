@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.4"
+version = "0.3.5"
 edition = "2021"
 license = "MPL-2.0"
 repository = "https://github.com/Plaintext-Gmbh/projectmind"
@@ -49,8 +49,8 @@ struct_field_names = "allow"
 ignored_unit_patterns = "allow"
 
 [workspace.dependencies]
-projectmind-plugin-api = { path = "crates/plugin-api", version = "0.3.4" }
-projectmind-core       = { path = "crates/core",       version = "0.3.4" }
+projectmind-plugin-api = { path = "crates/plugin-api", version = "0.3.5" }
+projectmind-core       = { path = "crates/core",       version = "0.3.5" }
 
 # General
 anyhow      = "1.0"
