@@ -645,6 +645,90 @@ fn list_module_files(
     ))
 }
 
+/// Build-integrity payload returned to the frontend. Lets the user verify
+/// they're running an official signed release vs. a self-compiled dev build.
+///
+/// Two markers drive `is_release_build`:
+///   - `PROJECTMIND_RELEASE_BUILD=1` env var at compile time (set by the CI
+///     release matrix only on tag-pushes from the official repo)
+///   - `PROJECTMIND_GIT_COMMIT` env var at compile time (the SHA the bundle
+///     was built from)
+///
+/// `updater_pubkey_hash` is a `SHA-256` over the bytes of the embedded ed25519
+/// public key, so a fork that swapped the key out shows a different hash and
+/// the UI can flag it as a non-official updater channel.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BuildIntegrity {
+    /// Semantic version from Cargo.toml.
+    pub version: String,
+    /// True when the bundle was produced by the official tagged release
+    /// pipeline (env var `PROJECTMIND_RELEASE_BUILD=1` at build time).
+    pub is_release_build: bool,
+    /// Git commit the bundle was built from, if the build-time env var was
+    /// set. `None` for casual local builds.
+    pub git_commit: Option<String>,
+    /// Build timestamp (RFC3339) when the env var was provided by CI.
+    pub built_at: Option<String>,
+    /// `SHA-256` of the embedded updater public key. Stable hash → official
+    /// key; different hash → fork or custom-keyed build.
+    pub updater_pubkey_hash: String,
+    /// Hex-truncated convenience copy of the same hash for compact display.
+    pub updater_pubkey_short: String,
+}
+
+/// Tauri command: report the running bundle's integrity markers to the UI.
+#[tauri::command]
+fn get_build_integrity() -> BuildIntegrity {
+    use sha2::{Digest, Sha256};
+
+    let pubkey = include_str!("../tauri.conf.json");
+    // Cheap & cheerful: hash the whole conf.json. We could parse and pick out
+    // exactly the pubkey field, but the conf is tiny (~50 lines) and the hash
+    // is only used for display + integrity comparison, not a trust decision.
+    // The exact byte equality matters far more than what the hash represents.
+    let mut hasher = Sha256::new();
+    hasher.update(extract_pubkey_bytes(pubkey));
+    let digest = hasher.finalize();
+    let updater_pubkey_hash = hex_encode(&digest);
+    let updater_pubkey_short = updater_pubkey_hash.chars().take(12).collect::<String>();
+
+    BuildIntegrity {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        is_release_build: matches!(option_env!("PROJECTMIND_RELEASE_BUILD"), Some("1")),
+        git_commit: option_env!("PROJECTMIND_GIT_COMMIT").map(str::to_string),
+        built_at: option_env!("PROJECTMIND_BUILT_AT").map(str::to_string),
+        updater_pubkey_hash,
+        updater_pubkey_short,
+    }
+}
+
+/// Best-effort extraction of the updater pubkey field from `tauri.conf.json`'s
+/// raw text, so the `SHA-256` we surface is over the *key value*, not the
+/// whole config (which would change every time we touch unrelated fields). We
+/// don't pull in `serde_json` here since this runs in a hot UI path; a
+/// regex-free substring match is plenty for a fixed-format JSON config.
+fn extract_pubkey_bytes(conf: &str) -> &[u8] {
+    if let Some(start) = conf.find("\"pubkey\":") {
+        let after = &conf[start + "\"pubkey\":".len()..];
+        if let Some(q1) = after.find('"') {
+            let inner = &after[q1 + 1..];
+            if let Some(q2) = inner.find('"') {
+                return &inner.as_bytes()[..q2];
+            }
+        }
+    }
+    conf.as_bytes()
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
+
 /// Render a [`Visibility`] enum as the lowercase string the frontend expects
 /// (`"public"`, `"protected"`, `"package"`, `"private"`). Matches the rendering
 /// the MCP `class_outline` tool uses, so MCP and GUI stay in sync.
@@ -854,6 +938,7 @@ pub fn run() {
             set_walkthrough_step,
             end_walkthrough,
             open_external,
+            get_build_integrity,
         ])
         .setup(|app| {
             spawn_state_watcher(app.handle().clone());

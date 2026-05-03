@@ -49,6 +49,7 @@
   import StatusBar from './components/StatusBar.svelte';
   import McpToast from './components/McpToast.svelte';
   import UpdateToast from './components/UpdateToast.svelte';
+  import BuildIntegrity from './components/BuildIntegrity.svelte';
   import { startBackgroundChecks as startUpdateChecks } from './lib/updater';
   // Heavy components — pulled in dynamically the first time the user
   // visits the matching tab. mermaid (~640 KB) and marked (~40 KB) ride
@@ -245,6 +246,7 @@
   }
 
   let kbdHelpOpen = false;
+  let integrityOpen = false;
 
   function onNavKey(ev: KeyboardEvent) {
     // Don't steal navigation keys while the user is typing in a field.
@@ -977,6 +979,12 @@
         {theme === 'dark' ? '☀' : '☾'}
       </button>
       <button
+        class="integrity-toggle"
+        on:click={() => (integrityOpen = true)}
+        title={$t('integrity.title')}
+        aria-label={$t('integrity.title')}
+      >🛡</button>
+      <button
         class="kbd-help-toggle"
         on:click={() => (kbdHelpOpen = true)}
         title="{$t('keyboard.title')} (?)"
@@ -1290,6 +1298,7 @@
   {/if}
 
   <KeyboardHelp bind:open={kbdHelpOpen} />
+  <BuildIntegrity bind:open={integrityOpen} />
   <McpToast />
   <UpdateToast />
   <StatusBar />
@@ -1628,6 +1637,14 @@
     font-family: var(--mono);
     font-size: 13px;
     font-weight: 600;
+    line-height: 1;
+  }
+
+  .integrity-toggle {
+    width: 32px;
+    padding: 6px 0;
+    text-align: center;
+    font-size: 14px;
     line-height: 1;
   }
 

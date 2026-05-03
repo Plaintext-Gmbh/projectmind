@@ -499,3 +499,21 @@ export async function currentState(): Promise<UiState | null> {
   if (!isTauriRuntime()) return api<UiState | null>('/api/current_state');
   return invoke<UiState | null>('current_state');
 }
+
+/// Build-integrity markers — surfaced via the shield button in the header.
+/// Lets the user verify whether the desktop app they are running was produced
+/// by the official tagged-release pipeline (signed bundle, embedded official
+/// updater public key) or is a self-compiled / forked build.
+export interface BuildIntegrity {
+  version: string;
+  is_release_build: boolean;
+  git_commit: string | null;
+  built_at: string | null;
+  updater_pubkey_hash: string;
+  updater_pubkey_short: string;
+}
+
+export async function getBuildIntegrity(): Promise<BuildIntegrity | null> {
+  if (!isTauriRuntime()) return null;
+  return invoke<BuildIntegrity>('get_build_integrity');
+}
