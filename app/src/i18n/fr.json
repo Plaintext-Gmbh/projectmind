@@ -125,5 +125,10 @@
   "status.followingMcpTitle": "L'interface suit un intent MCP.",
   "status.walkthroughTitle": "Mode visite",
   "layout.both.show": "Afficher les colonnes modules et fichiers",
-  "layout.both.hide": "Masquer les colonnes modules et fichiers (vue complète)"
+  "layout.both.hide": "Masquer les colonnes modules et fichiers (vue complète)",
+  "updater.available": "Mise à jour disponible : v{version}",
+  "updater.install": "Installer",
+  "updater.installing": "Installation v{version} — redémarrage…",
+  "updater.dismiss": "Ignorer",
+  "updater.error": "Échec de la mise à jour"
 }

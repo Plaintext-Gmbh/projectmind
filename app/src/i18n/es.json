@@ -125,5 +125,10 @@
   "status.followingMcpTitle": "La GUI sigue un intent de MCP.",
   "status.walkthroughTitle": "Modo walkthrough",
   "layout.both.show": "Mostrar columnas de módulos y archivos",
-  "layout.both.hide": "Ocultar columnas de módulos y archivos (vista completa)"
+  "layout.both.hide": "Ocultar columnas de módulos y archivos (vista completa)",
+  "updater.available": "Actualización disponible: v{version}",
+  "updater.install": "Instalar",
+  "updater.installing": "Instalando v{version} — reiniciando…",
+  "updater.dismiss": "Descartar",
+  "updater.error": "Error de actualización"
 }

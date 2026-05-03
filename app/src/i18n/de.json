@@ -155,5 +155,10 @@
   "status.followingMcpTitle": "Die GUI folgt einem MCP-View-Intent.",
   "status.walkthroughTitle": "Walkthrough-Modus",
   "layout.both.show": "Modul- und Datei-Spalte einblenden",
-  "layout.both.hide": "Modul- und Datei-Spalte ausblenden (Vollansicht)"
+  "layout.both.hide": "Modul- und Datei-Spalte ausblenden (Vollansicht)",
+  "updater.available": "Update verfügbar: v{version}",
+  "updater.install": "Installieren",
+  "updater.installing": "Installiere v{version} — Neustart…",
+  "updater.dismiss": "Schliessen",
+  "updater.error": "Update fehlgeschlagen"
 }

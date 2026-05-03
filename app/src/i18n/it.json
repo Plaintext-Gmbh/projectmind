@@ -125,5 +125,10 @@
   "status.followingMcpTitle": "La GUI segue un intent MCP.",
   "status.walkthroughTitle": "Modalità walkthrough",
   "layout.both.show": "Mostra colonne moduli e file",
-  "layout.both.hide": "Nascondi colonne moduli e file (vista completa)"
+  "layout.both.hide": "Nascondi colonne moduli e file (vista completa)",
+  "updater.available": "Aggiornamento disponibile: v{version}",
+  "updater.install": "Installa",
+  "updater.installing": "Installazione v{version} — riavvio…",
+  "updater.dismiss": "Ignora",
+  "updater.error": "Aggiornamento fallito"
 }

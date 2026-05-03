@@ -48,6 +48,8 @@
   import KeyboardHelp from './components/KeyboardHelp.svelte';
   import StatusBar from './components/StatusBar.svelte';
   import McpToast from './components/McpToast.svelte';
+  import UpdateToast from './components/UpdateToast.svelte';
+  import { startBackgroundChecks as startUpdateChecks } from './lib/updater';
   // Heavy components — pulled in dynamically the first time the user
   // visits the matching tab. mermaid (~640 KB) and marked (~40 KB) ride
   // along with DiagramView / FileView / WalkthroughView etc., so keeping
@@ -526,6 +528,15 @@
       fileKindFilter.set(null);
       packageFilter.set(null);
       classSource = '';
+      // A view tied to the previous repo (open file, active diff, running
+      // walkthrough) is meaningless after a repo switch — reset to the
+      // default tab so the new repo lands in a clean state instead of an
+      // orphaned viewer that points at a path the new repo doesn't have.
+      viewMode.set('classes');
+      fileView.set(null);
+      diffViewRef.set(null);
+      walkthroughCursor.set(null);
+      followingMcp.set(false);
       recents.record(summary.root, summary.classes, summary.modules);
     } catch (err) {
       if (opts.silent) {
@@ -737,6 +748,7 @@
 
   onMount(async () => {
     window.addEventListener('keydown', onNavKey);
+    startUpdateChecks();
     browserMode = !isTauriRuntime();
     if (browserMode && !browserToken()) {
       browserAuthorized = false;
@@ -1279,6 +1291,7 @@
 
   <KeyboardHelp bind:open={kbdHelpOpen} />
   <McpToast />
+  <UpdateToast />
   <StatusBar />
 </main>
 
