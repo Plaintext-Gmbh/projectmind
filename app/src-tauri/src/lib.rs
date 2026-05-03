@@ -47,6 +47,7 @@ pub struct AppState {
     /// list / all queries never block adds, but mutations briefly take
     /// a write lock.
     pub annotations: RwLock<Option<projectmind_core::annotations::JsonAnnotationStore>>,
+    pub pending_markdown_file: RwLock<Option<PathBuf>>,
 }
 
 impl AppState {
@@ -60,6 +61,7 @@ impl AppState {
             engine,
             repo: RwLock::new(None),
             annotations: RwLock::new(None),
+            pending_markdown_file: RwLock::new(None),
         }
     }
 }
@@ -83,6 +85,8 @@ pub struct RepoSummary {
     /// instead of hard-coding the bean-graph / package-tree / folder-map
     /// triple.
     pub available_diagrams: Vec<String>,
+    /// Top-level UI tabs the active plugin set contributes for this repo.
+    pub tabs: Vec<projectmind_core::TabDescriptor>,
 }
 
 /// One class entry exposed to the UI.
@@ -181,10 +185,40 @@ fn open_repo(path: String, state: State<'_, Arc<AppState>>) -> Result<RepoSummar
         .engine
         .open_repo(std::path::Path::new(&path))
         .map_err(|e| e.to_string())?;
+    Ok(open_repository(repo, &state, ViewIntent::default()))
+}
+
+/// Tauri command: open a Markdown document as a virtual repository.
+#[tauri::command]
+fn open_markdown_file(
+    path: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<RepoSummary, String> {
+    let repo = state
+        .engine
+        .open_markdown_file(std::path::Path::new(&path))
+        .map_err(|e| e.to_string())?;
+    let file = repo.root.clone();
+    Ok(open_repository(
+        repo,
+        &state,
+        ViewIntent::File {
+            path: file,
+            anchor: None,
+        },
+    ))
+}
+
+fn open_repository(
+    repo: Repository,
+    state: &State<'_, Arc<AppState>>,
+    new_view: ViewIntent,
+) -> RepoSummary {
     let markdown_count = files::list_markdown_files(&repo.root).len();
     let html_count =
         html::list_html_files(&repo.root).len() + html::find_html_snippets(&repo.root).len();
     let available_diagrams = state.engine.available_diagrams(&repo);
+    let tabs = state.engine.available_tabs(&repo);
     let summary = RepoSummary {
         root: repo.root.clone(),
         modules: repo.modules.len(),
@@ -194,13 +228,19 @@ fn open_repo(path: String, state: State<'_, Arc<AppState>>) -> Result<RepoSummar
         markdown_count,
         html_count,
         available_diagrams,
+        tabs,
     };
     let root = repo.root.clone();
     *state.repo.write() = Some(repo);
     // (Re-)open the per-repo annotation store. A failure to load is
     // surfaced to logs but doesn't fail the open — the GUI just won't
     // have annotation features for this repo.
-    match projectmind_core::annotations::JsonAnnotationStore::open(&root) {
+    let annotation_root = if root.is_file() {
+        root.parent().unwrap_or(&root)
+    } else {
+        &root
+    };
+    match projectmind_core::annotations::JsonAnnotationStore::open(annotation_root) {
         Ok(store) => {
             *state.annotations.write() = Some(store);
         }
@@ -218,14 +258,15 @@ fn open_repo(path: String, state: State<'_, Arc<AppState>>) -> Result<RepoSummar
     let same_repo = prev.repo_root.as_ref() == Some(&root);
     publish_state(UiState {
         repo_root: Some(root),
-        view: if same_repo {
-            prev.view
-        } else {
-            ViewIntent::default()
-        },
+        view: if same_repo { prev.view } else { new_view },
         ..UiState::default()
     });
-    Ok(summary)
+    summary
+}
+
+#[tauri::command]
+fn pending_markdown_file(state: State<'_, Arc<AppState>>) -> Option<PathBuf> {
+    state.pending_markdown_file.write().take()
 }
 
 #[tauri::command]
@@ -574,8 +615,8 @@ fn list_markdown_files(root: String) -> Result<Vec<MarkdownFile>, String> {
     if !p.is_absolute() {
         return Err(format!("root must be absolute: {root}"));
     }
-    if !p.is_dir() {
-        return Err(format!("root is not a directory: {root}"));
+    if !p.is_dir() && !p.is_file() {
+        return Err(format!("root is not a directory or file: {root}"));
     }
     Ok(files::list_markdown_files(p))
 }
@@ -589,8 +630,8 @@ fn search_markdown(root: String, query: String, limit: usize) -> Result<Vec<Mark
     if !p.is_absolute() {
         return Err(format!("root must be absolute: {root}"));
     }
-    if !p.is_dir() {
-        return Err(format!("root is not a directory: {root}"));
+    if !p.is_dir() && !p.is_file() {
+        return Err(format!("root is not a directory or file: {root}"));
     }
     let cap = if limit == 0 { 200 } else { limit };
     Ok(files::search_markdown(p, &query, cap))
@@ -880,6 +921,25 @@ fn spawn_state_watcher(handle: AppHandle) {
     });
 }
 
+fn markdown_launch_arg(args: impl IntoIterator<Item = String>) -> Option<PathBuf> {
+    args.into_iter()
+        .map(PathBuf::from)
+        .find(|p| is_markdown_path(p))
+}
+
+fn is_markdown_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown" | "mdx"))
+}
+
+fn queue_markdown_file(app: &AppHandle, state: &Arc<AppState>, path: PathBuf) {
+    *state.pending_markdown_file.write() = Some(path.clone());
+    if let Err(err) = app.emit("open-markdown-file", path) {
+        tracing::debug!(error = %err, "failed to emit open-markdown-file");
+    }
+}
+
 /// Tauri entrypoint.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -893,16 +953,21 @@ pub fn run() {
     // Belt-and-suspenders with the MCP heartbeat check in `launch::ensure_gui_running`.
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     {
+        let single_state = Arc::clone(&state);
         builder = builder.plugin(tauri_plugin_single_instance::init(
-            |app: &AppHandle, _args: Vec<String>, _cwd: String| {
+            move |app: &AppHandle, args: Vec<String>, _cwd: String| {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.unminimize();
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
+                if let Some(path) = markdown_launch_arg(args) {
+                    queue_markdown_file(app, &single_state, path);
+                }
             },
         ));
     }
+    let setup_state = Arc::clone(&state);
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -911,6 +976,8 @@ pub fn run() {
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             open_repo,
+            open_markdown_file,
+            pending_markdown_file,
             list_classes,
             list_modules,
             show_class,
@@ -938,7 +1005,10 @@ pub fn run() {
             open_external,
             get_build_integrity,
         ])
-        .setup(|app| {
+        .setup(move |app| {
+            if let Some(path) = markdown_launch_arg(std::env::args()) {
+                queue_markdown_file(app.handle(), &setup_state, path);
+            }
             spawn_state_watcher(app.handle().clone());
             spawn_heartbeat();
             Ok(())

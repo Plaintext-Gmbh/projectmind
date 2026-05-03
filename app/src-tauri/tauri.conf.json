@@ -41,6 +41,16 @@
     "longDescription": "A read-only architecture browser that pairs with LLM coding agents via MCP.",
     "externalBin": [
       "binaries/projectmind-mcp"
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["md", "markdown", "mdx"],
+        "name": "Markdown document",
+        "description": "Markdown document",
+        "role": "Viewer",
+        "rank": "Default",
+        "mimeType": "text/markdown"
+      }
     ]
   },
   "plugins": {
