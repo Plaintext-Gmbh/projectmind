@@ -1076,14 +1076,15 @@
             <svelte:component this={mod.default} />
           {/await}
         </div>
-      {:else if !$classSidebarVisible}
-        <button
-          class="pane-rail"
-          on:click={() => classSidebarVisible.set(true)}
-          title={$t('layout.files.show')}
-          aria-label={$t('layout.files.show')}
-        >›</button>
       {:else}
+        {#if !$classSidebarVisible}
+          <button
+            class="pane-rail"
+            on:click={() => classSidebarVisible.set(true)}
+            title={$t('layout.files.show')}
+            aria-label={$t('layout.files.show')}
+          >›</button>
+        {:else}
         <aside class="sidebar">
           <button
             class="pane-collapse"
@@ -1203,6 +1204,7 @@
           }}
           title="Drag to resize · double-click to reset"
         ></div>
+        {/if}
         <main class="viewer">
           {#if $viewMode === 'pdf' && $fileView}
             <PdfView path={$fileView.path} />

@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Viewer pane went blank when the files sidebar was collapsed.** Hitting either the new header sidebar-toggle or the pre-existing per-column `‹` collapse button replaced the entire `<aside class="sidebar"> + resizer + <main class="viewer">` block with just a `pane-rail`, so the actively-shown class / file / PDF / image content disappeared too. Restructured the conditional so the inner `{#if classSidebarVisible}` swaps **only** sidebar+resizer for the rail; the viewer renders unconditionally. Affects every viewMode that uses the layout grid (`classes` / `pdf` / `image` / `file`); `md` and `html` are unaffected since they already render through `files-fullspan`.
 - **Welcome screen rendered raw i18n keys** — `welcome.title`, `welcome.tagline`, `welcome.openButton`, `welcome.empty`, `welcome.hint.{browser,tauri}` and the browser-mode token panel keys (`browserMode.banner`, `browserMode.tokenLabel`, `browserMode.tokenSubmit`) were referenced from `App.svelte` but had no entry in any locale file, so the i18n fallback dumped the key string verbatim. Added across `en` / `de` / `fr` / `it` / `es`. Same patch fills several other long-standing gaps surfaced while auditing the welcome view (`diagram.hint`, `drop.overlay`, `files.aria.list`, `files.filter.{all,md.title,html.title}`, `files.package.{label,clear}`, `files.placeholder`, `status.followingMcp{,Title}`, `status.walkthroughTitle`, `layout.both.{show,hide}`).
 
 ## [0.3.2] — 2026-05-03
