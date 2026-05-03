@@ -404,6 +404,11 @@ fn route_api(
             let summary = open_repo_locked(&mut guard, Path::new(&args.path))?;
             Ok(serde_json::to_value(summary)?)
         }
+        ("POST", "/api/open_markdown_file") => {
+            let args: PathArg = serde_json::from_slice(body)?;
+            let summary = open_markdown_file_locked(&mut guard, Path::new(&args.path))?;
+            Ok(serde_json::to_value(summary)?)
+        }
         ("GET", "/api/list_classes") => {
             let stereotype = query.get("stereotype").map(String::as_str);
             let module = query.get("module").map(String::as_str);
@@ -808,6 +813,30 @@ fn open_repo_locked(state: &mut HostState, path: &Path) -> anyhow::Result<RepoSu
         anyhow::bail!("repo path must be absolute: {}", path.display());
     }
     let repo = state.engine.open_repo(path)?;
+    open_repository_locked(state, repo, ViewIntent::default())
+}
+
+fn open_markdown_file_locked(state: &mut HostState, path: &Path) -> anyhow::Result<RepoSummary> {
+    if !path.is_absolute() {
+        anyhow::bail!("markdown file path must be absolute: {}", path.display());
+    }
+    let repo = state.engine.open_markdown_file(path)?;
+    let file = repo.root.clone();
+    open_repository_locked(
+        state,
+        repo,
+        ViewIntent::File {
+            path: file,
+            anchor: None,
+        },
+    )
+}
+
+fn open_repository_locked(
+    state: &mut HostState,
+    repo: Repository,
+    view: ViewIntent,
+) -> anyhow::Result<RepoSummary> {
     let markdown_count = files::list_markdown_files(&repo.root).len();
     let html_count =
         html::list_html_files(&repo.root).len() + html::find_html_snippets(&repo.root).len();
@@ -834,7 +863,7 @@ fn open_repo_locked(state: &mut HostState, path: &Path) -> anyhow::Result<RepoSu
     };
     state::write(UiState {
         repo_root: Some(repo.root.clone()),
-        view: ViewIntent::default(),
+        view,
         ..UiState::default()
     })?;
     state.repo = Some(repo);

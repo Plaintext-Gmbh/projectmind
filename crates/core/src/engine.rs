@@ -246,6 +246,37 @@ impl Engine {
         Ok(repo)
     }
 
+    /// Open a single Markdown document as a virtual repository.
+    ///
+    /// The repository root is the canonical file path itself. This keeps the
+    /// UI context scoped to the selected document while still reusing the
+    /// existing repository-shaped state and file-view plumbing.
+    pub fn open_markdown_file(&self, path: &Path) -> Result<Repository, RepositoryError> {
+        let path = std::fs::canonicalize(path)
+            .map_err(|_| RepositoryError::InvalidPath(path.to_path_buf()))?;
+        if !path.is_file() || !is_markdown_path(&path) {
+            return Err(RepositoryError::InvalidMarkdownFile(path));
+        }
+
+        let module_root = path
+            .parent()
+            .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+        let module = Module {
+            id: "document".into(),
+            name: path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("document")
+                .into(),
+            root: module_root,
+            classes: BTreeMap::new(),
+        };
+
+        let mut repo = Repository::new(path);
+        repo.insert_module(module);
+        Ok(repo)
+    }
+
     fn parse_root(&self, root: &Path) -> Result<Module, RepositoryError> {
         let mut module = Module {
             id: derive_module_id(root),
@@ -434,6 +465,12 @@ impl Engine {
     }
 }
 
+fn is_markdown_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown" | "mdx"))
+}
+
 fn derive_module_id(root: &Path) -> String {
     root.file_name()
         .and_then(|s| s.to_str())
@@ -537,6 +574,33 @@ mod tests {
         let ids: Vec<_> = tabs.iter().map(|t| t.id.as_str()).collect();
         // Core tabs come first in declaration order, then plugin tabs.
         assert_eq!(ids, vec!["files", "diagrams", "tests"]);
+    }
+
+    #[test]
+    fn opens_markdown_file_as_virtual_repo() {
+        let dir = tempdir();
+        let file = dir.path().join("note.md");
+        std::fs::write(&file, "# Note").unwrap();
+
+        let engine = Engine::new();
+        let repo = engine.open_markdown_file(&file).unwrap();
+
+        assert_eq!(repo.root, std::fs::canonicalize(&file).unwrap());
+        assert_eq!(repo.modules.len(), 1);
+        assert_eq!(repo.class_count(), 0);
+        let module = repo.modules.get("document").unwrap();
+        assert_eq!(module.name, "note");
+        assert_eq!(module.root, std::fs::canonicalize(dir.path()).unwrap());
+    }
+
+    #[test]
+    fn rejects_non_markdown_virtual_repo_file() {
+        let dir = tempdir();
+        let file = dir.path().join("note.txt");
+        std::fs::write(&file, "not markdown").unwrap();
+
+        let engine = Engine::new();
+        assert!(engine.open_markdown_file(&file).is_err());
     }
 
     #[test]

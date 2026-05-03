@@ -50,6 +50,34 @@ pub struct ModuleFile {
 pub fn list_markdown_files(root: &Path) -> Vec<MarkdownFile> {
     let mut out: Vec<MarkdownFile> = Vec::new();
 
+    if root.is_file() {
+        let Some(ext) = root.extension().and_then(|e| e.to_str()) else {
+            return out;
+        };
+        let lower = ext.to_ascii_lowercase();
+        if !matches!(lower.as_str(), "md" | "markdown" | "mdx") {
+            return out;
+        }
+        let title = first_h1(root).unwrap_or_else(|| {
+            root.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string()
+        });
+        let size = std::fs::metadata(root).map_or(0, |m| m.len());
+        out.push(MarkdownFile {
+            abs: root.to_path_buf(),
+            rel: root
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string(),
+            title,
+            size,
+        });
+        return out;
+    }
+
     let walker = WalkBuilder::new(root)
         .standard_filters(true)
         .hidden(true)
@@ -365,6 +393,21 @@ mod tests {
         let files = list_markdown_files(&root);
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].title, "notes");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn lists_single_markdown_file_root() {
+        let root = tmp_dir("single-file");
+        let file = root.join("brief.md");
+        std::fs::write(&file, "# Brief\nbody").unwrap();
+
+        let files = list_markdown_files(&file);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].abs, file);
+        assert_eq!(files[0].rel, "brief.md");
+        assert_eq!(files[0].title, "Brief");
+
         std::fs::remove_dir_all(&root).ok();
     }
 

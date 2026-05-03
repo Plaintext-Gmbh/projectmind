@@ -77,6 +77,9 @@ impl HtmlKind {
 }
 
 fn build_walker(root: &Path) -> ignore::Walk {
+    if root.is_file() {
+        return WalkBuilder::new(root).max_depth(Some(0)).build();
+    }
     WalkBuilder::new(root)
         .standard_filters(true)
         .hidden(true)
