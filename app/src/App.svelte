@@ -28,6 +28,7 @@
   } from './lib/store';
   import {
     openRepo,
+    openMarkdownFile,
     listClasses,
     listModules,
     listModuleFiles,
@@ -36,6 +37,7 @@
     browserToken,
     clearBrowserToken,
     isTauriRuntime,
+    pendingMarkdownFile,
     setBrowserToken,
   } from './lib/api';
   import type { ClassEntry, ModuleEntry, ModuleFile, TabDescriptor, UiState } from './lib/api';
@@ -300,6 +302,7 @@
   let browserAuthorized = true;
   let tokenInput = '';
   let unlistenState: (() => void) | null = null;
+  let unlistenOpenMarkdownFile: (() => void) | null = null;
   let statePoll: ReturnType<typeof setInterval> | null = null;
   let lastSeq = 0;
   // Drag-and-drop state. `dragOver` toggles the full-window overlay; in
@@ -551,6 +554,36 @@
     }
   }
 
+  async function loadMarkdownDocument(path: string, opts: { silent?: boolean } = {}) {
+    loading = true;
+    errorMessage.set(null);
+    try {
+      const summary = await openMarkdownFile(path);
+      repo.set(summary);
+      const [list, mods] = await Promise.all([listClasses(), listModules()]);
+      classes.set(list);
+      modules.set(mods);
+      selectedClass.set(null);
+      moduleFilter.set(null);
+      stereotypeFilter.set(null);
+      fileKindFilter.set(null);
+      packageFilter.set(null);
+      classSource = '';
+      fileView.update((cur) => ({
+        path: summary.root,
+        anchor: null,
+        nonce: (cur?.nonce ?? 0) + 1,
+      }));
+      viewMode.set('file');
+      recents.record(summary.root, summary.classes, summary.modules);
+    } catch (err) {
+      if (opts.silent) throw err;
+      errorMessage.set(String(err));
+    } finally {
+      loading = false;
+    }
+  }
+
   function handleSelect(c: ClassEntry) {
     selectedClass.set(c);
   }
@@ -682,6 +715,13 @@
   /// desktop side we infer directory-ness from the absence of an extension —
   /// good enough for the common drop targets (Finder folders, single files).
   async function handleDroppedPath(absPath: string, isDirectory: boolean): Promise<void> {
+    const ext = extOf(absPath);
+    if (!isDirectory && viewModeForExt(ext) === 'file') {
+      followingMcp.set(false);
+      await loadMarkdownDocument(absPath);
+      return;
+    }
+
     const repoPath = isDirectory ? absPath : dirname(absPath);
     if (!repoPath) {
       errorMessage.set(`Cannot derive repository directory from: ${absPath}`);
@@ -694,7 +734,6 @@
       viewMode.set('classes');
       return;
     }
-    const ext = extOf(absPath);
     const target = viewModeForExt(ext);
     if (target === null) {
       // Source files / unknown extensions land on the Code tab.
@@ -773,6 +812,15 @@
       unlistenState = await listen<UiState>('state-changed', (ev) => {
         void applyState(ev.payload);
       });
+      unlistenOpenMarkdownFile = await listen<string>('open-markdown-file', (ev) => {
+        followingMcp.set(false);
+        void loadMarkdownDocument(ev.payload);
+      });
+      const pending = await pendingMarkdownFile();
+      if (pending) {
+        followingMcp.set(false);
+        await loadMarkdownDocument(pending);
+      }
       // Register Tauri 2 webview-level drag-drop. Reports absolute paths
       // (which the browser DOM API hides) and fires enter/over/drop/leave.
       unlistenDragDrop = await getCurrentWebview().onDragDropEvent((event) => {
@@ -818,6 +866,7 @@
   onDestroy(() => {
     window.removeEventListener('keydown', onNavKey);
     unlistenState?.();
+    unlistenOpenMarkdownFile?.();
     unlistenDragDrop?.();
     if (statePoll) clearInterval(statePoll);
     if (browserDropHintTimer) clearTimeout(browserDropHintTimer);
@@ -1834,13 +1883,6 @@
     margin-top: 32px;
     color: var(--fg-2);
     font-size: 12px;
-  }
-
-  .welcome code {
-    font-family: var(--mono);
-    background: var(--bg-2);
-    padding: 1px 6px;
-    border-radius: 3px;
   }
 
   .layout {

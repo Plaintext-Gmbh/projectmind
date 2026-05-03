@@ -77,6 +77,10 @@ pub enum RepositoryError {
     #[error("invalid repository path: {0}")]
     InvalidPath(PathBuf),
 
+    /// The provided path does not exist, is not a file, or is not Markdown.
+    #[error("invalid markdown file path: {0}")]
+    InvalidMarkdownFile(PathBuf),
+
     /// A plugin failed.
     #[error("plugin error: {0}")]
     Plugin(#[from] projectmind_plugin_api::Error),

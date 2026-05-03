@@ -116,6 +116,16 @@ export async function openRepo(path: string): Promise<RepoSummary> {
   return invoke<RepoSummary>('open_repo', { path });
 }
 
+export async function openMarkdownFile(path: string): Promise<RepoSummary> {
+  if (!isTauriRuntime()) return post<RepoSummary>('/api/open_markdown_file', { path });
+  return invoke<RepoSummary>('open_markdown_file', { path });
+}
+
+export async function pendingMarkdownFile(): Promise<string | null> {
+  if (!isTauriRuntime()) return null;
+  return invoke<string | null>('pending_markdown_file');
+}
+
 export async function listClasses(stereotype?: string, module?: string): Promise<ClassEntry[]> {
   if (!isTauriRuntime()) {
     return api<ClassEntry[]>(`/api/list_classes${query({ stereotype, module })}`);
