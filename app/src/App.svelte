@@ -132,6 +132,15 @@
     setLanguage(codes[(idx + 1) % codes.length]);
   }
 
+  // Hide module + file column simultaneously to give the viewer the full
+  // width. Re-shows both when at least one is currently hidden.
+  function toggleBothSidebars() {
+    const anyVisible = get(moduleSidebarVisible) || get(classSidebarVisible);
+    moduleSidebarVisible.set(!anyVisible);
+    classSidebarVisible.set(!anyVisible);
+  }
+  $: bothSidebarsVisible = $moduleSidebarVisible || $classSidebarVisible;
+
   let diagramKind: DiagramKind = 'bean-graph';
   let folderMapLayout: 'hierarchy' | 'solar' | 'td' = 'solar';
 
@@ -810,22 +819,6 @@
 <main>
   <header>
     <div class="brand">
-      <div class="nav-history" role="group" aria-label="Navigation history">
-        <button
-          class="nav-arrow"
-          disabled={!$nav_canBack || !$repo}
-          on:click={navBack}
-          title="{$t('nav.back') || 'Back'} (⌘[ / Alt+←)"
-          aria-label={$t('nav.back') || 'Back'}
-        >‹</button>
-        <button
-          class="nav-arrow"
-          disabled={!$nav_canForward || !$repo}
-          on:click={navForward}
-          title="{$t('nav.forward') || 'Forward'} (⌘] / Alt+→)"
-          aria-label={$t('nav.forward') || 'Forward'}
-        >›</button>
-      </div>
       <img class="logo" src="/logo.png" alt="ProjectMind" />
       <span class="title">ProjectMind</span>
       {#if $repo}
@@ -928,6 +921,30 @@
       {#if browserMode}
         <button on:click={forgetBrowserToken} title={$t('nav.token')}>{$t('nav.token')}</button>
       {/if}
+      <div class="nav-history" role="group" aria-label="Navigation history">
+        <button
+          class="nav-arrow"
+          disabled={!$nav_canBack || !$repo}
+          on:click={navBack}
+          title="{$t('nav.back') || 'Back'} (⌘[ / Alt+←)"
+          aria-label={$t('nav.back') || 'Back'}
+        >‹</button>
+        <button
+          class="nav-arrow"
+          disabled={!$nav_canForward || !$repo}
+          on:click={navForward}
+          title="{$t('nav.forward') || 'Forward'} (⌘] / Alt+→)"
+          aria-label={$t('nav.forward') || 'Forward'}
+        >›</button>
+      </div>
+      <button
+        class="sidebars-toggle"
+        on:click={toggleBothSidebars}
+        disabled={!$repo}
+        title={bothSidebarsVisible ? $t('layout.both.hide') : $t('layout.both.show')}
+        aria-label={bothSidebarsVisible ? $t('layout.both.hide') : $t('layout.both.show')}
+        aria-pressed={!bothSidebarsVisible}
+      >{bothSidebarsVisible ? '⊟' : '⊞'}</button>
       <button on:click={pickAndOpen} disabled={loading}>
         {loading ? $t('status.loading') : $t('nav.openRepo')}
       </button>
@@ -1607,6 +1624,18 @@
     font-size: 11px;
     font-weight: 600;
     line-height: 1;
+  }
+
+  .sidebars-toggle {
+    width: 34px;
+    padding: 6px 0;
+    text-align: center;
+    font-size: 15px;
+    line-height: 1;
+  }
+  .sidebars-toggle[aria-pressed='true'] {
+    border-color: var(--accent-2);
+    color: var(--accent-2);
   }
 
   .walkthrough-btn {

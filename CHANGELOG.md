@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`start_gui` MCP tool** — explicit "bring the desktop window up" intent for LLMs. The `view_*` tools already auto-launch the GUI on demand (lazy, throttled); `start_gui` exposes the same launcher as a first-class call so an agent can ensure the window is up before a sequence of intents (e.g. before kicking off a walkthrough). Returns whether the GUI was already running or was just launched (with the resolved binary path). Honours `$PROJECTMIND_APP` for an override; on macOS uses `open -a`, on Linux execs the binary directly. Bypasses the `view_*` cooldown since the call is user-initiated.
+- **Sidebar-toggle button in the header** — single button left of "Open repo" that hides both the modules and files columns at once for an unobstructed viewer. The two existing per-column rails remain for fine-grained control. `aria-pressed` reflects the collapsed state; visibility persists via the existing `moduleSidebarVisible` / `classSidebarVisible` stores.
+- **Interactive LLM-CLI registration in `scripts/install.sh`** — after dropping `projectmind-mcp` on disk the bash installer now detects `claude` and `codex` on `PATH` and offers (one `[Y/n]` prompt per CLI) to wire up the MCP server via the official subcommand (`claude mcp add` / `codex mcp add`). Other MCP-capable CLIs (`gemini`, `cursor`, `windsurf`, `cline`, `opencode`, `aider`, `continue`) are detected and the manual binary path is surfaced. `PM_REGISTER=yes` auto-registers every detected CLI without prompting; `PM_REGISTER=no` skips the prompt and just prints manual hints. The prompt reads from `/dev/tty` so it survives `curl … | sh`.
+
+### Changed
+
+- **Header navigation arrows moved next to the new sidebar toggle.** The `‹ ›` history buttons used to live inside `.brand` on the far left of the toolbar; they now sit immediately left of the sidebar-toggle in the action group, which keeps every toolbar control the user actually clicks (back / forward / collapse / open repo / lang / theme / ?) in one cluster on the right. The brand block on the left is now logo + title + repo crumb only, so it has more room to render long repo paths before clipping.
+
+### Fixed
+
+- **Welcome screen rendered raw i18n keys** — `welcome.title`, `welcome.tagline`, `welcome.openButton`, `welcome.empty`, `welcome.hint.{browser,tauri}` and the browser-mode token panel keys (`browserMode.banner`, `browserMode.tokenLabel`, `browserMode.tokenSubmit`) were referenced from `App.svelte` but had no entry in any locale file, so the i18n fallback dumped the key string verbatim. Added across `en` / `de` / `fr` / `it` / `es`. Same patch fills several other long-standing gaps surfaced while auditing the welcome view (`diagram.hint`, `drop.overlay`, `files.aria.list`, `files.filter.{all,md.title,html.title}`, `files.package.{label,clear}`, `files.placeholder`, `status.followingMcp{,Title}`, `status.walkthroughTitle`, `layout.both.{show,hide}`).
+
 ## [0.3.2] — 2026-05-03
 
 ### Added

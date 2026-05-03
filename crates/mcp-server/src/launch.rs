@@ -57,6 +57,32 @@ pub(crate) fn ensure_gui_running() {
     }
 }
 
+/// Outcome of an explicit `start_gui` tool call.
+pub(crate) enum StartGuiOutcome {
+    /// Heartbeat is fresh — GUI is already running.
+    AlreadyRunning,
+    /// We just spawned the shell. It usually takes ~2s before the heartbeat
+    /// catches up.
+    Launched { path: String },
+}
+
+/// Explicit, user-initiated GUI launch. Unlike [`ensure_gui_running`] this:
+/// - returns a structured outcome instead of logging-and-forgetting,
+/// - bypasses the relaunch cooldown (the user just asked for it),
+/// - surfaces a real error when no GUI binary can be found.
+pub(crate) fn start_gui_explicit() -> Result<StartGuiOutcome, String> {
+    if heartbeat::is_alive(HEARTBEAT_FRESH) {
+        return Ok(StartGuiOutcome::AlreadyRunning);
+    }
+    let candidate = resolve_app()
+        .ok_or_else(|| "no projectmind GUI binary found (set $PROJECTMIND_APP)".to_string())?;
+    spawn_detached(&candidate).map_err(|e| format!("spawn {}: {e}", candidate.display()))?;
+    *LAST_LAUNCH.lock().expect("LAST_LAUNCH poisoned") = Some(Instant::now());
+    Ok(StartGuiOutcome::Launched {
+        path: candidate.display().to_string(),
+    })
+}
+
 #[derive(Debug, thiserror::Error)]
 enum LaunchError {
     #[error("no projectmind GUI binary found (set $PROJECTMIND_APP)")]
