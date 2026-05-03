@@ -201,6 +201,55 @@ cmd_app_build() {
         pnpm tauri build
     fi
     cd "$ROOT_DIR"
+
+    cmd_macos_stabilize_bundle_id "$target"
+}
+
+# Tauri's bundler leaves the .app with the linker's auto ad-hoc signature,
+# whose Identifier is "<crate_name>-<random_hash>" instead of the configured
+# bundle.identifier. macOS keys TCC permissions (Schreibtisch, Documents, …)
+# off (Identifier, CodeRequirement) — a wandering Identifier means the
+# permission prompt re-fires after every rebuild / auto-update.
+#
+# Re-sign ad-hoc with --identifier set to the value from tauri.conf.json so
+# the Identifier half of that tuple is stable across rebuilds. This is the
+# best we can do without an Apple Developer ID; with a real cert macOS would
+# also accept hash drift via designated-requirement matching.
+cmd_macos_stabilize_bundle_id() {
+    local target="${1:-}"
+    case "$(uname -s)" in
+        Darwin) ;;
+        *) return ;;
+    esac
+    case "$target" in
+        ""|*-apple-darwin|universal-apple-darwin) ;;
+        *) return ;;
+    esac
+
+    local bundle_root
+    if [[ -n "$target" ]]; then
+        bundle_root="$ROOT_DIR/target/$target/release/bundle/macos"
+    else
+        bundle_root="$ROOT_DIR/target/release/bundle/macos"
+    fi
+    if [[ ! -d "$bundle_root" ]]; then
+        return
+    fi
+
+    local conf="$ROOT_DIR/app/src-tauri/tauri.conf.json"
+    local identifier
+    identifier="$(node -e "console.log(require('$conf').identifier)")"
+    if [[ -z "$identifier" ]]; then
+        echo "macos-stabilize: no identifier in $conf" >&2
+        return 1
+    fi
+
+    local app
+    while IFS= read -r app; do
+        echo "macos-stabilize: re-sign $app with identifier=$identifier"
+        codesign --force --deep --sign - --identifier "$identifier" "$app"
+        codesign -dv "$app" 2>&1 | grep -E '^(Identifier|Signature)=' || true
+    done < <(find "$bundle_root" -maxdepth 2 -name '*.app' -type d)
 }
 
 # Build the MCP server binary for the requested target(s) and copy it
