@@ -18,13 +18,13 @@ workspace = true
 [dependencies]
 projectmind-plugin-api = { workspace = true }
 projectmind-core       = { workspace = true }
-projectmind-browser-host = { path = "../browser-host", version = "0.3.3" }
+projectmind-browser-host = { path = "../browser-host", version = "0.3.4" }
 
 # Local plugins linked statically for Phase 1
-projectmind-lang-java         = { path = "../../plugins/lang-java", version = "0.3.3" }
-projectmind-lang-rust         = { path = "../../plugins/lang-rust", version = "0.3.3" }
-projectmind-framework-spring  = { path = "../../plugins/framework-spring", version = "0.3.3" }
-projectmind-framework-lombok  = { path = "../../plugins/framework-lombok", version = "0.3.3" }
+projectmind-lang-java         = { path = "../../plugins/lang-java", version = "0.3.4" }
+projectmind-lang-rust         = { path = "../../plugins/lang-rust", version = "0.3.4" }
+projectmind-framework-spring  = { path = "../../plugins/framework-spring", version = "0.3.4" }
+projectmind-framework-lombok  = { path = "../../plugins/framework-lombok", version = "0.3.4" }
 
 anyhow      = { workspace = true }
 clap        = { workspace = true }
