@@ -65,8 +65,8 @@
   import type { HistoryEntry, DiagramKind, FolderMapLayout } from './lib/navigation';
   import * as recents from './lib/recentRepos';
   import { recentRepos } from './lib/recentRepos';
-  const lazyDiagramView = () =>
-    loadComponent('DiagramView', () => import('./components/DiagramView.svelte'));
+  const lazyDiagramIndex = () =>
+    loadComponent('DiagramIndex', () => import('./components/DiagramIndex.svelte'));
   const lazyFileView = () =>
     loadComponent('FileView', () => import('./components/FileView.svelte'));
   const lazyDrawIoView = () =>
@@ -328,16 +328,6 @@
     diagramKind = ($repo.available_diagrams[0] ?? 'folder-map') as typeof diagramKind;
   }
 
-  function diagramLabel(kind: string): string {
-    switch (kind) {
-      case 'bean-graph': return $t('diagram.beanGraph');
-      case 'package-tree': return $t('diagram.packageTree');
-      case 'folder-map': return $t('diagram.folderMap');
-      case 'inheritance-tree': return $t('diagram.inheritanceTree');
-      case 'doc-graph': return $t('diagram.docGraph');
-      default: return kind; // unknown plugin-contributed diagram — show id
-    }
-  }
   $: void loadSourceFor($selectedClass);
 
   // PDFs / images that live inside each module. The map is reloaded whenever
@@ -1305,19 +1295,13 @@
       {/if}
     </section>
   {:else if $viewMode === 'diagram'}
-    <section class="diagram-view">
-      <div class="diagram-tabs">
-        {#each $repo.available_diagrams as d (d)}
-          <button class:active={diagramKind === d} on:click={() => (diagramKind = d as typeof diagramKind)}>
-            {diagramLabel(d)}
-          </button>
-        {/each}
-        <span class="diagram-hint">{$t('diagram.hint')}</span>
-      </div>
-      {#await lazyDiagramView() then mod}
-        <svelte:component this={mod.default} kind={diagramKind} folderLayout={folderMapLayout} />
-      {/await}
-    </section>
+    {#await lazyDiagramIndex() then mod}
+      <svelte:component
+        this={mod.default}
+        bind:selectedKind={diagramKind}
+        folderLayout={folderMapLayout}
+      />
+    {/await}
   {:else if $viewMode === 'walkthrough' && $walkthroughCursor}
     {#await lazyWalkthroughView() then mod}
       <svelte:component
@@ -2173,32 +2157,6 @@
     padding: 40px;
     color: var(--fg-2);
     text-align: center;
-  }
-
-  .diagram-view {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .diagram-tabs {
-    display: flex;
-    gap: 8px;
-    padding: 8px 16px;
-    background: var(--bg-1);
-    border-bottom: 1px solid var(--bg-3);
-  }
-
-  .diagram-tabs button.active {
-    border-color: var(--accent-2);
-    color: var(--accent-2);
-  }
-
-  .diagram-hint {
-    margin-left: auto;
-    font-size: 11px;
-    color: var(--fg-2);
   }
 
   /* ----- Drag-and-drop ---------------------------------------------------- */
