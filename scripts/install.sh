@@ -16,6 +16,12 @@
 #                      (or /usr/local/bin if the script is run as root)
 #   PM_NO_APP=1        skip the desktop app, only install the MCP server
 #   PM_NO_MCP=1        skip the MCP server, only install the desktop app
+#   PM_REGISTER=auto   how to register the MCP server with installed LLM CLIs
+#                      (claude, codex, ...). Values:
+#                        auto = ask interactively when a TTY is available
+#                               (default), skip otherwise
+#                        yes  = register without prompting for any detected CLI
+#                        no   = never register, just print manual hints
 
 set -eu
 
@@ -199,6 +205,82 @@ else
     warn "PM_NO_APP=1 — skipping desktop app"
 fi
 
+# ---- Optional: register the MCP with installed LLM CLIs --------------------
+# When a curl|sh pipe is the install path, stdin points at the pipe, not a
+# TTY. We open /dev/tty explicitly so prompts still work in that scenario.
+ask_yn() {
+    prompt="$1"
+    if [ -e /dev/tty ]; then
+        printf '%s [Y/n] ' "$prompt" >/dev/tty
+        IFS= read -r reply </dev/tty || reply=""
+    else
+        printf '%s [Y/n] ' "$prompt"
+        IFS= read -r reply || reply=""
+    fi
+    case "$reply" in
+        ''|y|Y|yes|YES|Yes) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+mcp_path="${PREFIX}/projectmind-mcp"
+register_mode="${PM_REGISTER:-auto}"
+
+# In auto mode we need a TTY to ask. Without one (e.g. piped from CI),
+# downgrade to "no" with a helpful hint.
+if [ "$register_mode" = "auto" ] && [ ! -e /dev/tty ]; then
+    register_mode="no"
+fi
+
+register_with() {
+    cli_name="$1"; shift
+    desc="$1"; shift
+    # Remaining args are the command to run; "$mcp_path" is appended at call site.
+    if [ "$register_mode" = "no" ]; then
+        info "  $cli_name detected — to register manually:  $desc"
+        return 0
+    fi
+    if [ "$register_mode" = "yes" ] || ask_yn "  register projectmind with $cli_name?"; then
+        if "$@"; then
+            info "  registered with $cli_name"
+        else
+            warn "  $cli_name registration failed — you can rerun manually:  $desc"
+        fi
+    fi
+}
+
+if [ "${PM_NO_MCP:-0}" != "1" ] && [ "$register_mode" != "no" ]; then
+    have_any=0
+    for cli in claude codex; do
+        command -v "$cli" >/dev/null 2>&1 && have_any=1 && break
+    done
+    if [ "$have_any" = "1" ]; then
+        bold ""
+        info "found one or more LLM CLIs — offering to register projectmind:"
+    fi
+fi
+
+if [ "${PM_NO_MCP:-0}" != "1" ]; then
+    if command -v claude >/dev/null 2>&1; then
+        register_with "Claude Code" \
+            "claude mcp add -s user -e PROJECTMIND_LOG=info projectmind '$mcp_path'" \
+            claude mcp add -s user -e PROJECTMIND_LOG=info projectmind "$mcp_path"
+    fi
+    if command -v codex >/dev/null 2>&1; then
+        register_with "Codex CLI" \
+            "codex mcp add --env PROJECTMIND_LOG=info projectmind -- '$mcp_path'" \
+            codex mcp add --env PROJECTMIND_LOG=info projectmind -- "$mcp_path"
+    fi
+    # Best-effort detection for other LLM CLIs that support MCP. We don't
+    # auto-register because their config syntax varies — surface the binary
+    # path so the user can wire it up.
+    for cli in gemini cursor windsurf cline opencode aider continue; do
+        if command -v "$cli" >/dev/null 2>&1; then
+            info "  $cli detected — register manually with: $cli's MCP config (use $mcp_path)"
+        fi
+    done
+fi
+
 bold ""
 bold "ProjectMind $TAG installed."
 case "$OS" in
@@ -206,6 +288,6 @@ case "$OS" in
     Linux)  info "Launch with 'projectmind' (if it's on your PATH) or run the AppImage directly." ;;
 esac
 if [ "${PM_NO_MCP:-0}" != "1" ]; then
-    info "MCP server: $PREFIX/projectmind-mcp"
-    info "Add to your LLM CLI's mcp config — see https://github.com/${REPO}/#readme"
+    info "MCP server: $mcp_path"
+    info "Docs: https://github.com/${REPO}/#readme"
 fi

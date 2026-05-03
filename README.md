@@ -40,6 +40,12 @@ Re-running the script upgrades to the newest release. Pin a specific version
 with `PM_VERSION=v1.2.3 …`. Skip components with `PM_NO_APP=1` or
 `PM_NO_MCP=1` (Bash) / `$env:PM_NO_APP="1"` (PowerShell).
 
+When the bash installer detects a supported LLM CLI on `PATH` (currently
+`claude` and `codex`) it offers to register `projectmind-mcp` for you with a
+single `claude mcp add` / `codex mcp add` call. Override with
+`PM_REGISTER=yes` (auto-register every detected CLI without prompting) or
+`PM_REGISTER=no` (skip the prompt and just print the manual command).
+
 ## Why
 
 Modern AI-assisted development with CLI agents is great — until you want to *see* what just changed, *visualise* how the architecture is evolving, or *drill into* the structure without firing up a heavy IDE.
@@ -81,6 +87,7 @@ custom agent — can connect to. It implements:
 | `list_html` | List HTML / XHTML / JSP / Velocity / FreeMarker template files in the open repository. |
 | `list_html_snippets` | Scan source files (`.java`, `.kt`, `.groovy`, `.scala`, incl. Java text blocks) for HTML snippets in string literals — filtered to ≥2 tags so XML namespace declarations and short error strings drop out. |
 | `plugin_info` | List active language and framework plugins. |
+| `start_gui` | Launch the ProjectMind desktop app if it isn't already running (the `view_*` tools auto-launch on demand, so call this only to bring up the window before any view intent). Honours `$PROJECTMIND_APP` for an override path. |
 
 Active language plugins in Phase 1:
 

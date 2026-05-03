@@ -370,6 +370,11 @@ pub(crate) fn list() -> Value {
                 "name": "stop_browser",
                 "description": "Forget the LAN browser host status for this MCP process. The listener exits when the process exits.",
                 "inputSchema": no_args_schema()
+            },
+            {
+                "name": "start_gui",
+                "description": "Launch the ProjectMind desktop app if it is not already running. Most `view_*` tools auto-launch the GUI on demand, so call this explicitly only when you want to bring up the window before any view intent (e.g. before starting a walkthrough). On macOS this uses `open -a ProjectMind`; on Linux the binary is invoked directly. Set $PROJECTMIND_APP to override the resolved path.",
+                "inputSchema": no_args_schema()
             }
         ]
     })
@@ -408,8 +413,23 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "open_browser_repo" => open_browser_repo(state, parsed.arguments).await,
         "browser_status" => browser_status(),
         "stop_browser" => stop_browser(),
+        "start_gui" => start_gui_handler(),
         other => Err(DispatchError::invalid_params(format!(
             "unknown tool: {other}"
+        ))),
+    }
+}
+
+fn start_gui_handler() -> DispatchResult {
+    match launch::start_gui_explicit() {
+        Ok(launch::StartGuiOutcome::AlreadyRunning) => Ok(text_result(
+            "ProjectMind GUI is already running (heartbeat fresh).",
+        )),
+        Ok(launch::StartGuiOutcome::Launched { path }) => Ok(text_result(format!(
+            "Launched ProjectMind GUI from {path}. Window may take a couple of seconds to appear."
+        ))),
+        Err(err) => Err(DispatchError::internal(format!(
+            "could not launch ProjectMind GUI: {err}"
         ))),
     }
 }
