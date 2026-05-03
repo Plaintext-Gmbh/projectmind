@@ -3110,7 +3110,7 @@ dependencies = [
 
 [[package]]
 name = "projectmind-app"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "notify",
  "parking_lot",
@@ -3133,7 +3133,7 @@ dependencies = [
 
 [[package]]
 name = "projectmind-browser-host"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "open",
@@ -3151,7 +3151,7 @@ dependencies = [
 
 [[package]]
 name = "projectmind-core"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "dirs",
@@ -3170,7 +3170,7 @@ dependencies = [
 
 [[package]]
 name = "projectmind-framework-lombok"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "projectmind-plugin-api",
  "serde_json",
@@ -3178,7 +3178,7 @@ dependencies = [
 
 [[package]]
 name = "projectmind-framework-spring"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "projectmind-plugin-api",
  "tracing",
@@ -3186,7 +3186,7 @@ dependencies = [
 
 [[package]]
 name = "projectmind-lang-java"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "projectmind-plugin-api",
  "tracing",
@@ -3196,7 +3196,7 @@ dependencies = [
 
 [[package]]
 name = "projectmind-lang-rust"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "projectmind-plugin-api",
  "tracing",
@@ -3206,7 +3206,7 @@ dependencies = [
 
 [[package]]
 name = "projectmind-mcp"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -3228,7 +3228,7 @@ dependencies = [
 
 [[package]]
 name = "projectmind-plugin-api"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "serde",
  "serde_json",
