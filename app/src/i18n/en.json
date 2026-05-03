@@ -155,5 +155,10 @@
   "status.followingMcpTitle": "GUI is following an MCP-issued view intent.",
   "status.walkthroughTitle": "Walkthrough mode",
   "layout.both.show": "Show modules and files columns",
-  "layout.both.hide": "Hide modules and files columns (full view)"
+  "layout.both.hide": "Hide modules and files columns (full view)",
+  "updater.available": "Update available: v{version}",
+  "updater.install": "Install",
+  "updater.installing": "Installing v{version} — relaunching…",
+  "updater.dismiss": "Dismiss",
+  "updater.error": "Update failed"
 }
