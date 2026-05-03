@@ -235,11 +235,23 @@ jobs:
 
       - name: Build app bundle
         shell: bash
+        env:
+          # When set, Tauri signs every updater-eligible bundle (macOS .app.tar.gz,
+          # Linux .AppImage, Windows .msi) with a `.sig` sidecar. Empty / unset →
+          # build proceeds unsigned and the publish step skips latest.json.
+          # Generate via `pnpm tauri signer generate` and store the raw key file
+          # contents as the GitHub secret.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: ./scripts/ci.sh app-build ${{ matrix.target }}
 
       - name: Package
         shell: bash
         run: ./scripts/ci.sh app-package ${{ matrix.target }} ${{ matrix.asset_suffix }}
+
+      - name: Stage updater assets
+        shell: bash
+        run: ./scripts/ci.sh app-stage-updater ${{ matrix.target }} ${{ matrix.asset_suffix }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -250,6 +262,15 @@ jobs:
             projectmind-app-${{ matrix.asset_suffix }}.tar.gz.sha256
           retention-days: 30
 
+      - name: Upload updater assets
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: projectmind-updater-${{ matrix.asset_suffix }}
+          path: updater-stage/
+          retention-days: 30
+          if-no-files-found: ignore
+
   publish:
     name: Publish GitHub release
     needs: [mcp, app]
@@ -258,14 +279,23 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: artifacts
+
+      - name: Build latest.json (updater manifest)
+        shell: bash
+        run: ./scripts/ci.sh build-latest-json artifacts/ "${{ github.ref_name }}" latest.json
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
         with:
           files: |
             artifacts/**/*.tar.gz
             artifacts/**/*.sha256
+            artifacts/projectmind-updater-*/*
+            latest.json
           generate_release_notes: true
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false

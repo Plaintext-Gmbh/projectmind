@@ -48,6 +48,8 @@
   import KeyboardHelp from './components/KeyboardHelp.svelte';
   import StatusBar from './components/StatusBar.svelte';
   import McpToast from './components/McpToast.svelte';
+  import UpdateToast from './components/UpdateToast.svelte';
+  import { startBackgroundChecks as startUpdateChecks } from './lib/updater';
   // Heavy components — pulled in dynamically the first time the user
   // visits the matching tab. mermaid (~640 KB) and marked (~40 KB) ride
   // along with DiagramView / FileView / WalkthroughView etc., so keeping
@@ -131,6 +133,15 @@
     const idx = codes.indexOf($language);
     setLanguage(codes[(idx + 1) % codes.length]);
   }
+
+  // Hide module + file column simultaneously to give the viewer the full
+  // width. Re-shows both when at least one is currently hidden.
+  function toggleBothSidebars() {
+    const anyVisible = get(moduleSidebarVisible) || get(classSidebarVisible);
+    moduleSidebarVisible.set(!anyVisible);
+    classSidebarVisible.set(!anyVisible);
+  }
+  $: bothSidebarsVisible = $moduleSidebarVisible || $classSidebarVisible;
 
   let diagramKind: DiagramKind = 'bean-graph';
   let folderMapLayout: 'hierarchy' | 'solar' | 'td' = 'solar';
@@ -517,6 +528,15 @@
       fileKindFilter.set(null);
       packageFilter.set(null);
       classSource = '';
+      // A view tied to the previous repo (open file, active diff, running
+      // walkthrough) is meaningless after a repo switch — reset to the
+      // default tab so the new repo lands in a clean state instead of an
+      // orphaned viewer that points at a path the new repo doesn't have.
+      viewMode.set('classes');
+      fileView.set(null);
+      diffViewRef.set(null);
+      walkthroughCursor.set(null);
+      followingMcp.set(false);
       recents.record(summary.root, summary.classes, summary.modules);
     } catch (err) {
       if (opts.silent) {
@@ -728,6 +748,7 @@
 
   onMount(async () => {
     window.addEventListener('keydown', onNavKey);
+    startUpdateChecks();
     browserMode = !isTauriRuntime();
     if (browserMode && !browserToken()) {
       browserAuthorized = false;
@@ -810,22 +831,6 @@
 <main>
   <header>
     <div class="brand">
-      <div class="nav-history" role="group" aria-label="Navigation history">
-        <button
-          class="nav-arrow"
-          disabled={!$nav_canBack || !$repo}
-          on:click={navBack}
-          title="{$t('nav.back') || 'Back'} (⌘[ / Alt+←)"
-          aria-label={$t('nav.back') || 'Back'}
-        >‹</button>
-        <button
-          class="nav-arrow"
-          disabled={!$nav_canForward || !$repo}
-          on:click={navForward}
-          title="{$t('nav.forward') || 'Forward'} (⌘] / Alt+→)"
-          aria-label={$t('nav.forward') || 'Forward'}
-        >›</button>
-      </div>
       <img class="logo" src="/logo.png" alt="ProjectMind" />
       <span class="title">ProjectMind</span>
       {#if $repo}
@@ -928,6 +933,30 @@
       {#if browserMode}
         <button on:click={forgetBrowserToken} title={$t('nav.token')}>{$t('nav.token')}</button>
       {/if}
+      <div class="nav-history" role="group" aria-label="Navigation history">
+        <button
+          class="nav-arrow"
+          disabled={!$nav_canBack || !$repo}
+          on:click={navBack}
+          title="{$t('nav.back') || 'Back'} (⌘[ / Alt+←)"
+          aria-label={$t('nav.back') || 'Back'}
+        >‹</button>
+        <button
+          class="nav-arrow"
+          disabled={!$nav_canForward || !$repo}
+          on:click={navForward}
+          title="{$t('nav.forward') || 'Forward'} (⌘] / Alt+→)"
+          aria-label={$t('nav.forward') || 'Forward'}
+        >›</button>
+      </div>
+      <button
+        class="sidebars-toggle"
+        on:click={toggleBothSidebars}
+        disabled={!$repo}
+        title={bothSidebarsVisible ? $t('layout.both.hide') : $t('layout.both.show')}
+        aria-label={bothSidebarsVisible ? $t('layout.both.hide') : $t('layout.both.show')}
+        aria-pressed={!bothSidebarsVisible}
+      >{bothSidebarsVisible ? '⊟' : '⊞'}</button>
       <button on:click={pickAndOpen} disabled={loading}>
         {loading ? $t('status.loading') : $t('nav.openRepo')}
       </button>
@@ -1059,14 +1088,15 @@
             <svelte:component this={mod.default} />
           {/await}
         </div>
-      {:else if !$classSidebarVisible}
-        <button
-          class="pane-rail"
-          on:click={() => classSidebarVisible.set(true)}
-          title={$t('layout.files.show')}
-          aria-label={$t('layout.files.show')}
-        >›</button>
       {:else}
+        {#if !$classSidebarVisible}
+          <button
+            class="pane-rail"
+            on:click={() => classSidebarVisible.set(true)}
+            title={$t('layout.files.show')}
+            aria-label={$t('layout.files.show')}
+          >›</button>
+        {:else}
         <aside class="sidebar">
           <button
             class="pane-collapse"
@@ -1186,6 +1216,7 @@
           }}
           title="Drag to resize · double-click to reset"
         ></div>
+        {/if}
         <main class="viewer">
           {#if $viewMode === 'pdf' && $fileView}
             <PdfView path={$fileView.path} />
@@ -1260,6 +1291,7 @@
 
   <KeyboardHelp bind:open={kbdHelpOpen} />
   <McpToast />
+  <UpdateToast />
   <StatusBar />
 </main>
 
@@ -1607,6 +1639,18 @@
     font-size: 11px;
     font-weight: 600;
     line-height: 1;
+  }
+
+  .sidebars-toggle {
+    width: 34px;
+    padding: 6px 0;
+    text-align: center;
+    font-size: 15px;
+    line-height: 1;
+  }
+  .sidebars-toggle[aria-pressed='true'] {
+    border-color: var(--accent-2);
+    color: var(--accent-2);
   }
 
   .walkthrough-btn {

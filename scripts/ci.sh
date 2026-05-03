@@ -294,17 +294,122 @@ cmd_app_package() {
     echo "app-package: $archive ($size_h, ${#bundles[@]} bundle file(s))"
 }
 
+cmd_app_stage_updater() {
+    # Copy the updater-eligible bundle (and its sibling .sig if signed) into
+    # `updater-stage/` with platform-stable filenames. The publish job then
+    # collects these across the matrix and builds latest.json.
+    local target="${1:?target triple required}"
+    local suffix="${2:?asset suffix required}"
+    local bundle_dir="target/${target}/release/bundle"
+    local stage="updater-stage"
+    mkdir -p "$stage"
+
+    local bundle=""
+    case "$suffix" in
+        macos-*)
+            bundle="$(find "$bundle_dir/macos" -maxdepth 2 -name '*.app.tar.gz' | head -n1 || true)"
+            ;;
+        linux-*)
+            bundle="$(find "$bundle_dir/appimage" -maxdepth 2 -name '*.AppImage' | head -n1 || true)"
+            ;;
+        windows-*)
+            bundle="$(find "$bundle_dir/msi" -maxdepth 2 -name '*.msi' | head -n1 || true)"
+            ;;
+    esac
+
+    if [[ -z "$bundle" ]]; then
+        echo "app-stage-updater: no updater bundle for $suffix — skipping (unsigned build?)"
+        return 0
+    fi
+
+    local base; base="$(basename "$bundle")"
+    local ext="${base#*.}"   # e.g. "app.tar.gz" / "AppImage" / "msi"
+    local out="$stage/projectmind-updater-${suffix}.${ext}"
+    cp "$bundle" "$out"
+    echo "app-stage-updater: $out"
+
+    if [[ -f "${bundle}.sig" ]]; then
+        cp "${bundle}.sig" "${out}.sig"
+        echo "app-stage-updater: ${out}.sig"
+    else
+        echo "app-stage-updater: no .sig sidecar — TAURI_SIGNING_PRIVATE_KEY missing? skipping signature."
+    fi
+}
+
+cmd_build_latest_json() {
+    # Walk the downloaded artifacts/, collect the per-platform updater bundles
+    # plus their .sig contents, and emit a Tauri-compatible latest.json.
+    # Skips platforms whose .sig is missing (unsigned build) instead of
+    # failing — a release that ships zero signed bundles still publishes,
+    # just without an updater manifest.
+    local artifacts_root="${1:?artifacts root required}"
+    local tag="${2:?release tag required, e.g. v0.3.5}"
+    local out="${3:-latest.json}"
+    local version="${tag#v}"
+    local repo_url="https://github.com/Plaintext-Gmbh/projectmind/releases/download/${tag}"
+
+    python3 - "$artifacts_root" "$tag" "$version" "$repo_url" "$out" <<'PY'
+import json, os, sys, glob
+from pathlib import Path
+
+root, tag, version, repo_url, out = sys.argv[1:6]
+
+# Map asset_suffix -> Tauri platform identifier
+PLATFORM_KEY = {
+    'macos-universal': 'darwin-aarch64',  # also reported under x86_64 below
+    'linux-x86_64':    'linux-x86_64',
+    'windows-x86_64':  'windows-x86_64',
+}
+# Tauri keys both Mac arches off the same universal bundle.
+EXTRA_AS = {'macos-universal': ['darwin-x86_64']}
+
+platforms = {}
+for d in sorted(Path(root).glob('projectmind-updater-*')):
+    suffix = d.name.removeprefix('projectmind-updater-')
+    base = PLATFORM_KEY.get(suffix)
+    if not base:
+        continue
+    bundle = next((f for f in d.iterdir() if f.is_file() and not f.name.endswith('.sig')), None)
+    sig = next((f for f in d.iterdir() if f.name.endswith('.sig')), None)
+    if not bundle or not sig:
+        print(f'skipping {suffix}: bundle={bundle} sig={sig}', file=sys.stderr)
+        continue
+    entry = {
+        'signature': sig.read_text(encoding='utf-8').strip(),
+        'url': f'{repo_url}/{bundle.name}',
+    }
+    platforms[base] = entry
+    for extra in EXTRA_AS.get(suffix, []):
+        platforms[extra] = entry
+
+if not platforms:
+    print('build-latest-json: no signed bundles found — skipping latest.json', file=sys.stderr)
+    sys.exit(0)
+
+manifest = {
+    'version': version,
+    'notes': f'See https://github.com/Plaintext-Gmbh/projectmind/releases/tag/{tag}',
+    'pub_date': os.environ.get('GITHUB_RUN_TIMESTAMP', ''),
+    'platforms': platforms,
+}
+Path(out).write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+print(f'build-latest-json: wrote {out} with {len(platforms)} platforms')
+PY
+}
+
 case "${1:-}" in
-    check)           shift; cmd_check "$@" ;;
-    test)            shift; cmd_test "$@" ;;
-    install-deps)    shift; cmd_install_deps "$@" ;;
+    check)             shift; cmd_check "$@" ;;
+    test)              shift; cmd_test "$@" ;;
+    install-deps)      shift; cmd_install_deps "$@" ;;
     release-build)     shift; cmd_release_build "$@" ;;
     release-smoke)     shift; cmd_release_smoke "$@" ;;
     release-package)   shift; cmd_release_package "$@" ;;
     stage-mcp-sidecar) shift; cmd_stage_mcp_sidecar "$@" ;;
     app-build)         shift; cmd_app_build "$@" ;;
     app-package)       shift; cmd_app_package "$@" ;;
-    all)             cmd_check; cmd_test ;;
+    app-stage-updater) shift; cmd_app_stage_updater "$@" ;;
+    build-latest-json) shift; cmd_build_latest_json "$@" ;;
+    all)               cmd_check; cmd_test ;;
     -h|--help|help|"") usage ;;
     *) echo "unknown command: $1" >&2; usage; exit 2 ;;
 esac
