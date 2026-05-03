@@ -34,6 +34,11 @@
 //! middle of a save can't corrupt the file. The whole document is
 //! re-serialised on every mutation — fine while the volume cap from
 //! the design doc holds (a few thousand entries per repo at most).
+//!
+//! Before every successful overwrite the previous file is rotated to
+//! `annotations.json.bak`. If `annotations.json` is later found missing
+//! or unparseable, [`JsonAnnotationStore::open`] silently recovers from
+//! the `.bak` so a torn write or accidental edit can't lose user data.
 
 use std::path::{Path, PathBuf};
 
@@ -44,6 +49,7 @@ use serde::{Deserialize, Serialize};
 const FILE_VERSION: u32 = 1;
 const STORE_DIR: &str = ".projectmind";
 const STORE_FILE: &str = "annotations.json";
+const BACKUP_SUFFIX: &str = "bak";
 
 /// Disk shape of `.projectmind/annotations.json`. Unknown fields are kept
 /// (`#[serde(default)]` on optional ones) so a newer client can land
@@ -84,24 +90,44 @@ impl JsonAnnotationStore {
         repo_root.join(STORE_DIR).join(STORE_FILE)
     }
 
+    /// Path of the rotating backup written on every successful save.
+    fn backup_path(&self) -> PathBuf {
+        self.path.with_extension(format!("json.{BACKUP_SUFFIX}"))
+    }
+
     /// Open (or create) the store for `repo_root`. A missing file is
     /// equivalent to an empty store — we don't materialise it until the
     /// first write, so opening a read-only repo doesn't litter it with
     /// an empty `.projectmind/` directory.
     ///
-    /// A malformed file is rejected so the user notices rather than
-    /// having their existing annotations silently discarded.
+    /// If the main file is missing or unparseable, the rotating
+    /// `.bak` from the previous successful save is tried as a fallback
+    /// (annotations are user-created data; losing them silently to a
+    /// torn write would be a data-loss bug). If both are missing we
+    /// start empty; if both exist but the main one is corrupt the
+    /// recovered records are reused, but a fresh save is deferred until
+    /// the next mutation so a read-only browse stays read-only.
     pub fn open(repo_root: &Path) -> std::io::Result<Self> {
         let path = Self::store_path(repo_root);
-        let inner = match std::fs::read_to_string(&path) {
-            Ok(s) => serde_json::from_str(&s)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => AnnotationsFile {
-                version: FILE_VERSION,
-                next_id: 0,
-                records: Vec::new(),
+        let backup = path.with_extension(format!("json.{BACKUP_SUFFIX}"));
+        let inner = match read_annotations(&path) {
+            Ok(Some(file)) => file,
+            Ok(None) => match read_annotations(&backup)? {
+                Some(file) => file,
+                None => empty_file(),
             },
-            Err(e) => return Err(e),
+            Err(_) => match read_annotations(&backup)? {
+                Some(file) => file,
+                None => {
+                    // Main file is corrupt and there's no usable backup —
+                    // surface the original error rather than silently
+                    // wiping the user's data.
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "annotations.json is malformed and no usable .bak exists",
+                    ));
+                }
+            },
         };
         Ok(Self { path, inner })
     }
@@ -114,8 +140,39 @@ impl JsonAnnotationStore {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let tmp = self.path.with_extension("json.tmp");
         std::fs::write(&tmp, json)?;
+        // Rotate the previous good copy to `.bak` before the rename so a
+        // crash between the rotate and the rename still leaves the user
+        // with their last save in `.bak`. `rename` overwrites the target
+        // on the platforms we support, so we don't have to clear it.
+        let backup = self.backup_path();
+        if self.path.exists() {
+            std::fs::rename(&self.path, &backup)?;
+        }
         std::fs::rename(&tmp, &self.path)?;
         Ok(())
+    }
+}
+
+fn empty_file() -> AnnotationsFile {
+    AnnotationsFile {
+        version: FILE_VERSION,
+        next_id: 0,
+        records: Vec::new(),
+    }
+}
+
+/// Read and parse an annotations file. Returns `Ok(None)` only for a
+/// missing file; a present-but-malformed file is returned as `Err` so
+/// the caller can decide whether to fall back to `.bak`.
+fn read_annotations(path: &Path) -> std::io::Result<Option<AnnotationsFile>> {
+    match std::fs::read_to_string(path) {
+        Ok(s) => {
+            let parsed: AnnotationsFile = serde_json::from_str(&s)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            Ok(Some(parsed))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
     }
 }
 
@@ -289,12 +346,73 @@ mod tests {
     }
 
     #[test]
-    fn malformed_file_is_rejected_loudly() {
+    fn malformed_file_without_bak_is_rejected_loudly() {
         let tmp = TempDir::new();
         let path = JsonAnnotationStore::store_path(tmp.path());
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "{ not valid json").unwrap();
         let err = JsonAnnotationStore::open(tmp.path()).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn save_rotates_previous_main_into_bak() {
+        let tmp = TempDir::new();
+        let mut store = JsonAnnotationStore::open(tmp.path()).unwrap();
+        let path = JsonAnnotationStore::store_path(tmp.path());
+        let bak = path.with_extension("json.bak");
+
+        // First save: nothing to rotate yet.
+        store.add(record("a.rs", 1, 1, "alpha")).unwrap();
+        assert!(path.exists(), "main file written");
+        assert!(!bak.exists(), "no previous file → no .bak yet");
+
+        // Second save: previous main rotates into .bak.
+        store.add(record("a.rs", 2, 2, "beta")).unwrap();
+        assert!(path.exists());
+        assert!(bak.exists(), ".bak should hold the previous good copy");
+        let prior: AnnotationsFile =
+            serde_json::from_str(&std::fs::read_to_string(&bak).unwrap()).unwrap();
+        assert_eq!(prior.records.len(), 1, ".bak holds the pre-save state");
+        assert_eq!(prior.records[0].label, "alpha");
+    }
+
+    #[test]
+    fn corrupt_main_recovers_from_bak() {
+        let tmp = TempDir::new();
+        let mut store = JsonAnnotationStore::open(tmp.path()).unwrap();
+        store.add(record("a.rs", 1, 1, "alpha")).unwrap();
+        store.add(record("a.rs", 2, 2, "beta")).unwrap();
+        drop(store);
+
+        // Simulate a torn write: the main file is garbage, but .bak still
+        // holds the last successful save (i.e. the state before "beta").
+        let path = JsonAnnotationStore::store_path(tmp.path());
+        std::fs::write(&path, "garbage").unwrap();
+
+        let store = JsonAnnotationStore::open(tmp.path()).unwrap();
+        let all = store.all().unwrap();
+        assert_eq!(all.len(), 1, "recovered the .bak content");
+        assert_eq!(all[0].label, "alpha");
+    }
+
+    #[test]
+    fn missing_main_with_bak_uses_bak() {
+        let tmp = TempDir::new();
+        let mut store = JsonAnnotationStore::open(tmp.path()).unwrap();
+        store.add(record("a.rs", 1, 1, "alpha")).unwrap();
+        store.add(record("a.rs", 2, 2, "beta")).unwrap();
+        drop(store);
+
+        // Simulate the user (or some unrelated tool) deleting the main
+        // file while the .bak survives. Re-opening must recover, not
+        // silently start empty.
+        let path = JsonAnnotationStore::store_path(tmp.path());
+        std::fs::remove_file(&path).unwrap();
+
+        let store = JsonAnnotationStore::open(tmp.path()).unwrap();
+        let all = store.all().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].label, "alpha");
     }
 }
