@@ -233,6 +233,11 @@ jobs:
         working-directory: app
         run: pnpm install --frozen-lockfile
 
+      - name: Capture build timestamp
+        id: build_time
+        shell: bash
+        run: echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: Build app bundle
         shell: bash
         env:
@@ -249,7 +254,7 @@ jobs:
           # the tag-push path; absent on workflow_dispatch reruns.
           PROJECTMIND_RELEASE_BUILD: '1'
           PROJECTMIND_GIT_COMMIT: ${{ github.sha }}
-          PROJECTMIND_BUILT_AT: ${{ github.event.repository.updated_at }}
+          PROJECTMIND_BUILT_AT: ${{ steps.build_time.outputs.built_at }}
         run: ./scripts/ci.sh app-build ${{ matrix.target }}
 
       - name: Package

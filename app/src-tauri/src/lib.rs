@@ -682,10 +682,8 @@ fn get_build_integrity() -> BuildIntegrity {
     use sha2::{Digest, Sha256};
 
     let pubkey = include_str!("../tauri.conf.json");
-    // Cheap & cheerful: hash the whole conf.json. We could parse and pick out
-    // exactly the pubkey field, but the conf is tiny (~50 lines) and the hash
-    // is only used for display + integrity comparison, not a trust decision.
-    // The exact byte equality matters far more than what the hash represents.
+    // Hash only the updater pubkey value so unrelated config edits don't
+    // change the official-channel marker shown in the integrity dialog.
     let mut hasher = Sha256::new();
     hasher.update(extract_pubkey_bytes(pubkey));
     let digest = hasher.finalize();
