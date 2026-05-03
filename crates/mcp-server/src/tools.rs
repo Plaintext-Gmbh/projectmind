@@ -221,7 +221,8 @@ fn open_browser_repo_schema() -> Value {
         "properties": {
             "path": { "type": "string", "description": "Absolute path to the repository root. Defaults to the currently-open repo or current statefile repo." },
             "port": { "type": "integer", "minimum": 0, "maximum": 65535, "description": "Port to bind; 0 means choose a free port." },
-            "open_browser": { "type": "boolean", "default": true, "description": "Open the default browser on this machine after starting." }
+            "open_browser": { "type": "boolean", "default": true, "description": "Open the default browser on this machine after starting." },
+            "lan": { "type": "boolean", "default": false, "description": "Bind on 0.0.0.0 so the host is reachable from other devices in the LAN (e.g. iPad/phone). Default is false: bind on 127.0.0.1 only." }
         }
     })
 }
@@ -1121,6 +1122,8 @@ struct OpenBrowserRepoArgs {
     port: Option<u16>,
     #[serde(default = "default_open_browser")]
     open_browser: bool,
+    #[serde(default)]
+    lan: bool,
 }
 
 fn default_open_browser() -> bool {
@@ -1162,6 +1165,7 @@ async fn open_browser_repo(state: &Mutex<ServerState>, args: Value) -> DispatchR
         port: args.port.unwrap_or(0),
         asset_dir,
         open_browser: args.open_browser,
+        lan: args.lan,
     })
     .map_err(|e| DispatchError::internal(format!("open_browser_repo: {e}")))?;
     Ok(text_result(

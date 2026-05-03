@@ -151,6 +151,10 @@ pub struct BrowserHostConfig {
     pub asset_dir: PathBuf,
     /// Open the default browser after startup.
     pub open_browser: bool,
+    /// Bind on `0.0.0.0` so the host is reachable from other devices in the
+    /// LAN. Defaults to `false`, in which case the host is bound to
+    /// `127.0.0.1` and is only reachable from this machine.
+    pub lan: bool,
 }
 
 /// Public status returned by MCP tools.
@@ -206,10 +210,12 @@ fn host_slot() -> &'static Mutex<Option<RunningHost>> {
     HOST.get_or_init(|| Mutex::new(None))
 }
 
-/// Start the LAN browser host, or return the existing host status.
+/// Start the browser host, or return the existing host status.
 ///
-/// The server binds to `0.0.0.0` by design because this mode is explicitly
-/// for LAN/VM access. Every API endpoint requires the random bearer token.
+/// By default the server binds to `127.0.0.1` so the host is only reachable
+/// from this machine. Set [`BrowserHostConfig::lan`] to `true` to bind on
+/// `0.0.0.0` and expose the host to other devices in the LAN. Every API
+/// endpoint requires the random bearer token regardless of the bind address.
 pub fn start(config: BrowserHostConfig) -> anyhow::Result<BrowserHostStatus> {
     {
         let mut slot = host_slot().lock().expect("browser host slot poisoned");
@@ -230,11 +236,16 @@ pub fn start(config: BrowserHostConfig) -> anyhow::Result<BrowserHostStatus> {
         }
     }
 
-    let bind = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port);
+    let bind_ip = if config.lan {
+        IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+    } else {
+        IpAddr::V4(Ipv4Addr::LOCALHOST)
+    };
+    let bind = SocketAddr::new(bind_ip, config.port);
     let listener = TcpListener::bind(bind)?;
     let actual = listener.local_addr()?;
     let token = generate_token();
-    let urls = access_urls(actual.port(), &token);
+    let urls = access_urls(actual.port(), &token, config.lan);
     let shared = Arc::new(Mutex::new(HostState::new()));
     let running = Arc::new(AtomicBool::new(true));
 
@@ -1171,12 +1182,14 @@ fn generate_token() -> String {
     s
 }
 
-fn access_urls(port: u16, token: &str) -> Vec<String> {
+fn access_urls(port: u16, token: &str, lan: bool) -> Vec<String> {
     let mut urls = vec![format!("http://127.0.0.1:{port}/#token={token}")];
-    for ip in lan_ips() {
-        let url = format!("http://{ip}:{port}/#token={token}");
-        if !urls.contains(&url) {
-            urls.push(url);
+    if lan {
+        for ip in lan_ips() {
+            let url = format!("http://{ip}:{port}/#token={token}");
+            if !urls.contains(&url) {
+                urls.push(url);
+            }
         }
     }
     urls
@@ -1220,8 +1233,8 @@ fn _type_check_public_payloads(
 #[cfg(test)]
 mod tests {
     use super::{
-        authorized, content_type, parse_request, percent_decode, split_target, ParseError,
-        MAX_BODY_BYTES, MAX_HEADER_BYTES,
+        access_urls, authorized, content_type, parse_request, percent_decode, split_target,
+        ParseError, MAX_BODY_BYTES, MAX_HEADER_BYTES,
     };
     use std::collections::BTreeMap;
     use std::io::Cursor;
@@ -1339,6 +1352,28 @@ mod tests {
             ParseError::Io(_) => {}
             other => panic!("expected Io, got {other:?}"),
         }
+    }
+
+    // ----- access_urls -----
+
+    #[test]
+    fn access_urls_loopback_only_when_lan_false() {
+        let urls = access_urls(8123, "deadbeef", false);
+        assert_eq!(urls.len(), 1, "expected only the loopback URL: {urls:?}");
+        assert_eq!(urls[0], "http://127.0.0.1:8123/#token=deadbeef");
+        assert!(
+            !urls.iter().any(|u| u.contains("0.0.0.0")),
+            "loopback-only must not advertise 0.0.0.0: {urls:?}"
+        );
+    }
+
+    #[test]
+    fn access_urls_starts_with_loopback_when_lan_true() {
+        // The set of LAN IPs depends on the test host (and may be empty in CI),
+        // so we only assert the invariant: the first URL is always loopback.
+        let urls = access_urls(8123, "deadbeef", true);
+        assert!(!urls.is_empty());
+        assert_eq!(urls[0], "http://127.0.0.1:8123/#token=deadbeef");
     }
 
     // ----- split_target -----
