@@ -233,6 +233,11 @@ jobs:
         working-directory: app
         run: pnpm install --frozen-lockfile
 
+      - name: Capture build timestamp
+        id: build_time
+        shell: bash
+        run: echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: Build app bundle
         shell: bash
         env:
@@ -243,6 +248,13 @@ jobs:
           # contents as the GitHub secret.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Build-integrity markers — surfaced by the in-app shield button so a
+          # user can tell at a glance whether they are running an official
+          # tagged-release build or a self-compiled / forked one. Only set on
+          # the tag-push path; absent on workflow_dispatch reruns.
+          PROJECTMIND_RELEASE_BUILD: '1'
+          PROJECTMIND_GIT_COMMIT: ${{ github.sha }}
+          PROJECTMIND_BUILT_AT: ${{ steps.build_time.outputs.built_at }}
         run: ./scripts/ci.sh app-build ${{ matrix.target }}
 
       - name: Package
