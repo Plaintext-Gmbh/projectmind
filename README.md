@@ -88,6 +88,17 @@ custom agent — can connect to. It implements:
 | `list_html_snippets` | Scan source files (`.java`, `.kt`, `.groovy`, `.scala`, incl. Java text blocks) for HTML snippets in string literals — filtered to ≥2 tags so XML namespace declarations and short error strings drop out. |
 | `plugin_info` | List active language and framework plugins. |
 | `start_gui` | Launch the ProjectMind desktop app if it isn't already running (the `view_*` tools auto-launch on demand, so call this only to bring up the window before any view intent). Honours `$PROJECTMIND_APP` for an override path. |
+| `open_browser_repo` | Start the in-process browser host that serves the ProjectMind webapp at a tokenized URL — same UI as the Tauri shell, but reachable from any browser. Default binds on `127.0.0.1`; pass `lan: true` to bind on `0.0.0.0` so the URL works from another device on the same WLAN (iPad / phone / second laptop). The bearer token in the URL fragment gates every API call. |
+| `browser_status` | Return the running browser host's bind address, tokenized URLs and open repo, or null if no host is started. Side-effect free — handy to re-surface the URL/token without restarting the host. |
+| `stop_browser` | Forget the cached browser host status so the next `open_browser_repo` starts fresh. |
+
+The browser host is the natural answer to *"open this repo on my iPad
+while I keep working on the laptop"*: ask the LLM to call
+`open_browser_repo` with `lan: true`, the response carries a
+`http://<lan-ip>:<port>/#token=…` URL you open on the second device.
+Both the Tauri desktop window and the browser tab subscribe to the
+same shared statefile, so any subsequent `view_*` / `walkthrough_*`
+push from the LLM mirrors to whichever viewers happen to be open.
 
 Active language plugins in Phase 1:
 
