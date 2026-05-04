@@ -2,8 +2,8 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { get } from 'svelte/store';
   import mermaid from 'mermaid';
-  import { showDiagram, fileRecency } from '../lib/api';
-  import type { ClassEntry, DiagramKind } from '../lib/api';
+  import { showDiagram, fileRecency, listChangesSince } from '../lib/api';
+  import type { ChangedFile, ClassEntry, DiagramKind } from '../lib/api';
   import {
     classes,
     selectedClass,
@@ -94,12 +94,15 @@
 
   // 'structure' (default) keeps the existing per-kind palette; 'recency'
   // tints each leaf by how long ago it was last touched; 'author' tints
-  // by the most-recent committer. Folders inherit the fact of the most
-  // recent descendant so both git-driven modes stay consistent.
+  // by the most-recent committer; 'diff' overlays git status against a
+  // ref. Folders inherit the most-prominent fact from their descendants
+  // so each git-driven mode stays consistent.
   // Persisted per-browser so the user's preference sticks across sessions.
-  type ColorBy = 'structure' | 'recency' | 'author';
+  type ColorBy = 'structure' | 'recency' | 'author' | 'diff';
   const COLOR_BY_KEY = 'projectmind.diagram.folderMap.colorBy';
+  const DIFF_REF_KEY = 'projectmind.diagram.folderMap.diffRef';
   let colorBy: ColorBy = readColorByPref();
+  let diffRef: string = readDiffRefPref();
   /// Per-path git fact: how long ago + who. Both recency and author modes
   /// read from this single cache so toggling between them doesn't re-fetch.
   /// `null` means "haven't loaded yet"; an empty Map means "loaded, repo
@@ -109,10 +112,18 @@
   let factsForRoot: string | null = null;
   let gitError: string | null = null;
 
+  /// Per-path change status against `diffRef`. Same load-once-per-(repo,ref)
+  /// caching shape as the recency/author cache above. `null` = not loaded;
+  /// empty Map = loaded but no changes (clean working tree at that ref).
+  type DiffStatus = ChangedFile['status'];
+  let changesByPath: Map<string, DiffStatus> | null = null;
+  let changesForKey: string | null = null;
+  let diffError: string | null = null;
+
   function readColorByPref(): ColorBy {
     try {
       const v = localStorage.getItem(COLOR_BY_KEY);
-      if (v === 'recency' || v === 'author' || v === 'structure') return v;
+      if (v === 'recency' || v === 'author' || v === 'structure' || v === 'diff') return v;
     } catch {
       // localStorage unavailable
     }
@@ -127,11 +138,42 @@
     }
   }
 
+  function readDiffRefPref(): string {
+    try {
+      const v = localStorage.getItem(DIFF_REF_KEY);
+      if (v && v.trim()) return v.trim();
+    } catch {
+      // localStorage unavailable
+    }
+    return 'HEAD~1';
+  }
+
+  function writeDiffRefPref(v: string) {
+    try {
+      localStorage.setItem(DIFF_REF_KEY, v);
+    } catch {
+      // ignore
+    }
+  }
+
   function setColorBy(v: ColorBy) {
     if (colorBy === v) return;
     colorBy = v;
     writeColorByPref(v);
     void render(kind, folderLayout, docGraphLayout);
+  }
+
+  function setDiffRef(v: string) {
+    const next = v.trim();
+    if (!next || next === diffRef) return;
+    diffRef = next;
+    writeDiffRefPref(next);
+    // Force a re-fetch on the next render — the cache key includes the ref,
+    // so changing it invalidates the prior load automatically, but we want
+    // the new fetch to happen now rather than on the next colorBy toggle.
+    changesByPath = null;
+    changesForKey = null;
+    if (colorBy === 'diff') void render(kind, folderLayout, docGraphLayout);
   }
 
   /// Fetch the per-file git facts (recency + author) for the current repo
@@ -170,6 +212,32 @@
     if (email && email.trim()) return email.trim().toLowerCase();
     if (name && name.trim()) return name.trim();
     return null;
+  }
+
+  /// Fetch (and cache) the per-file change status against `diffRef` for the
+  /// current repo. Cache key combines the repo root and the ref so flipping
+  /// either invalidates correctly. Best-effort: a failure (bad ref, no git)
+  /// surfaces the message in the toolbar; the diagram falls back to the
+  /// structure palette.
+  async function ensureChangesForCurrentRepo(): Promise<void> {
+    const root = $repo?.root ?? null;
+    if (!root) return;
+    const key = `${root}@${diffRef}`;
+    if (changesForKey === key && changesByPath !== null) return;
+    try {
+      const items = await listChangesSince(diffRef);
+      const map = new Map<string, DiffStatus>();
+      for (const item of items) {
+        map.set(item.path.replace(/\\/g, '/'), item.status);
+      }
+      changesByPath = map;
+      changesForKey = key;
+      diffError = null;
+    } catch (err) {
+      diffError = String(err);
+      changesByPath = new Map();
+      changesForKey = key;
+    }
   }
 
   // viewport state
@@ -267,6 +335,8 @@
       const wantGitFacts =
         k === 'folder-map' && (colorBy === 'recency' || colorBy === 'author');
       if (wantGitFacts) await ensureGitFactsForCurrentRepo();
+      const wantChanges = k === 'folder-map' && colorBy === 'diff';
+      if (wantChanges) await ensureChangesForCurrentRepo();
 
       const payload = await showDiagram(k);
       docGraph = null;
@@ -334,6 +404,9 @@
   function buildFillFor(
     map: FolderMap,
   ): (id: string, kind: 'root' | 'folder' | 'file') => string | null {
+    if (colorBy === 'diff') {
+      return buildDiffFillFor(map);
+    }
     if (
       (colorBy !== 'recency' && colorBy !== 'author') ||
       !factsByPath ||
@@ -384,6 +457,95 @@
       if (!f || !f.author) return null;
       return authorColor(f.author);
     };
+  }
+
+  /// Pick the most prominent change status from a node and its descendants.
+  /// Priority deleted > added > renamed > modified > type_change > other —
+  /// "things vanished" is the first thing a reviewer needs to notice, fresh
+  /// files are next, in-place edits last. Folders adopt the winning status
+  /// so a tinted parent says "something interesting happened in here";
+  /// untouched files / folders stay null and fall back to the structure
+  /// palette.
+  function buildDiffFillFor(
+    map: FolderMap,
+  ): (id: string, kind: 'root' | 'folder' | 'file') => string | null {
+    if (!changesByPath || changesByPath.size === 0) {
+      return () => null;
+    }
+    const byParent = new Map<string, FolderMapNode[]>();
+    for (const n of map.nodes) {
+      if (!n.parent) continue;
+      const arr = byParent.get(n.parent) ?? [];
+      arr.push(n);
+      byParent.set(n.parent, arr);
+    }
+    const changes = changesByPath;
+    const statusById = new Map<string, DiffStatus>();
+    function visit(node: FolderMapNode): DiffStatus | null {
+      if (node.kind === 'file') {
+        const s = changes.get(node.id) ?? null;
+        if (s) statusById.set(node.id, s);
+        return s;
+      }
+      const children = byParent.get(node.id) ?? [];
+      let best: DiffStatus | null = null;
+      for (const c of children) {
+        const v = visit(c);
+        if (v !== null && (best === null || diffPriority(v) > diffPriority(best))) best = v;
+      }
+      if (best !== null) statusById.set(node.id, best);
+      return best;
+    }
+    const rootNode = map.nodes.find((n) => n.parent === null);
+    if (rootNode) visit(rootNode);
+    return (id, kind) => {
+      const s = statusById.get(id);
+      if (!s) return null;
+      // Folders get a dimmed version so the eye still tracks the leaves
+      // as the primary signal; root + plain folders read as "contains
+      // something changed" without competing with their changed children.
+      return diffColor(s, kind !== 'file');
+    };
+  }
+
+  /// Rank statuses for parent aggregation — deleted wins so a vanished file
+  /// is never visually masked by a sibling rename or modification.
+  function diffPriority(s: DiffStatus): number {
+    switch (s) {
+      case 'deleted':
+        return 5;
+      case 'added':
+        return 4;
+      case 'renamed':
+        return 3;
+      case 'modified':
+        return 2;
+      case 'type_change':
+        return 1;
+      case 'other':
+      default:
+        return 0;
+    }
+  }
+
+  /// Status palette. Hues match the conventional "red = removed, green =
+  /// added, amber = changed" review vocabulary so the legend doesn't have
+  /// to be looked up. `dim` drops saturation + lifts lightness for folder
+  /// aggregates so files still pop against their containers.
+  function diffColor(status: DiffStatus, dim: boolean): string {
+    const palette: Record<DiffStatus, [number, number, number]> = {
+      added: [140, 60, 45],
+      modified: [35, 80, 50],
+      deleted: [0, 65, 50],
+      renamed: [270, 50, 55],
+      type_change: [200, 50, 50],
+      other: [220, 20, 50],
+    };
+    const [h, s, l] = palette[status];
+    if (dim) {
+      return `hsl(${h}, ${Math.max(20, s - 25)}%, ${Math.min(75, l + 18)}%)`;
+    }
+    return `hsl(${h}, ${s}%, ${l}%)`;
   }
 
   /// Map a "seconds since last commit" value onto an HSL colour. Brand-new
@@ -931,8 +1093,31 @@
         title="Colour by last committer — same author always gets the same hue"
         aria-pressed={colorBy === 'author'}
       >A</button>
+      <button
+        class:active={colorBy === 'diff'}
+        on:click={() => setColorBy('diff')}
+        title="Overlay git status against a ref — added / modified / deleted"
+        aria-pressed={colorBy === 'diff'}
+      >D</button>
+      {#if colorBy === 'diff'}
+        <input
+          class="diff-ref"
+          type="text"
+          spellcheck="false"
+          autocomplete="off"
+          value={diffRef}
+          title="Git ref to compare against (e.g. HEAD~1, main, a1b2c3d)"
+          on:change={(e) => setDiffRef((e.target as HTMLInputElement).value)}
+          on:keydown={(e) => {
+            if (e.key === 'Enter') setDiffRef((e.target as HTMLInputElement).value);
+          }}
+        />
+      {/if}
       {#if (colorBy === 'recency' || colorBy === 'author') && gitError}
         <span class="hint" style="color: var(--error);" title={gitError}>⚠ git unavailable</span>
+      {/if}
+      {#if colorBy === 'diff' && diffError}
+        <span class="hint" style="color: var(--error);" title={diffError}>⚠ git unavailable</span>
       {/if}
     {:else if kind === 'doc-graph'}
       <span class="divider"></span>
@@ -1092,6 +1277,23 @@
     color: var(--fg-2);
     min-width: 44px;
     text-align: right;
+  }
+
+  .diff-ref {
+    width: 96px;
+    height: 24px;
+    padding: 0 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg-1);
+    background: var(--bg-2);
+    border: 1px solid var(--bg-3);
+    border-radius: 4px;
+  }
+
+  .diff-ref:focus {
+    outline: none;
+    border-color: var(--accent-2);
   }
 
   .doc-summary {
