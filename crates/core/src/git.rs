@@ -59,6 +59,7 @@ pub fn list_changes_since(
     to_ref: Option<&str>,
 ) -> Result<Vec<ChangedFile>, GitError> {
     let repo = GitRepo::discover(repo_root)?;
+    let (from_ref, to_ref) = split_range(from_ref, to_ref);
     let from_tree = resolve_tree(&repo, from_ref)?;
 
     let diff = if let Some(to) = to_ref {
@@ -78,6 +79,7 @@ pub fn unified_diff(
     to_ref: Option<&str>,
 ) -> Result<String, GitError> {
     let repo = GitRepo::discover(repo_root)?;
+    let (from_ref, to_ref) = split_range(from_ref, to_ref);
     let from_tree = resolve_tree(&repo, from_ref)?;
     let diff = if let Some(to) = to_ref {
         let to_tree = resolve_tree(&repo, to)?;
@@ -97,6 +99,28 @@ pub fn unified_diff(
         true
     })?;
     Ok(out)
+}
+
+/// Accept the git CLI shorthand `A..B` inside `from_ref` and split it into
+/// `(A, Some(B))`. If `to_ref` is already set, it wins — the caller passed an
+/// explicit second ref and we treat the inline range's tail as redundant.
+/// `A...B` (three dots = symmetric difference) is treated like `A..B` here;
+/// libgit2 doesn't model the merge base on this path either way.
+fn split_range<'a>(from_ref: &'a str, to_ref: Option<&'a str>) -> (&'a str, Option<&'a str>) {
+    if to_ref.is_some() {
+        return (from_ref, to_ref);
+    }
+    let sep = if from_ref.contains("...") {
+        "..."
+    } else {
+        ".."
+    };
+    if let Some((from, to)) = from_ref.split_once(sep) {
+        if !from.is_empty() && !to.is_empty() {
+            return (from, Some(to));
+        }
+    }
+    (from_ref, to_ref)
 }
 
 fn resolve_tree<'a>(repo: &'a GitRepo, name: &str) -> Result<git2::Tree<'a>, GitError> {
@@ -468,5 +492,64 @@ mod tests {
         let y = by_path.get(&PathBuf::from("y.md")).unwrap();
         assert_eq!(y.author_name.as_deref(), Some("Alice"));
         assert_eq!(y.author_email.as_deref(), Some("alice@example.com"));
+    }
+
+    #[test]
+    fn split_range_passes_plain_ref_through() {
+        assert_eq!(split_range("HEAD", None), ("HEAD", None));
+        assert_eq!(
+            split_range("HEAD", Some("master")),
+            ("HEAD", Some("master"))
+        );
+    }
+
+    #[test]
+    fn split_range_extracts_two_dot_range() {
+        assert_eq!(
+            split_range("origin/master..HEAD", None),
+            ("origin/master", Some("HEAD"))
+        );
+    }
+
+    #[test]
+    fn split_range_extracts_three_dot_range() {
+        assert_eq!(
+            split_range("main...feature", None),
+            ("main", Some("feature"))
+        );
+    }
+
+    #[test]
+    fn split_range_explicit_to_ref_wins_over_inline_range() {
+        // When the caller passed an explicit `to_ref`, the inline range tail
+        // is redundant — keep `from_ref` untouched and let libgit2 fail
+        // loudly if it really is malformed.
+        assert_eq!(
+            split_range("origin/master..HEAD", Some("v1.0")),
+            ("origin/master..HEAD", Some("v1.0"))
+        );
+    }
+
+    #[test]
+    fn split_range_ignores_empty_sides() {
+        // `..HEAD` and `HEAD..` are valid git CLI shorthands but we have no
+        // way to fill in the implied side without inventing repo state, so
+        // pass them through and let `revparse_single` produce a clear error.
+        assert_eq!(split_range("..HEAD", None), ("..HEAD", None));
+        assert_eq!(split_range("HEAD..", None), ("HEAD..", None));
+    }
+
+    #[test]
+    fn unified_diff_accepts_inline_range() {
+        let tmp = TempDir::new();
+        let repo = init_repo(tmp.path());
+        commit_file(&repo, tmp.path(), "a.txt", "v1\n", "first", 1_700_000_000);
+        commit_file(&repo, tmp.path(), "a.txt", "v2\n", "second", 1_700_000_100);
+
+        // Caller passes an `A..B` shorthand in `from_ref` with no explicit
+        // `to_ref` — the regression in issue #119.
+        let out = unified_diff(tmp.path(), "HEAD~1..HEAD", None).expect("range diff");
+        assert!(out.contains("-v1"), "diff should show old line: {out}");
+        assert!(out.contains("+v2"), "diff should show new line: {out}");
     }
 }

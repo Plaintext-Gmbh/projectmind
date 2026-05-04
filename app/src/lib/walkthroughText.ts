@@ -39,3 +39,27 @@ export function expandStepRefs(md: string): string {
     return `[${text}](pm:step:${n - 1})`;
   });
 }
+
+/// Same-file line anchor inside narration markdown. Matches `#L42`,
+/// `#L42-58` and the `#L42-L58` / `#L42–L58` (en-dash) variants the LLM
+/// occasionally emits.
+const LINE_ANCHOR = /^#L(\d+)(?:[-–]L?(\d+))?$/;
+
+/// Parse a same-file line anchor into a `{from, to}` line range. Returns
+/// `null` for any other anchor (heading slugs, empty strings, …) so callers
+/// can fall through to their default handler.
+///
+/// Single-line refs (`#L42`) collapse to `from === to` so the renderer can
+/// flash one line. The 1-based line numbers match what the user sees in the
+/// gutter.
+export function matchLineAnchor(href: string): { from: number; to: number } | null {
+  const m = LINE_ANCHOR.exec(href);
+  if (!m) return null;
+  const from = Number(m[1]);
+  const to = m[2] ? Number(m[2]) : from;
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return null;
+  // Reversed ranges (`#L20-10`) are normalised so the renderer doesn't
+  // need to special-case them.
+  if (to < from) return { from: to, to: from };
+  return { from, to };
+}

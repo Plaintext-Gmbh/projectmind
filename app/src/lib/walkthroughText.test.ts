@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { expandStepRefs } from './walkthroughText';
+import { expandStepRefs, matchLineAnchor } from './walkthroughText';
 
 describe('expandStepRefs', () => {
   it('rewrites short form to a 0-based pm:step link', () => {
@@ -43,5 +43,42 @@ describe('expandStepRefs', () => {
     expect(expandStepRefs(md)).toBe(
       '[link](https://example.com) and [step 1](pm:step:0)',
     );
+  });
+});
+
+describe('matchLineAnchor', () => {
+  it('parses single-line anchors', () => {
+    expect(matchLineAnchor('#L42')).toEqual({ from: 42, to: 42 });
+  });
+
+  it('parses multi-line ranges with bare numbers', () => {
+    expect(matchLineAnchor('#L42-58')).toEqual({ from: 42, to: 58 });
+  });
+
+  it('parses multi-line ranges with the `L` prefix repeated', () => {
+    // The LLM occasionally writes `#L42-L58` instead of `#L42-58`.
+    expect(matchLineAnchor('#L42-L58')).toEqual({ from: 42, to: 58 });
+  });
+
+  it('parses ranges joined by an en-dash', () => {
+    // Markdown editors sometimes auto-substitute `-` with an en-dash.
+    expect(matchLineAnchor('#L42–L58')).toEqual({ from: 42, to: 58 });
+    expect(matchLineAnchor('#L42–58')).toEqual({ from: 42, to: 58 });
+  });
+
+  it('normalises reversed ranges so the renderer never gets `to < from`', () => {
+    expect(matchLineAnchor('#L20-L10')).toEqual({ from: 10, to: 20 });
+  });
+
+  it('returns null for non-line anchors so heading slugs fall through', () => {
+    expect(matchLineAnchor('#some-heading')).toBeNull();
+    expect(matchLineAnchor('#L')).toBeNull();
+    expect(matchLineAnchor('#Labc')).toBeNull();
+    expect(matchLineAnchor('')).toBeNull();
+  });
+
+  it('returns null for non-anchor hrefs', () => {
+    expect(matchLineAnchor('https://example.com')).toBeNull();
+    expect(matchLineAnchor('pm:file:/foo#L42')).toBeNull();
   });
 });

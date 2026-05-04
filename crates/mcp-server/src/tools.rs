@@ -40,8 +40,8 @@ fn ref_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "ref":   { "type": "string", "description": "Git ref to compare against (e.g. HEAD, HEAD~5)" },
-            "to":    { "type": "string", "description": "Optional second ref; defaults to working tree" }
+            "ref":   { "type": "string", "description": "Git ref to compare from (e.g. HEAD, HEAD~5, origin/master). Also accepts the `A..B` range shorthand — in that case omit `to`." },
+            "to":    { "type": "string", "description": "Optional second ref; defaults to the working tree. Leave empty when `ref` already uses `A..B` shorthand." }
         },
         "required": ["ref"]
     })
