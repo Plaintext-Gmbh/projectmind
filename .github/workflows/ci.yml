@@ -93,6 +93,25 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
 
+      # projectmind-mcp embeds app/dist via include_dir!, so the frontend
+      # must exist before the Rust build starts. Same pnpm + node setup as
+      # the `rust` job above.
+      - name: Install pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 9
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Build frontend (required for include_dir!)
+        working-directory: app
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
       - name: Build + smoke test release MCP binary
         run: ./scripts/ci.sh release-smoke
 

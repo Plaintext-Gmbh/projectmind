@@ -66,6 +66,18 @@ fn initialize_returns_server_info() {
 }
 
 #[test]
+fn initialize_returns_routing_instructions() {
+    let mut s = Server::spawn();
+    let resp = s.call(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#);
+    let instructions = resp["result"]["instructions"]
+        .as_str()
+        .expect("initialize must surface server instructions for client-side routing");
+    assert!(instructions.contains("Desktop GUI"));
+    assert!(instructions.contains("open_browser_repo"));
+    assert!(instructions.contains("walkthrough_start"));
+}
+
+#[test]
 fn tools_list_includes_open_repo() {
     let mut s = Server::spawn();
     let resp = s.call(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#);

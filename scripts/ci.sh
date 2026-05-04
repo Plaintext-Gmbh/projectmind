@@ -85,6 +85,30 @@ cmd_test() {
     cargo test "${cargo_args[@]}" --doc
 }
 
+# projectmind-mcp embeds `app/dist` via `include_dir!`, so any cargo
+# build that touches the MCP crate (release-build, release-smoke,
+# stage-mcp-sidecar) needs the frontend built first. Idempotent: skips
+# when `app/dist/index.html` already exists. CI also installs pnpm and
+# builds the frontend in an explicit step (for actions/setup-node's
+# pnpm cache), so this helper is the local-iteration safety net.
+ensure_frontend_built() {
+    if [[ -f "$ROOT_DIR/app/dist/index.html" ]]; then
+        return
+    fi
+    if ! command -v pnpm >/dev/null 2>&1; then
+        echo "ensure_frontend_built: 'pnpm' not found and app/dist is missing — install pnpm or build app/dist manually" >&2
+        exit 1
+    fi
+    echo "ensure_frontend_built: app/dist missing → running pnpm install + pnpm build"
+    (
+        cd "$ROOT_DIR/app"
+        if [[ ! -d node_modules ]]; then
+            pnpm install --frozen-lockfile
+        fi
+        pnpm build
+    )
+}
+
 # tauri-build's build script validates `bundle.externalBin` paths on
 # every cargo invocation that touches the projectmind-app crate, even
 # `cargo check` / `clippy`. Stage an empty placeholder so check/test
@@ -125,6 +149,7 @@ cmd_install_deps() {
 
 cmd_release_build() {
     local target="${1:-}"
+    ensure_frontend_built
     if [[ -n "$target" ]]; then
         cargo build --release --bin projectmind-mcp --target "$target"
     else
@@ -186,6 +211,10 @@ cmd_app_build() {
     # bundle build. tauri.conf.json declares `externalBin` so the bundler
     # picks up `app/src-tauri/binaries/projectmind-mcp-<triple>{ext}` and
     # ships it next to the GUI binary inside the .app/.deb/.msi.
+    # The sidecar build embeds app/dist via include_dir!, and runs
+    # before Tauri's own beforeBuildCommand, so the frontend has to be
+    # ready up front.
+    ensure_frontend_built
     cmd_stage_mcp_sidecar "$target"
 
     cd "$ROOT_DIR/app"
