@@ -85,6 +85,29 @@ pub(crate) async fn dispatch(
     }
 }
 
+/// Server-level guidance surfaced via the MCP `instructions` field on
+/// `initialize`. Compatible MCP clients (Claude Code, Codex, …) load this
+/// once into the model context, so it is the right place for cross-tool
+/// routing rules that would otherwise have to be duplicated into every tool
+/// description. Keep it short and concrete — verbose guidance pushes useful
+/// tokens out of the prompt.
+const SERVER_INSTRUCTIONS: &str = r"ProjectMind ships two viewers that share state through a filesystem statefile:
+
+1. Desktop GUI (Tauri shell). Auto-launches on the first `view_*` / `walkthrough_*` call. Use `start_gui` to bring the window up explicitly.
+2. Browser webapp. Started on demand via `open_browser_repo`, accessed at the tokenized URL the tool returns (`http://<host>:<port>/#token=<token>`). Polls the statefile every couple of seconds.
+
+`view_*` and `walkthrough_*` push state. EVERY viewer that is currently open mirrors the change — there is no per-viewer routing. ``Send something only to the browser'' means: make sure the user has only the browser open. Same the other way round.
+
+User intent → tool routing:
+
+- ``open in browser'' / ``im Browser zeigen'' / ``open it on my iPad / phone / laptop'': call `open_browser_repo`. Pass `lan: true` whenever the user mentions another device (iPad, phone, second laptop, anyone else on the WLAN) — otherwise the URL is loopback-only and useless off-machine. Surface the returned URL (including `#token=...`) verbatim to the user; you cannot open it for them.
+- ``start a tour'' / ``walk me through ...'' (no qualifier): call `walkthrough_start`. The Desktop GUI auto-launches.
+- ``start a tour in the browser'' / ``tour me through this on my iPad'': make sure `open_browser_repo` has been called (use `browser_status` to check first), surface the URL, then `walkthrough_start`.
+- ``show me file X'' / ``open class Y'': use `view_file` / `view_class`. Mirrors to whatever viewer(s) are open.
+- ``show me X locally'' / ``in the desktop app'': there is no separate desktop-only push. If the browser viewer is also open it will mirror. If the user really wants the browser quiet, tell them to close that tab — do not silently fail.
+
+`browser_status` is a free, side-effect-less status check. Always call it before a second `open_browser_repo` to re-surface the existing URL/token instead of restarting the host.";
+
 fn initialize_response() -> Value {
     json!({
         "protocolVersion": PROTOCOL_VERSION,
@@ -94,7 +117,8 @@ fn initialize_response() -> Value {
         "serverInfo": {
             "name": SERVER_NAME,
             "version": SERVER_VERSION,
-        }
+        },
+        "instructions": SERVER_INSTRUCTIONS,
     })
 }
 

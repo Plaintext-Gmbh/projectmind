@@ -221,8 +221,8 @@ fn open_browser_repo_schema() -> Value {
         "properties": {
             "path": { "type": "string", "description": "Absolute path to the repository root. Defaults to the currently-open repo or current statefile repo." },
             "port": { "type": "integer", "minimum": 0, "maximum": 65535, "description": "Port to bind; 0 means choose a free port." },
-            "open_browser": { "type": "boolean", "default": true, "description": "Open the default browser on this machine after starting." },
-            "lan": { "type": "boolean", "default": false, "description": "Bind on 0.0.0.0 so the host is reachable from other devices in the LAN (e.g. iPad/phone). Default is false: bind on 127.0.0.1 only." }
+            "open_browser": { "type": "boolean", "default": true, "description": "Open the default browser on THIS machine after starting. Set false when the user only wants the link surfaced in chat (e.g. to copy onto another device)." },
+            "lan": { "type": "boolean", "default": false, "description": "Set true to bind on 0.0.0.0 so the URL contains a LAN IP and is reachable from other devices on the same WLAN (iPad / phone / another laptop). Default false binds on 127.0.0.1 — loopback only, useless off-machine. The bearer token in the URL fragment still gates every request." }
         }
     })
 }
@@ -314,27 +314,27 @@ pub(crate) fn list() -> Value {
             },
             {
                 "name": "view_class",
-                "description": "Tell the GUI to switch to the classes view and open the given class. MCP-driven navigation; takes precedence over manual GUI navigation.",
+                "description": "Open a class in every ProjectMind viewer that is currently running (Desktop GUI and/or browser webapp from `open_browser_repo`). Use after the user says `show me class X` / `open class X`. Pushes UI state via the shared statefile — no per-viewer routing exists. Auto-launches the Desktop GUI if no viewer is up; takes precedence over manual GUI navigation.",
                 "inputSchema": fqn_schema()
             },
             {
                 "name": "view_diff",
-                "description": "Tell the GUI to switch to the diff view between two git refs (or `ref` vs working tree).",
+                "description": "Open the diff view between two git refs (or `ref` vs working tree) in every running ProjectMind viewer. Mirrors to Desktop GUI and/or browser webapp simultaneously — there is no per-viewer routing. Auto-launches the Desktop GUI if nothing is open.",
                 "inputSchema": ref_schema()
             },
             {
                 "name": "view_file",
-                "description": "Tell the GUI to open an arbitrary file. Markdown is rendered (mermaid blocks + images embedded); other extensions show as plain source.",
+                "description": "Open an arbitrary file in every running ProjectMind viewer (Desktop GUI and/or browser webapp). Markdown is rendered (mermaid blocks + images embedded); other extensions show as plain source. Use after `show me file X` / `open README` etc. Mirrors to all open viewers — there is no per-viewer routing. Auto-launches the Desktop GUI if nothing is open.",
                 "inputSchema": file_schema()
             },
             {
                 "name": "view_diagram",
-                "description": "Tell the GUI to switch to the diagram view (`bean-graph` or `package-tree`).",
+                "description": "Open a diagram (`bean-graph`, `package-tree`, `folder-map`, …) in every running ProjectMind viewer. Mirrors to Desktop GUI and/or browser webapp simultaneously. Auto-launches the Desktop GUI if nothing is open.",
                 "inputSchema": diagram_schema()
             },
             {
                 "name": "walkthrough_start",
-                "description": "Start a guided tour. The GUI switches to the walk-through view, displaying step 0 with the LLM's narration and the chosen target (class / file / diff / note). Replaces any previous tour.",
+                "description": "Start a guided tour. Pushes the tour body + step 0 to every viewer currently open (Desktop GUI and/or browser webapp from `open_browser_repo`). Use after `give me a tour` / `walk me through ...`. For `tour in the browser` / `tour me through this on my iPad`, call `open_browser_repo` first (with `lan: true` if a remote device is involved) so the user has a URL to open before the tour starts. Replaces any previous tour. Auto-launches the Desktop GUI if nothing else is open.",
                 "inputSchema": walkthrough_start_schema()
             },
             {
@@ -359,22 +359,22 @@ pub(crate) fn list() -> Value {
             },
             {
                 "name": "open_browser_repo",
-                "description": "Start the LAN browser host, open a repository, and return tokenized browser URLs. This binds to 0.0.0.0 and requires the returned random token for all API calls.",
+                "description": "Start the in-process browser host that serves the ProjectMind webapp at a tokenized URL, then surface that URL to the user verbatim — they will open it themselves; you cannot. Use after `open in browser` / `im Browser zeigen` / `show me on my iPad / phone / laptop`. Pass `lan: true` whenever the user mentions a remote device (iPad, phone, second machine on the same WLAN) — otherwise the URL is `http://127.0.0.1:...` and unreachable from anything but this machine. The bearer token in the URL fragment gates every API call regardless of bind address. Idempotent: calling again with a different `path` reopens the host on the existing port; call `browser_status` first to avoid restarting the host. Once the user has opened the URL, every subsequent `view_*` / `walkthrough_*` push will mirror to that browser tab in addition to the Desktop GUI.",
                 "inputSchema": open_browser_repo_schema()
             },
             {
                 "name": "browser_status",
-                "description": "Return the running LAN browser host status, including tokenized URLs, or null if it has not been started.",
+                "description": "Return the running browser host's bind address, tokenized URLs and open repo, or null if no host is running. Side-effect-free — call this before `open_browser_repo` to re-surface the existing URL/token instead of restarting the host (or to show the user the link again).",
                 "inputSchema": no_args_schema()
             },
             {
                 "name": "stop_browser",
-                "description": "Forget the LAN browser host status for this MCP process. The listener exits when the process exits.",
+                "description": "Forget the cached browser host status for this MCP process so the next `open_browser_repo` call starts fresh. The actual TCP listener exits when the MCP process exits — this does not kill it mid-session.",
                 "inputSchema": no_args_schema()
             },
             {
                 "name": "start_gui",
-                "description": "Launch the ProjectMind desktop app if it is not already running. Most `view_*` tools auto-launch the GUI on demand, so call this explicitly only when you want to bring up the window before any view intent (e.g. before starting a walkthrough). On macOS this uses `open -a ProjectMind`; on Linux the binary is invoked directly. Set $PROJECTMIND_APP to override the resolved path.",
+                "description": "Bring up the ProjectMind Desktop window (Tauri shell) if not already running. Most `view_*` / `walkthrough_*` tools auto-launch the GUI on demand, so call this explicitly only when the user says `open the desktop app` / `starte die Desktop-App`, or when you want the window up before the first push of a tour. Returns whether it was already running. On macOS uses `open -a ProjectMind`; on Linux execs the binary. Honours $PROJECTMIND_APP for an override. Note: this is the local desktop counterpart to `open_browser_repo` — use `open_browser_repo` instead when the user says `in browser` / `auf dem iPad`.",
                 "inputSchema": no_args_schema()
             }
         ]
@@ -1190,6 +1190,19 @@ fn stop_browser() -> DispatchResult {
     Ok(text_result(json!({"ok": true}).to_string()))
 }
 
+/// Web frontend embedded into the MCP binary at compile time.
+///
+/// The `app/dist` directory must exist at build time — the workspace CI
+/// always runs `pnpm build` before `cargo build` because the Tauri crate's
+/// `tauri::generate_context!()` macro requires it as well, so this is a
+/// shared invariant rather than an extra build step. Embedding solves the
+/// "Linux .deb / macOS .app installs `projectmind-mcp` to a system path
+/// where no sibling `app/dist` exists, so `open_browser_repo` could never
+/// find the assets" problem without duplicating the assets onto disk: one
+/// binary, one source-of-truth, extracted lazily on first use.
+static EMBEDDED_WEB_DIST: include_dir::Dir<'_> =
+    include_dir::include_dir!("$CARGO_MANIFEST_DIR/../../app/dist");
+
 fn locate_web_dist() -> anyhow::Result<PathBuf> {
     if let Some(path) = std::env::var_os("PROJECTMIND_WEB_DIST") {
         let path = PathBuf::from(path);
@@ -1209,7 +1222,34 @@ fn locate_web_dist() -> anyhow::Result<PathBuf> {
             return Ok(candidate);
         }
     }
-    anyhow::bail!("set PROJECTMIND_WEB_DIST or run from the ProjectMind repo root")
+    extract_embedded_web_dist()
+}
+
+/// Extract the embedded `app/dist` payload to a versioned cache directory
+/// so subsequent calls (and other concurrent MCP processes on the same
+/// machine) reuse the same files. The version segment in the path means a
+/// `projectmind-mcp` upgrade automatically lands in a fresh directory and
+/// the old one can be garbage-collected by the user without breaking the
+/// running process.
+fn extract_embedded_web_dist() -> anyhow::Result<PathBuf> {
+    let cache_root = dirs::cache_dir()
+        .ok_or_else(|| anyhow::anyhow!("no cache dir available for extracting web assets"))?
+        .join("projectmind")
+        .join(format!("web-dist-{}", env!("CARGO_PKG_VERSION")));
+    if cache_root.join("index.html").is_file() {
+        return Ok(cache_root);
+    }
+    std::fs::create_dir_all(&cache_root)?;
+    EMBEDDED_WEB_DIST
+        .extract(&cache_root)
+        .map_err(|e| anyhow::anyhow!("failed to extract embedded web assets: {e}"))?;
+    if !cache_root.join("index.html").is_file() {
+        anyhow::bail!(
+            "embedded web assets extracted but index.html is missing — \
+             this is a packaging bug, please file an issue"
+        );
+    }
+    Ok(cache_root)
 }
 
 /// Best-effort statefile write. Failures are logged but never bubble up: the
@@ -1259,5 +1299,16 @@ mod tests {
     fn escape_id_strips_special_chars() {
         assert_eq!(escape_id("com.example.Foo"), "com_example_Foo");
         assert_eq!(escape_id("UserService<T>"), "UserService_T_");
+    }
+
+    #[test]
+    fn embedded_web_dist_contains_index_html() {
+        // Pins the contract that `app/dist/index.html` is built and embedded
+        // into the binary. Without this the Linux .deb / macOS .app bundles
+        // ship an MCP server that cannot serve the browser webapp at all.
+        assert!(
+            EMBEDDED_WEB_DIST.get_file("index.html").is_some(),
+            "app/dist/index.html must exist at build time and be embedded"
+        );
     }
 }

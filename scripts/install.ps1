@@ -23,6 +23,25 @@ function Info($msg) { Write-Host "::" -ForegroundColor Cyan -NoNewline; Write-Ho
 function Warn($msg) { Write-Host "!!" -ForegroundColor Yellow -NoNewline; Write-Host " $msg" }
 function Fail($msg) { Write-Host "xx" -ForegroundColor Red -NoNewline; Write-Host " $msg"; exit 1 }
 
+# ---- environment hardening ------------------------------------------------
+# Windows PowerShell 5.1 (the default on Windows 10 / Server 2016/2019
+# installs without recent updates) negotiates TLS 1.0 / 1.1 by default.
+# GitHub's release CDN and API both reject those, so `Invoke-WebRequest`
+# fails with "Could not create SSL/TLS secure channel" before any download
+# starts. PowerShell 7+ already defaults to TLS 1.2+; the OR with the
+# existing setting is a harmless no-op there.
+try {
+    [Net.ServicePointManager]::SecurityProtocol = `
+        [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+} catch {
+    Warn "could not enforce TLS 1.2 — GitHub downloads may fail on this PowerShell version"
+}
+
+# GitHub's REST API rejects requests with no User-Agent header (HTTP 403,
+# message "Request forbidden by administrative rules"). Releases-CDN
+# tolerates a missing UA, but sending one consistently keeps both happy.
+$WebHeaders = @{ 'User-Agent' = "projectmind-installer/$Version" }
+
 # ---- detect arch -----------------------------------------------------------
 $arch = $env:PROCESSOR_ARCHITECTURE
 if ($arch -ne 'AMD64' -and $arch -ne 'x86_64') {
@@ -44,7 +63,7 @@ New-Item -ItemType Directory -Force -Path $BinDest | Out-Null
 $ReleaseApi = "https://api.github.com/repos/$Repo/releases"
 if ($Version -eq 'latest') {
     Info "resolving latest release tag"
-    $latest = Invoke-RestMethod -UseBasicParsing -Uri "$ReleaseApi/latest"
+    $latest = Invoke-RestMethod -UseBasicParsing -Uri "$ReleaseApi/latest" -Headers $WebHeaders
     $Tag = $latest.tag_name
     if (-not $Tag) { Fail "could not parse latest release tag from GitHub API" }
 } else {
@@ -59,7 +78,7 @@ New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
 try {
     function Download($asset) {
         Info "downloading $asset"
-        Invoke-WebRequest -UseBasicParsing -Uri "$DownloadBase/$asset" -OutFile (Join-Path $Tmp $asset)
+        Invoke-WebRequest -UseBasicParsing -Uri "$DownloadBase/$asset" -OutFile (Join-Path $Tmp $asset) -Headers $WebHeaders
     }
 
     # Soft variant: returns $true on success, $false on 404/transport error
@@ -68,11 +87,19 @@ try {
     function Download-Optional($asset) {
         Info "downloading $asset"
         try {
-            Invoke-WebRequest -UseBasicParsing -Uri "$DownloadBase/$asset" -OutFile (Join-Path $Tmp $asset) -ErrorAction Stop
+            Invoke-WebRequest -UseBasicParsing -Uri "$DownloadBase/$asset" -OutFile (Join-Path $Tmp $asset) -Headers $WebHeaders -ErrorAction Stop
             return $true
         } catch {
             return $false
         }
+    }
+
+    # All release archives are .tar.gz. `tar.exe` ships with Windows 10
+    # build 17063+ (April 2018) and Windows 11; on older builds the call
+    # below fails with an unhelpful "tar is not recognized" — surface a
+    # clear pointer instead.
+    if (-not (Get-Command tar -ErrorAction SilentlyContinue)) {
+        Fail "'tar' not found. Update to Windows 10 build 17063+ / Windows 11, or install 7-Zip and extract the release manually from https://github.com/$Repo/releases"
     }
 
     # ---- MCP server ------------------------------------------------------

@@ -81,8 +81,9 @@ regex = "1"
 nucleo-matcher = "0.3"
 
 # Filesystem
-dirs   = "6"
-notify = "8"
+dirs        = "6"
+include_dir = "0.7"
+notify      = "8"
 
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
