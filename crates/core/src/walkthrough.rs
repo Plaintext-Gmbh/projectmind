@@ -76,9 +76,39 @@ pub enum WalkthroughTarget {
         /// Optional target ref. `None` means working tree.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to: Option<String>,
+        /// Optional focus inside the diff (#126). When present the GUI
+        /// scrolls + pulses the matching hunk; old tour payloads that
+        /// don't set it render the diff exactly like before.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        focus: Option<DiffFocus>,
     },
     /// Pure narration; nothing rendered in the target pane.
     Note,
+}
+
+/// Optional spotlight inside a diff target (#126).
+///
+/// All fields are independent: `file` alone scrolls the diff to the first
+/// hunk of that file; `file + hunk` jumps to a specific hunk inside it;
+/// `file + line` jumps to a particular line. The GUI tolerates any
+/// combination — a `line` without a `file` falls back to "first hunk
+/// containing that line", which is usually unique inside a single
+/// commit-sized patch.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DiffFocus {
+    /// Repository-relative path of the file to scroll to. Match is
+    /// substring on the `+++ b/<path>` header so callers can pass
+    /// either the relative path or just the basename.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    /// 0-based hunk index *within `file`* (or the whole diff when no
+    /// file is set). Ignored when out of range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hunk: Option<u32>,
+    /// 1-based line number in the new file (i.e. the right side of the
+    /// diff). Ignored when out of range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
 }
 
 /// 1-based inclusive line range.

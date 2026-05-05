@@ -845,7 +845,11 @@
             ><span class="lineno">{lineNo}</span><span class="content">{line}</span>
 </span>{/each}</code></pre>
           {:else if step.target.kind === 'diff'}
-            <DiffView reference={step.target.reference} to={step.target.to ?? null} />
+            <DiffView
+              reference={step.target.reference}
+              to={step.target.to ?? null}
+              focus={step.target.focus ?? null}
+            />
           {/if}
         </div>
 
