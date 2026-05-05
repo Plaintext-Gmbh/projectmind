@@ -294,7 +294,8 @@ export type DiagramKind =
   | 'folder-map'
   | 'inheritance-tree'
   | 'doc-graph'
-  | 'c4-container';
+  | 'c4-container'
+  | 'architecture-layers';
 
 export async function showDiagram(kind: DiagramKind): Promise<string> {
   if (!isTauriRuntime()) return api<string>(`/api/show_diagram${query({ kind })}`);

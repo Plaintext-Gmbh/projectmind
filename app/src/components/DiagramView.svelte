@@ -2,6 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { get } from 'svelte/store';
   import mermaid from 'mermaid';
+  import DrawIoFrame from './DrawIoFrame.svelte';
   import { showDiagram, fileRecency, listChangesSince } from '../lib/api';
   import type { ChangedFile, ClassEntry, DiagramKind } from '../lib/api';
   import {
@@ -78,6 +79,7 @@
   let stage: HTMLDivElement;
   let mermaidSource = '';
   let svg = '';
+  let drawIoXml = '';
   let docGraph: DocGraph | null = null;
   let selectedDocId: string | null = null;
   let docGraphLayout: 'network' | 'radial' | 'orphans' = 'network';
@@ -336,6 +338,7 @@
 
       const payload = await showDiagram(k);
       docGraph = null;
+      drawIoXml = '';
       if (k === 'folder-map') {
         mermaidSource = '';
         svg = renderFolderMap(JSON.parse(payload) as FolderMap, layout);
@@ -346,6 +349,10 @@
           selectedDocId = null;
         }
         svg = renderDocGraph(docGraph, docLayout);
+      } else if (k === 'architecture-layers') {
+        mermaidSource = '';
+        svg = '';
+        drawIoXml = payload;
       } else {
         mermaidSource = payload;
         const id = `mermaid-${Date.now()}`;
@@ -354,6 +361,7 @@
       }
       resetView();
       await tick();
+      if (drawIoXml) return;
       const node = stage?.querySelector('svg') as SVGSVGElement | null;
       if (node) {
         // Drop Mermaid's inline width/maxWidth so we control sizing.
@@ -1105,6 +1113,8 @@
       <span class="doc-summary">
         {docGraph.nodes.length} docs · {docGraph.edges.length} links · {docGraph.orphan_count} orphans · {docGraph.dangling_count} dangling
       </span>
+    {:else if kind === 'architecture-layers'}
+      <span class="doc-summary">draw.io architecture layer map</span>
     {/if}
     <span class="hint">Drag to pan • Shift + wheel to zoom</span>
   </div>
@@ -1113,6 +1123,10 @@
   {:else if error}
     <div class="error">⚠ {error}</div>
     <pre>{mermaidSource}</pre>
+  {:else if drawIoXml}
+    <div class="drawio-stage">
+      <DrawIoFrame xml={drawIoXml} title="draw.io architecture layer map" />
+    </div>
   {:else}
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -1280,6 +1294,13 @@
     /* let SVG fill the whole canvas */
     background:
       radial-gradient(circle at 1px 1px, var(--bg-2) 1px, transparent 0) 0 0 / 24px 24px;
+  }
+  .drawio-stage {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    overflow: hidden;
+    background: var(--bg-0);
   }
 
   .stage.dragging {

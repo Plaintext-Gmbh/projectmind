@@ -623,6 +623,323 @@ pub fn render_c4_container(repo: &Repository, framework: &dyn FrameworkPlugin) -
     out
 }
 
+/// Render an internal architecture layer map as draw.io XML.
+///
+/// Files/classes are placed as small circular nodes on three concentric
+/// architectural rings: outside contact, business logic, and data
+/// persistence. The centre uses a cylinder symbol for the internal data
+/// store. The output is intentionally `.drawio` XML so the same diagrams.net
+/// embed used for checked-in `.drawio` files can render generated diagrams.
+#[must_use]
+pub fn render_architecture_layers_drawio(repo: &Repository) -> String {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum Layer {
+        External,
+        Business,
+        Data,
+    }
+
+    #[derive(Debug, Clone)]
+    struct LayerNode {
+        id: String,
+        label: String,
+        detail: String,
+        layer: Layer,
+    }
+
+    let mut by_file: BTreeMap<String, LayerNode> = BTreeMap::new();
+    for module in repo.modules.values() {
+        for class in module.classes.values() {
+            let rel = if class.file.as_os_str().is_empty() {
+                class.name.clone()
+            } else {
+                format!("{}/{}", short_module(&module.id), class.file.display())
+            };
+            let layer = classify_architecture_layer(class);
+            let entry = by_file.entry(rel.clone()).or_insert_with(|| LayerNode {
+                id: format!("pm_file_{}", sanitize(&rel)),
+                label: file_label(&rel),
+                detail: rel.clone(),
+                layer,
+            });
+            if layer_priority(layer) > layer_priority(entry.layer) {
+                entry.layer = layer;
+            }
+            if !entry.detail.contains(&class.name) {
+                entry.detail = format!("{} - {}", entry.detail, class.name);
+            }
+        }
+    }
+
+    let mut external = Vec::new();
+    let mut business = Vec::new();
+    let mut data = Vec::new();
+    for node in by_file.into_values() {
+        match node.layer {
+            Layer::External => external.push(node),
+            Layer::Business => business.push(node),
+            Layer::Data => data.push(node),
+        }
+    }
+
+    let title = repo
+        .root
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("repository");
+
+    let mut out = String::from(
+        r#"<mxfile host="ProjectMind" agent="ProjectMind" version="24.7.17"><diagram id="architecture-layers" name="Architecture layers"><mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="0" arrows="0" fold="1" page="1" pageScale="1" pageWidth="1280" pageHeight="900" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/>"#,
+    );
+
+    drawio_text(&mut out, "pm_title", 40.0, 28.0, 520.0, 44.0, &format!("Architecture layers - {title}"), "fontSize=24;fontStyle=1;align=left;verticalAlign=middle;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;fontColor=#172033;");
+    drawio_text(&mut out, "pm_legend", 40.0, 72.0, 560.0, 26.0, "Outer ring: external contact - Middle ring: business logic - Inner ring: data persistence", "fontSize=12;align=left;verticalAlign=middle;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;fontColor=#53606f;");
+
+    drawio_ring(
+        &mut out,
+        "pm_ring_external",
+        640.0,
+        465.0,
+        350.0,
+        "External contact",
+        "#edf7ff",
+        "#4f8fc8",
+    );
+    drawio_ring(
+        &mut out,
+        "pm_ring_business",
+        640.0,
+        465.0,
+        240.0,
+        "Business layer",
+        "#f4f0ff",
+        "#8d6bd1",
+    );
+    drawio_ring(
+        &mut out,
+        "pm_ring_data",
+        640.0,
+        465.0,
+        135.0,
+        "Data persistence",
+        "#eef8f1",
+        "#4c9a63",
+    );
+    drawio_cylinder(
+        &mut out,
+        "pm_internal_store",
+        585.0,
+        420.0,
+        110.0,
+        90.0,
+        "Internal data store",
+    );
+
+    drawio_layer_nodes(
+        &mut out, &external, 640.0, 465.0, 325.0, 54.0, "#d8ecff", "#2d78b6",
+    );
+    drawio_layer_nodes(
+        &mut out, &business, 640.0, 465.0, 215.0, 58.0, "#e9ddff", "#7757bd",
+    );
+    drawio_layer_nodes(
+        &mut out, &data, 640.0, 465.0, 118.0, 50.0, "#dff2e4", "#39824d",
+    );
+
+    out.push_str("</root></mxGraphModel></diagram></mxfile>");
+
+    fn classify_architecture_layer(class: &projectmind_plugin_api::Class) -> Layer {
+        let text = format!(
+            "{} {} {}",
+            class.name,
+            class.file.display(),
+            class.stereotypes.join(" ")
+        )
+        .to_ascii_lowercase();
+        if contains_any(
+            &text,
+            &[
+                "rest-controller",
+                "controller",
+                "endpoint",
+                "resource",
+                "handler",
+                "router",
+                "api",
+                "web",
+                "http",
+                "cli",
+            ],
+        ) {
+            Layer::External
+        } else if contains_any(
+            &text,
+            &[
+                "repository",
+                "dao",
+                "entity",
+                "model",
+                "schema",
+                "migration",
+                "database",
+                "storage",
+                "persistence",
+            ],
+        ) {
+            Layer::Data
+        } else {
+            Layer::Business
+        }
+    }
+
+    fn layer_priority(layer: Layer) -> u8 {
+        match layer {
+            Layer::Business => 1,
+            Layer::Data => 2,
+            Layer::External => 3,
+        }
+    }
+
+    fn contains_any(haystack: &str, needles: &[&str]) -> bool {
+        needles.iter().any(|needle| haystack.contains(needle))
+    }
+
+    fn file_label(path: &str) -> String {
+        path.rsplit('/').next().unwrap_or(path).to_string()
+    }
+
+    fn drawio_ring(
+        out: &mut String,
+        id: &str,
+        cx: f64,
+        cy: f64,
+        r: f64,
+        label: &str,
+        fill: &str,
+        stroke: &str,
+    ) {
+        let style = format!(
+            "ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor={fill};strokeColor={stroke};strokeWidth=2;opacity=35;fontSize=18;fontStyle=1;fontColor={stroke};align=center;verticalAlign=top;spacingTop=18;"
+        );
+        drawio_vertex(out, id, cx - r, cy - r, r * 2.0, r * 2.0, label, &style);
+    }
+
+    fn drawio_layer_nodes(
+        out: &mut String,
+        nodes: &[LayerNode],
+        cx: f64,
+        cy: f64,
+        r: f64,
+        size: f64,
+        fill: &str,
+        stroke: &str,
+    ) {
+        const MAX_NODES: usize = 24;
+        let visible = nodes.len().min(MAX_NODES);
+        let total = if nodes.len() > MAX_NODES {
+            MAX_NODES + 1
+        } else {
+            visible
+        };
+        if total == 0 {
+            return;
+        }
+        for (idx, node) in nodes.iter().take(visible).enumerate() {
+            let angle =
+                -std::f64::consts::FRAC_PI_2 + (idx as f64 / total as f64) * std::f64::consts::TAU;
+            let x = cx + angle.cos() * r - size / 2.0;
+            let y = cy + angle.sin() * r - size / 2.0;
+            let label = truncate_label(&node.label, 18);
+            let tooltip = node.detail.replace(';', ",");
+            let style = format!(
+                "ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor={fill};strokeColor={stroke};strokeWidth=2;fontSize=10;fontColor=#172033;shadow=1;tooltip={tooltip};"
+            );
+            drawio_vertex(out, &node.id, x, y, size, size, &label, &style);
+        }
+        if nodes.len() > MAX_NODES {
+            let idx = MAX_NODES;
+            let angle =
+                -std::f64::consts::FRAC_PI_2 + (idx as f64 / total as f64) * std::f64::consts::TAU;
+            let x = cx + angle.cos() * r - size / 2.0;
+            let y = cy + angle.sin() * r - size / 2.0;
+            let label = format!("+{}", nodes.len() - MAX_NODES);
+            let style = format!(
+                "ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor={fill};strokeColor={stroke};strokeWidth=2;fontSize=13;fontStyle=1;fontColor=#172033;shadow=1;"
+            );
+            drawio_vertex(out, "pm_more_nodes", x, y, size, size, &label, &style);
+        }
+    }
+
+    fn drawio_cylinder(out: &mut String, id: &str, x: f64, y: f64, w: f64, h: f64, label: &str) {
+        drawio_vertex(
+            out,
+            id,
+            x,
+            y,
+            w,
+            h,
+            label,
+            "shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#f7fbf8;strokeColor=#2f6f43;strokeWidth=2;fontSize=12;fontStyle=1;fontColor=#172033;",
+        );
+    }
+
+    fn drawio_text(
+        out: &mut String,
+        id: &str,
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+        label: &str,
+        style: &str,
+    ) {
+        drawio_vertex(out, id, x, y, w, h, label, style);
+    }
+
+    fn drawio_vertex(
+        out: &mut String,
+        id: &str,
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+        value: &str,
+        style: &str,
+    ) {
+        let _ = write!(
+            out,
+            r#"<mxCell id="{}" value="{}" style="{}" vertex="1" parent="1"><mxGeometry x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" as="geometry"/></mxCell>"#,
+            xml_escape(id),
+            xml_escape(value),
+            xml_escape(style),
+            x,
+            y,
+            w,
+            h
+        );
+    }
+
+    fn truncate_label(label: &str, max_chars: usize) -> String {
+        if label.chars().count() <= max_chars {
+            return label.to_string();
+        }
+        let mut out = label
+            .chars()
+            .take(max_chars.saturating_sub(3))
+            .collect::<String>();
+        out.push_str("...");
+        out
+    }
+
+    fn xml_escape(raw: &str) -> String {
+        raw.replace('&', "&amp;")
+            .replace('"', "&quot;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    }
+
+    out
+}
+
 /// Quote-safe label for Mermaid C4. The renderer wraps each label in
 /// `"..."`; an embedded `"` would break parsing, so we substitute it.
 fn c4_label(raw: &str) -> String {
@@ -1052,5 +1369,55 @@ mod tests {
         let repo = Repository::default();
         let out = render_c4_container(&repo, &DummyFw);
         assert!(out.contains("no modules detected"));
+    }
+
+    #[test]
+    fn architecture_layers_drawio_places_files_on_expected_rings() {
+        let mut repo = Repository::new(PathBuf::from("repo"));
+        let mut m1 = Module {
+            id: "g:app".into(),
+            ..Default::default()
+        };
+        let mut controller = class("a.UserController", "controller");
+        controller.file = PathBuf::from("src/UserController.java");
+        let mut service = class("a.UserService", "service");
+        service.file = PathBuf::from("src/UserService.java");
+        let mut repository = class("a.UserRepository", "repository");
+        repository.file = PathBuf::from("src/UserRepository.java");
+        m1.classes.insert(controller.fqn.clone(), controller);
+        m1.classes.insert(service.fqn.clone(), service);
+        m1.classes.insert(repository.fqn.clone(), repository);
+        repo.insert_module(m1);
+
+        let out = render_architecture_layers_drawio(&repo);
+        assert!(out.starts_with("<mxfile"), "expected draw.io XML:\n{out}");
+        assert!(
+            out.contains("External contact"),
+            "external ring missing:\n{out}"
+        );
+        assert!(
+            out.contains("Business layer"),
+            "business ring missing:\n{out}"
+        );
+        assert!(
+            out.contains("Data persistence"),
+            "data ring missing:\n{out}"
+        );
+        assert!(
+            out.contains("Internal data store"),
+            "centre store missing:\n{out}"
+        );
+        assert!(
+            out.contains("UserController.java"),
+            "controller file missing:\n{out}"
+        );
+        assert!(
+            out.contains("UserService.java"),
+            "service file missing:\n{out}"
+        );
+        assert!(
+            out.contains("UserRepository.java"),
+            "repository file missing:\n{out}"
+        );
     }
 }
