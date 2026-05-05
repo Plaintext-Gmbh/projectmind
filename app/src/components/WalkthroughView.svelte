@@ -32,7 +32,7 @@
   import DiffView from './DiffView.svelte';
   import { readZoom, writeZoom, clampZoom, wheelDelta } from '../lib/shiftWheelZoom';
   import { openUrl } from '../lib/openUrl';
-  import { expandStepRefs } from '../lib/walkthroughText';
+  import { expandStepRefs, matchLineAnchor } from '../lib/walkthroughText';
 
   export let cursorId: string;
   export let cursorStep: number;
@@ -66,6 +66,8 @@
   let detailZoom = readZoom(ZOOM_KEY);
   let plainEl: HTMLPreElement | null = null;
   let narrationEl: HTMLElement | null = null;
+  /// DOM ref to the target pane — narration line links scroll into this.
+  let targetEl: HTMLDivElement | null = null;
 
   // UI flow state.
   let feedbackPrompt = false;
@@ -343,6 +345,8 @@
   /// embed several kinds of links in its markdown:
   ///
   ///   - `https://…` / `http://…` / `mailto:…` → open in system browser
+  ///   - `#L42` / `#L42-58` → scroll the current target to those lines and
+  ///     pulse them. Same-file shortcut for class / plain-file step targets.
   ///   - `#anchor` → leave the browser default in place (smooth scroll)
   ///   - `pm:class:com.example.Foo` → open the class viewer
   ///   - `pm:file:/abs/path/Foo.java` (optionally `#L10-L20`) → open file
@@ -361,7 +365,14 @@
     }
     if (!node || node.tagName !== 'A') return;
     const href = (node as HTMLAnchorElement).getAttribute('href') ?? '';
-    if (!href || href.startsWith('#')) return; // let browser handle anchors
+    if (!href) return;
+    const lineRange = matchLineAnchor(href);
+    if (lineRange) {
+      ev.preventDefault();
+      scrollTargetToLine(lineRange.from, lineRange.to);
+      return;
+    }
+    if (href.startsWith('#')) return; // let browser handle non-line anchors
     if (/^(https?:|mailto:)/i.test(href)) {
       ev.preventDefault();
       void openUrl(href);
@@ -375,6 +386,24 @@
     // Unknown scheme — refuse to navigate away.
     ev.preventDefault();
     console.warn('walkthrough: unsupported link scheme', href);
+  }
+
+  /// Scroll the current step target to a given line range and briefly flash
+  /// every line in the range. Looks up `data-line-no` markers — both
+  /// ClassViewer and the plain-file branch render them, the DiffView does
+  /// not (no source-line concept on a unified diff).
+  function scrollTargetToLine(from: number, to: number) {
+    if (!targetEl) return;
+    const root = targetEl;
+    const first = root.querySelector<HTMLElement>(`[data-line-no="${from}"]`);
+    if (!first) return;
+    first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    for (let n = from; n <= to; n++) {
+      const el = root.querySelector<HTMLElement>(`[data-line-no="${n}"]`);
+      if (!el) continue;
+      el.classList.add('flash');
+      setTimeout(() => el.classList.remove('flash'), 1400);
+    }
   }
 
   function handlePmLink(href: string) {
@@ -599,7 +628,7 @@
           {/if}
         </header>
 
-        <div class="target">
+        <div class="target" bind:this={targetEl}>
           {#if targetLoading}
             <div class="loading">Lade Inhalt…</div>
           {:else if targetError}
@@ -616,6 +645,7 @@
           {:else if step.target.kind === 'file'}
             <pre class="plain" bind:this={plainEl} style="font-size: {detailZoom}em;"><code>{#each plainSource.split('\n') as line, i (i)}{@const lineNo = i + 1}<span
               class="line"
+              data-line-no={lineNo}
               class:wt-highlight={plainHighlight.some((r) => lineNo >= r.from && lineNo <= r.to)}
             ><span class="lineno">{lineNo}</span><span class="content">{line}</span>
 </span>{/each}</code></pre>
@@ -984,6 +1014,16 @@
   .target .plain .line {
     display: block;
     padding: 0 12px;
+    scroll-margin-top: 12px;
+  }
+  /* `.flash` is added imperatively by `scrollTargetToLine` for ~1.4s when a
+     narration line link points here. The selector is :global because the
+     class also lands on data-line-no markers inside ClassViewer (a child
+     component) where Svelte's scoped CSS wouldn't reach. */
+  .target :global(.line.flash),
+  .target :global([data-line-no].flash) {
+    background: color-mix(in srgb, var(--accent-2) 35%, transparent);
+    transition: background 1s ease;
   }
   .target .plain .lineno {
     display: inline-block;
