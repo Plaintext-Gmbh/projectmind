@@ -1,4 +1,4 @@
-name: Release
+name: release
 
 # Two trigger paths into the same workflow file:
 #
@@ -44,7 +44,7 @@ jobs:
   # version reference, pushes a release/vX.Y.Z branch, opens a PR. Once the
   # PR is merged and a tag pushed, the build+publish path below takes over.
   bump:
-    name: Bump version + open PR
+    name: bumpVersion + openPr
     if: github.event_name == 'workflow_dispatch' && inputs.bump != ''
     runs-on: ubuntu-22.04
     permissions:
@@ -124,7 +124,7 @@ jobs:
   #          Linux, .msi/.exe on Windows).
 
   mcp:
-    name: MCP server / ${{ matrix.asset_suffix }}
+    name: mcpServer / ${{ matrix.asset_suffix }}
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ${{ matrix.os }}
     permissions:
@@ -190,7 +190,7 @@ jobs:
           retention-days: 30
 
   app:
-    name: Desktop app / ${{ matrix.asset_suffix }}
+    name: desktopApp / ${{ matrix.asset_suffix }}
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ${{ matrix.os }}
     permissions:
@@ -302,7 +302,7 @@ jobs:
           if-no-files-found: ignore
 
   publish:
-    name: Publish GitHub release
+    name: publishGithubRelease
     needs: [mcp, app]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-22.04
