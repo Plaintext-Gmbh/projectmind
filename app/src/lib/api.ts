@@ -293,7 +293,8 @@ export type DiagramKind =
   | 'package-tree'
   | 'folder-map'
   | 'inheritance-tree'
-  | 'doc-graph';
+  | 'doc-graph'
+  | 'c4-container';
 
 export async function showDiagram(kind: DiagramKind): Promise<string> {
   if (!isTauriRuntime()) return api<string>(`/api/show_diagram${query({ kind })}`);

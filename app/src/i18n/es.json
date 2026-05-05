@@ -52,6 +52,8 @@
   "diagram.description.folderMap": "Heatmap del sistema de archivos. Refleja tamaño y recencia de cada archivo.",
   "diagram.description.inheritanceTree": "Herencia de clases: quién extiende/implementa qué.",
   "diagram.description.docGraph": "Enlaces cruzados Markdown en el repositorio.",
+  "diagram.c4Container": "Contenedor C4",
+  "diagram.description.c4Container": "Vista de contenedores C4 — módulos como contenedores, dependencias entre módulos como aristas.",
   "modules.title": "Modulos",
   "modules.all": "Todos los modulos",
   "markdown.title": "Markdown",

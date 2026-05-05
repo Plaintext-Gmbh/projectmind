@@ -32,6 +32,8 @@
         return $t('diagram.inheritanceTree');
       case 'doc-graph':
         return $t('diagram.docGraph');
+      case 'c4-container':
+        return $t('diagram.c4Container');
       default:
         return kind;
     }
@@ -49,6 +51,8 @@
         return $t('diagram.description.inheritanceTree');
       case 'doc-graph':
         return $t('diagram.description.docGraph');
+      case 'c4-container':
+        return $t('diagram.description.c4Container');
       default:
         return '';
     }

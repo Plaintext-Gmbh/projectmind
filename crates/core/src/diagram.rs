@@ -514,6 +514,128 @@ fn resolve_super(
     None
 }
 
+/// Render a C4 Container view as Mermaid.
+///
+/// One container per parsed module, edges for cross-module relations
+/// reported by the framework plugin. Class counts give the user a sense
+/// of which container is the heavy one without drilling in. Reuses the
+/// Mermaid runtime that already ships, so no new bundle weight.
+///
+/// The Container layer was picked first per [#62](https://github.com/Plaintext-Gmbh/projectmind/issues/62)
+/// — it's a near-trivial mapping (one Container per module) and the
+/// most useful "I just opened this repo" overview.
+#[must_use]
+pub fn render_c4_container(repo: &Repository, framework: &dyn FrameworkPlugin) -> String {
+    let title = repo
+        .root
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("repository");
+
+    let mut out = String::from("C4Container\n");
+    let _ = writeln!(out, "    title Container view of {}", c4_label(title));
+
+    out.push_str(
+        "    Person(developer, \"Developer\", \"Browses architecture via ProjectMind\")\n",
+    );
+
+    if repo.modules.is_empty() {
+        out.push_str("    Container(empty, \"empty\", \"no modules detected\")\n");
+        return out;
+    }
+
+    let _ = writeln!(
+        out,
+        "    System_Boundary(repo, \"{}\") {{",
+        c4_label(title)
+    );
+
+    // Stable order — modules are already sorted (BTreeMap keys).
+    let mut module_ids: Vec<&String> = repo.modules.keys().collect();
+    module_ids.sort();
+    for mod_id in &module_ids {
+        let module = &repo.modules[*mod_id];
+        let id = escape_id(mod_id);
+        let label = c4_label(short_module(mod_id));
+        let class_count = module.classes.len();
+        let descr = if class_count == 1 {
+            "1 class".to_string()
+        } else {
+            format!("{class_count} classes")
+        };
+        let _ = writeln!(
+            out,
+            "        Container({id}, \"{label}\", \"{descr}\")"
+        );
+    }
+    out.push_str("    }\n");
+
+    // Cross-module edges aggregated from framework relations.
+    let mut node_modules: BTreeMap<String, String> = BTreeMap::new(); // fqn → mod_id
+    for (mod_id, module) in &repo.modules {
+        for class in module.classes.values() {
+            node_modules.insert(class.fqn.clone(), mod_id.clone());
+        }
+    }
+    let mut edges: BTreeSet<(String, String)> = BTreeSet::new(); // (from_mod, to_mod)
+    for (mod_id, module) in &repo.modules {
+        for rel in framework.relations(module) {
+            if let Some(to_mod) = node_modules.get(&rel.to) {
+                if to_mod != mod_id {
+                    edges.insert((mod_id.clone(), to_mod.clone()));
+                }
+            }
+        }
+    }
+
+    if edges.is_empty() {
+        // Anchor the developer to the first container so the diagram still
+        // has at least one Rel and reads as more than a flat list.
+        if let Some(first) = module_ids.first() {
+            let _ = writeln!(
+                out,
+                "    Rel(developer, {}, \"explores\")",
+                escape_id(first)
+            );
+        }
+    } else {
+        // Anchor the developer to the most-depended-upon module so the
+        // entry point is visually obvious.
+        let mut indegree: BTreeMap<String, usize> = BTreeMap::new();
+        for (_, to) in &edges {
+            *indegree.entry(to.clone()).or_default() += 1;
+        }
+        let entry = indegree
+            .iter()
+            .max_by_key(|(_, n)| **n)
+            .map(|(k, _)| k.clone())
+            .or_else(|| module_ids.first().map(|s| (*s).clone()));
+        if let Some(entry) = entry {
+            let _ = writeln!(
+                out,
+                "    Rel(developer, {}, \"explores\")",
+                escape_id(&entry)
+            );
+        }
+        for (from, to) in &edges {
+            let _ = writeln!(
+                out,
+                "    Rel({}, {}, \"uses\")",
+                escape_id(from),
+                escape_id(to)
+            );
+        }
+    }
+
+    out
+}
+
+/// Quote-safe label for Mermaid C4. The renderer wraps each label in
+/// `"..."`; an embedded `"` would break parsing, so we substitute it.
+fn c4_label(raw: &str) -> String {
+    raw.replace('"', "'")
+}
+
 /// Escape a string for use as a Mermaid `click ... call fn("...")` argument.
 /// Mermaid passes the literal text to JS, so we prevent quote/backslash injection.
 fn js_arg(raw: &str) -> String {
@@ -810,5 +932,129 @@ mod tests {
             "expected stripped generic ghost id:\n{out}"
         );
         assert!(out.contains("\"List\""), "expected bare label:\n{out}");
+    }
+
+    #[test]
+    fn c4_container_emits_one_container_per_module() {
+        let mut repo = Repository::default();
+        let mut m1 = Module {
+            id: "g:api".into(),
+            ..Default::default()
+        };
+        m1.classes.insert("a.A".into(), class("a.A", "service"));
+        m1.classes.insert("a.B".into(), class("a.B", "controller"));
+        let mut m2 = Module {
+            id: "g:core".into(),
+            ..Default::default()
+        };
+        m2.classes.insert("c.C".into(), class("c.C", "service"));
+        repo.insert_module(m1);
+        repo.insert_module(m2);
+
+        let out = render_c4_container(&repo, &DummyFw);
+        assert!(out.starts_with("C4Container\n"), "header missing:\n{out}");
+        assert!(out.contains("Person(developer"), "developer missing:\n{out}");
+        assert!(
+            out.contains("Container(g_api, \"api\", \"2 classes\")"),
+            "api container missing:\n{out}"
+        );
+        assert!(
+            out.contains("Container(g_core, \"core\", \"1 class\")"),
+            "core container missing/plural-wrong:\n{out}"
+        );
+        assert!(out.contains("System_Boundary"), "boundary missing:\n{out}");
+    }
+
+    #[test]
+    fn c4_container_emits_cross_module_edges_only() {
+        let mut repo = Repository::default();
+        let mut m1 = Module {
+            id: "g:api".into(),
+            ..Default::default()
+        };
+        // DummyFw chains stereotyped classes inside a module — so an in-module edge
+        // a.A→a.B exists. We add a class in m2 that ends up referenced from m1
+        // by inserting it as a stereotype-bearing neighbour in the same window.
+        // (DummyFw only emits edges within a Module, so we can't drive a true
+        // cross-module relation from it. This test asserts the absence of
+        // intra-module noise; the cross-module case is covered by the next.)
+        m1.classes.insert("a.A".into(), class("a.A", "service"));
+        m1.classes.insert("a.B".into(), class("a.B", "controller"));
+        repo.insert_module(m1);
+
+        let out = render_c4_container(&repo, &DummyFw);
+        assert!(
+            !out.contains("Rel(g_api, g_api"),
+            "self-edge should not appear:\n{out}"
+        );
+    }
+
+    #[test]
+    fn c4_container_aggregates_cross_module_edges() {
+        struct CrossFw;
+        impl FrameworkPlugin for CrossFw {
+            fn info(&self) -> PluginInfo {
+                PluginInfo {
+                    id: "cross",
+                    name: "Cross",
+                    version: "0.0.1",
+                }
+            }
+            fn supported_languages(&self) -> &[&'static str] {
+                &["lang-java"]
+            }
+            fn enrich(&self, _module: &mut Module) -> PiResult<()> {
+                Ok(())
+            }
+            fn relations(&self, module: &Module) -> Vec<Relation> {
+                // Every class in module emits a Calls edge to "core.Heart"
+                // (which lives in module g:core, not in this one).
+                module
+                    .classes
+                    .values()
+                    .map(|c| Relation {
+                        from: c.fqn.clone(),
+                        to: "core.Heart".to_string(),
+                        kind: RelationKind::Calls,
+                    })
+                    .collect()
+            }
+        }
+
+        let mut repo = Repository::default();
+        let mut api = Module {
+            id: "g:api".into(),
+            ..Default::default()
+        };
+        api.classes.insert("a.A".into(), class("a.A", "service"));
+        api.classes.insert("a.B".into(), class("a.B", "controller"));
+        let mut core = Module {
+            id: "g:core".into(),
+            ..Default::default()
+        };
+        core.classes
+            .insert("core.Heart".into(), class("core.Heart", "service"));
+        repo.insert_module(api);
+        repo.insert_module(core);
+
+        let out = render_c4_container(&repo, &CrossFw);
+        // Single aggregated edge despite two source classes.
+        assert_eq!(
+            out.matches("Rel(g_api, g_core, \"uses\")").count(),
+            1,
+            "expected one aggregated cross-module edge:\n{out}"
+        );
+        // Developer anchored on the most-depended-upon module.
+        assert!(
+            out.contains("Rel(developer, g_core, \"explores\")"),
+            "developer should anchor to entry point g:core:\n{out}"
+        );
+    }
+
+    #[test]
+    fn c4_container_renders_empty_repo_with_marker() {
+        let repo = Repository::default();
+        let out = render_c4_container(&repo, &DummyFw);
+        assert!(out.contains("no modules detected"));
     }
 }

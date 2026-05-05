@@ -188,6 +188,12 @@ impl Engine {
         }
         let has_classes = repo.class_count() > 0;
         if has_classes {
+            // c4-container draws one Container per module, so it is
+            // meaningful whenever we have at least one parsed module —
+            // independently of which framework/language plugin produced it.
+            if !repo.modules.is_empty() {
+                out.insert("c4-container".to_string());
+            }
             for lang in &self.languages {
                 for d in lang.provided_diagrams() {
                     out.insert((*d).to_string());

@@ -492,6 +492,7 @@ fn route_api(
                 "package-tree" => Ok(json!(diagram::render_package_tree(repo))),
                 "folder-map" => Ok(json!(diagram::render_folder_map(repo))),
                 "inheritance-tree" => Ok(json!(diagram::render_inheritance_tree(repo))),
+                "c4-container" => Ok(json!(diagram::render_c4_container(repo, &spring))),
                 "doc-graph" => Ok(json!(serde_json::to_string(
                     &projectmind_core::doc_graph::build(&repo.root)
                 )?)),
