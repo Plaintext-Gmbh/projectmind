@@ -81,7 +81,17 @@ fn diagram_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "type": { "type": "string", "enum": ["bean-graph", "package-tree", "folder-map"] }
+            "type": {
+                "type": "string",
+                "enum": [
+                    "bean-graph",
+                    "package-tree",
+                    "folder-map",
+                    "inheritance-tree",
+                    "doc-graph",
+                    "c4-container"
+                ]
+            }
         },
         "required": ["type"]
     })
@@ -610,6 +620,7 @@ async fn show_diagram(state: &Mutex<ServerState>, args: Value) -> DispatchResult
         "package-tree" => Ok(text_result(diagram::render_package_tree(repo))),
         "folder-map" => Ok(text_result(diagram::render_folder_map(repo))),
         "inheritance-tree" => Ok(text_result(diagram::render_inheritance_tree(repo))),
+        "c4-container" => Ok(text_result(diagram::render_c4_container(repo, &spring))),
         "doc-graph" => Ok(text_result(
             serde_json::to_string(&projectmind_core::doc_graph::build(&repo.root))
                 .map_err(|e| DispatchError::internal(format!("doc-graph failed: {e}")))?,

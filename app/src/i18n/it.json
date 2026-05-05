@@ -52,6 +52,8 @@
   "diagram.description.folderMap": "Heatmap del filesystem. Riflette dimensione e freschezza di ogni file.",
   "diagram.description.inheritanceTree": "Ereditarietà delle classi: chi estende/implementa cosa.",
   "diagram.description.docGraph": "Collegamenti Markdown incrociati nel repository.",
+  "diagram.c4Container": "Contenitore C4",
+  "diagram.description.c4Container": "Vista contenitori C4 — moduli come contenitori, dipendenze tra moduli come archi.",
   "modules.title": "Moduli",
   "modules.all": "Tutti i moduli",
   "markdown.title": "Markdown",
