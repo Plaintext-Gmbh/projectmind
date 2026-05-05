@@ -14,10 +14,10 @@ workspace = true
 [dependencies]
 projectmind-core = { workspace = true }
 projectmind-plugin-api = { workspace = true }
-projectmind-lang-java = { path = "../../plugins/lang-java", version = "0.3.7" }
-projectmind-lang-rust = { path = "../../plugins/lang-rust", version = "0.3.7" }
-projectmind-framework-spring = { path = "../../plugins/framework-spring", version = "0.3.7" }
-projectmind-framework-lombok = { path = "../../plugins/framework-lombok", version = "0.3.7" }
+projectmind-lang-java = { path = "../../plugins/lang-java", version = "0.3.8" }
+projectmind-lang-rust = { path = "../../plugins/lang-rust", version = "0.3.8" }
+projectmind-framework-spring = { path = "../../plugins/framework-spring", version = "0.3.8" }
+projectmind-framework-lombok = { path = "../../plugins/framework-lombok", version = "0.3.8" }
 
 anyhow = { workspace = true }
 rand = "0.8"
