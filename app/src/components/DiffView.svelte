@@ -1,20 +1,39 @@
 <script lang="ts">
-  import { showDiff } from '../lib/api';
+  import { tick } from 'svelte';
+  import { showDiff, type DiffFocus } from '../lib/api';
   import { t } from '../lib/i18n';
   import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
+  import { focusLineIndex, type DiffLine } from '../lib/diffFocus';
 
   export let reference: string;
   export let to: string | null = null;
+  /// Optional focus inside the diff (#126). When set, the matching
+  /// hunk / line is scrolled into view and pulsed once. Tour steps
+  /// without a focus pass `null`/`undefined` and the diff renders
+  /// exactly like before.
+  export let focus: DiffFocus | null = null;
 
   let raw = '';
-  let lines: { kind: 'meta' | 'header' | 'add' | 'del' | 'context' | 'hunk'; text: string }[] = [];
+  let lines: DiffLine[] = [];
   let loading = false;
   let error: string | null = null;
+
+  /// `index → element ref` map of rendered diff lines. Populated by
+  /// the `bind:this` on the `<span class="line">` block; used to
+  /// scroll the focused line into view.
+  let lineEls: HTMLSpanElement[] = [];
+  /// Index of the line that should currently pulse, or `null` for no
+  /// pulse. Cleared after the CSS animation finishes so the same
+  /// focus can be re-triggered when the tour pointer moves.
+  let pulseIdx: number | null = null;
 
   // Shift + wheel zoom, persisted under the per-component key.
   const { zoom, action: zoomAction } = createShiftWheelZoom('projectmind.diffview.zoom');
 
   $: if (reference) void load(reference, to);
+  /// React to focus changes after the load — the user can scrub through
+  /// tour steps that share `reference`/`to` but tweak the focus.
+  $: if (lines.length > 0 && focus !== undefined) void applyFocus(focus);
 
   async function load(ref: string, target: string | null) {
     loading = true;
@@ -22,6 +41,10 @@
     try {
       raw = await showDiff(ref, target ?? undefined);
       lines = parse(raw);
+      lineEls = [];
+      // Wait for the bind:this refs to land, then react to the current focus.
+      await tick();
+      await applyFocus(focus);
     } catch (err) {
       error = String(err);
       lines = [];
@@ -30,7 +53,29 @@
     }
   }
 
-  function parse(diff: string): typeof lines {
+  async function applyFocus(f: DiffFocus | null | undefined) {
+    if (!f || lines.length === 0) {
+      pulseIdx = null;
+      return;
+    }
+    const idx = focusLineIndex(lines, f);
+    if (idx === null) {
+      pulseIdx = null;
+      return;
+    }
+    await tick();
+    const el = lineEls[idx];
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    pulseIdx = idx;
+    // Clear the pulse after the animation duration so re-focusing the
+    // same line later still triggers the highlight.
+    window.setTimeout(() => {
+      if (pulseIdx === idx) pulseIdx = null;
+    }, 1400);
+  }
+
+  function parse(diff: string): DiffLine[] {
     return diff.split('\n').map((text) => {
       if (text.startsWith('diff --git ')) return { kind: 'header' as const, text };
       if (
@@ -67,7 +112,7 @@
     <div class="status">{$t('diff.noChanges')}</div>
   {:else}
     <pre class="diff"><!--
-   --><!-- prettier-ignore -->{#each lines as l, i (i)}<span class="line {l.kind}">{l.text || ' '}</span>
+   --><!-- prettier-ignore -->{#each lines as l, i (i)}<span class="line {l.kind}" class:pulse={pulseIdx === i} bind:this={lineEls[i]}>{l.text || ' '}</span>
 {/each}</pre>
   {/if}
 </section>
@@ -176,5 +221,22 @@
     color: var(--diff-del-fg);
     background: color-mix(in srgb, var(--diff-del-bg) 22%, transparent);
     border-left-color: var(--diff-del-bg);
+  }
+  /* Tour focus pulse (#126). Plays once when the focused line scrolls
+     into view; cleared after 1.4s so the same line can be re-pulsed
+     when the tour pointer moves. */
+  .line.pulse {
+    animation: diff-pulse 1.4s ease-out;
+    border-left-color: var(--accent-2);
+  }
+  @keyframes diff-pulse {
+    0% {
+      background-color: color-mix(in srgb, var(--accent-2) 50%, transparent);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-2) 40%, transparent);
+    }
+    100% {
+      background-color: transparent;
+      box-shadow: none;
+    }
   }
 </style>

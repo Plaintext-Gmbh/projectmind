@@ -138,6 +138,15 @@ fn walkthrough_step_schema() -> Value {
                     "anchor": { "type": "string", "description": "Heading slug (kind=file, markdown only)" },
                     "ref":  { "type": "string", "description": "Base git ref (kind=diff)" },
                     "to":   { "type": "string", "description": "Target git ref or omit for working tree (kind=diff)" },
+                    "focus": {
+                        "type": "object",
+                        "description": "Optional spotlight inside the diff (kind=diff). The GUI scrolls + pulses the matching hunk; tours without `focus` render exactly like before.",
+                        "properties": {
+                            "file": { "type": "string", "description": "Repo-relative path or basename — substring match on the `+++ b/<path>` header." },
+                            "hunk": { "type": "integer", "minimum": 0, "description": "0-based hunk index inside `file` (or the whole diff when `file` is omitted)." },
+                            "line": { "type": "integer", "minimum": 1, "description": "1-based line number in the new file." }
+                        }
+                    },
                     "highlight": {
                         "type": "array",
                         "description": "Line ranges to colour (kind=class or kind=file with non-markdown extension). 1-based inclusive.",

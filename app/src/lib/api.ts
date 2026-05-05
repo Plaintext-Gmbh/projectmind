@@ -416,10 +416,21 @@ export interface LineRange {
   to: number;
 }
 
+/// Optional spotlight inside a diff target (#126).
+export interface DiffFocus {
+  /// Repo-relative path or basename. Substring match on the
+  /// `+++ b/<path>` header.
+  file?: string;
+  /// 0-based hunk index inside `file` (or the whole diff when no file).
+  hunk?: number;
+  /// 1-based line number in the new file.
+  line?: number;
+}
+
 export type WalkthroughTarget =
   | { kind: 'class'; fqn: string; highlight?: LineRange[] }
   | { kind: 'file'; path: string; anchor?: string | null; highlight?: LineRange[] }
-  | { kind: 'diff'; reference: string; to?: string | null }
+  | { kind: 'diff'; reference: string; to?: string | null; focus?: DiffFocus }
   | { kind: 'note' };
 
 export interface WalkthroughStep {
