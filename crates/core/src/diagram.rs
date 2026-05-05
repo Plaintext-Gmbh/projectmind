@@ -647,6 +647,44 @@ pub fn render_architecture_layers_drawio(repo: &Repository) -> String {
         layer: Layer,
     }
 
+    #[derive(Debug, Clone, Copy)]
+    struct Rect {
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct Circle {
+        cx: f64,
+        cy: f64,
+        r: f64,
+    }
+
+    struct RingSpec<'a> {
+        id: &'a str,
+        circle: Circle,
+        label: &'a str,
+        fill: &'a str,
+        stroke: &'a str,
+    }
+
+    struct LayerSpec<'a> {
+        center: (f64, f64),
+        radius: f64,
+        size: f64,
+        fill: &'a str,
+        stroke: &'a str,
+    }
+
+    struct VertexSpec<'a> {
+        id: &'a str,
+        rect: Rect,
+        value: &'a str,
+        style: &'a str,
+    }
+
     let mut by_file: BTreeMap<String, LayerNode> = BTreeMap::new();
     for module in repo.modules.values() {
         for class in module.classes.values() {
@@ -692,38 +730,72 @@ pub fn render_architecture_layers_drawio(repo: &Repository) -> String {
         r#"<mxfile host="ProjectMind" agent="ProjectMind" version="24.7.17"><diagram id="architecture-layers" name="Architecture layers"><mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="0" arrows="0" fold="1" page="1" pageScale="1" pageWidth="1280" pageHeight="900" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/>"#,
     );
 
-    drawio_text(&mut out, "pm_title", 40.0, 28.0, 520.0, 44.0, &format!("Architecture layers - {title}"), "fontSize=24;fontStyle=1;align=left;verticalAlign=middle;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;fontColor=#172033;");
-    drawio_text(&mut out, "pm_legend", 40.0, 72.0, 560.0, 26.0, "Outer ring: external contact - Middle ring: business logic - Inner ring: data persistence", "fontSize=12;align=left;verticalAlign=middle;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;fontColor=#53606f;");
+    drawio_text(
+        &mut out,
+        "pm_title",
+        Rect {
+            x: 40.0,
+            y: 28.0,
+            w: 520.0,
+            h: 44.0,
+        },
+        &format!("Architecture layers - {title}"),
+        "fontSize=24;fontStyle=1;align=left;verticalAlign=middle;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;fontColor=#172033;",
+    );
+    drawio_text(
+        &mut out,
+        "pm_legend",
+        Rect {
+            x: 40.0,
+            y: 72.0,
+            w: 560.0,
+            h: 26.0,
+        },
+        "Outer ring: external contact - Middle ring: business logic - Inner ring: data persistence",
+        "fontSize=12;align=left;verticalAlign=middle;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;fontColor=#53606f;",
+    );
 
     drawio_ring(
         &mut out,
-        "pm_ring_external",
-        640.0,
-        465.0,
-        350.0,
-        "External contact",
-        "#edf7ff",
-        "#4f8fc8",
+        RingSpec {
+            id: "pm_ring_external",
+            circle: Circle {
+                cx: 640.0,
+                cy: 465.0,
+                r: 350.0,
+            },
+            label: "External contact",
+            fill: "#edf7ff",
+            stroke: "#4f8fc8",
+        },
     );
     drawio_ring(
         &mut out,
-        "pm_ring_business",
-        640.0,
-        465.0,
-        240.0,
-        "Business layer",
-        "#f4f0ff",
-        "#8d6bd1",
+        RingSpec {
+            id: "pm_ring_business",
+            circle: Circle {
+                cx: 640.0,
+                cy: 465.0,
+                r: 240.0,
+            },
+            label: "Business layer",
+            fill: "#f4f0ff",
+            stroke: "#8d6bd1",
+        },
     );
     drawio_ring(
         &mut out,
-        "pm_ring_data",
-        640.0,
-        465.0,
-        135.0,
-        "Data persistence",
-        "#eef8f1",
-        "#4c9a63",
+        RingSpec {
+            id: "pm_ring_data",
+            circle: Circle {
+                cx: 640.0,
+                cy: 465.0,
+                r: 135.0,
+            },
+            label: "Data persistence",
+            fill: "#eef8f1",
+            stroke: "#4c9a63",
+        },
     );
     drawio_cylinder(
         &mut out,
@@ -736,13 +808,37 @@ pub fn render_architecture_layers_drawio(repo: &Repository) -> String {
     );
 
     drawio_layer_nodes(
-        &mut out, &external, 640.0, 465.0, 325.0, 54.0, "#d8ecff", "#2d78b6",
+        &mut out,
+        &external,
+        LayerSpec {
+            center: (640.0, 465.0),
+            radius: 325.0,
+            size: 54.0,
+            fill: "#d8ecff",
+            stroke: "#2d78b6",
+        },
     );
     drawio_layer_nodes(
-        &mut out, &business, 640.0, 465.0, 215.0, 58.0, "#e9ddff", "#7757bd",
+        &mut out,
+        &business,
+        LayerSpec {
+            center: (640.0, 465.0),
+            radius: 215.0,
+            size: 58.0,
+            fill: "#e9ddff",
+            stroke: "#7757bd",
+        },
     );
     drawio_layer_nodes(
-        &mut out, &data, 640.0, 465.0, 118.0, 50.0, "#dff2e4", "#39824d",
+        &mut out,
+        &data,
+        LayerSpec {
+            center: (640.0, 465.0),
+            radius: 118.0,
+            size: 50.0,
+            fill: "#dff2e4",
+            stroke: "#39824d",
+        },
     );
 
     out.push_str("</root></mxGraphModel></diagram></mxfile>");
@@ -807,32 +903,29 @@ pub fn render_architecture_layers_drawio(repo: &Repository) -> String {
         path.rsplit('/').next().unwrap_or(path).to_string()
     }
 
-    fn drawio_ring(
-        out: &mut String,
-        id: &str,
-        cx: f64,
-        cy: f64,
-        r: f64,
-        label: &str,
-        fill: &str,
-        stroke: &str,
-    ) {
+    fn drawio_ring(out: &mut String, spec: RingSpec<'_>) {
         let style = format!(
-            "ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor={fill};strokeColor={stroke};strokeWidth=2;opacity=35;fontSize=18;fontStyle=1;fontColor={stroke};align=center;verticalAlign=top;spacingTop=18;"
+            "ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor={};strokeColor={};strokeWidth=2;opacity=35;fontSize=18;fontStyle=1;fontColor={};align=center;verticalAlign=top;spacingTop=18;",
+            spec.fill, spec.stroke, spec.stroke
         );
-        drawio_vertex(out, id, cx - r, cy - r, r * 2.0, r * 2.0, label, &style);
+        let rect = Rect {
+            x: spec.circle.cx - spec.circle.r,
+            y: spec.circle.cy - spec.circle.r,
+            w: spec.circle.r * 2.0,
+            h: spec.circle.r * 2.0,
+        };
+        drawio_vertex(
+            out,
+            VertexSpec {
+                id: spec.id,
+                rect,
+                value: spec.label,
+                style: &style,
+            },
+        );
     }
 
-    fn drawio_layer_nodes(
-        out: &mut String,
-        nodes: &[LayerNode],
-        cx: f64,
-        cy: f64,
-        r: f64,
-        size: f64,
-        fill: &str,
-        stroke: &str,
-    ) {
+    fn drawio_layer_nodes(out: &mut String, nodes: &[LayerNode], spec: LayerSpec<'_>) {
         const MAX_NODES: usize = 24;
         let visible = nodes.len().min(MAX_NODES);
         let total = if nodes.len() > MAX_NODES {
@@ -846,75 +939,92 @@ pub fn render_architecture_layers_drawio(repo: &Repository) -> String {
         for (idx, node) in nodes.iter().take(visible).enumerate() {
             let angle =
                 -std::f64::consts::FRAC_PI_2 + (idx as f64 / total as f64) * std::f64::consts::TAU;
-            let x = cx + angle.cos() * r - size / 2.0;
-            let y = cy + angle.sin() * r - size / 2.0;
+            let x = spec.center.0 + angle.cos() * spec.radius - spec.size / 2.0;
+            let y = spec.center.1 + angle.sin() * spec.radius - spec.size / 2.0;
             let label = truncate_label(&node.label, 18);
             let tooltip = node.detail.replace(';', ",");
             let style = format!(
-                "ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor={fill};strokeColor={stroke};strokeWidth=2;fontSize=10;fontColor=#172033;shadow=1;tooltip={tooltip};"
+                "ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor={};strokeColor={};strokeWidth=2;fontSize=10;fontColor=#172033;shadow=1;tooltip={tooltip};",
+                spec.fill, spec.stroke
             );
-            drawio_vertex(out, &node.id, x, y, size, size, &label, &style);
+            drawio_vertex(
+                out,
+                VertexSpec {
+                    id: &node.id,
+                    rect: Rect {
+                        x,
+                        y,
+                        w: spec.size,
+                        h: spec.size,
+                    },
+                    value: &label,
+                    style: &style,
+                },
+            );
         }
         if nodes.len() > MAX_NODES {
             let idx = MAX_NODES;
             let angle =
                 -std::f64::consts::FRAC_PI_2 + (idx as f64 / total as f64) * std::f64::consts::TAU;
-            let x = cx + angle.cos() * r - size / 2.0;
-            let y = cy + angle.sin() * r - size / 2.0;
+            let x = spec.center.0 + angle.cos() * spec.radius - spec.size / 2.0;
+            let y = spec.center.1 + angle.sin() * spec.radius - spec.size / 2.0;
             let label = format!("+{}", nodes.len() - MAX_NODES);
             let style = format!(
-                "ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor={fill};strokeColor={stroke};strokeWidth=2;fontSize=13;fontStyle=1;fontColor=#172033;shadow=1;"
+                "ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor={};strokeColor={};strokeWidth=2;fontSize=13;fontStyle=1;fontColor=#172033;shadow=1;",
+                spec.fill, spec.stroke
             );
-            drawio_vertex(out, "pm_more_nodes", x, y, size, size, &label, &style);
+            drawio_vertex(
+                out,
+                VertexSpec {
+                    id: "pm_more_nodes",
+                    rect: Rect {
+                        x,
+                        y,
+                        w: spec.size,
+                        h: spec.size,
+                    },
+                    value: &label,
+                    style: &style,
+                },
+            );
         }
     }
 
     fn drawio_cylinder(out: &mut String, id: &str, x: f64, y: f64, w: f64, h: f64, label: &str) {
         drawio_vertex(
             out,
-            id,
-            x,
-            y,
-            w,
-            h,
-            label,
-            "shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#f7fbf8;strokeColor=#2f6f43;strokeWidth=2;fontSize=12;fontStyle=1;fontColor=#172033;",
+            VertexSpec {
+                id,
+                rect: Rect { x, y, w, h },
+                value: label,
+                style: "shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#f7fbf8;strokeColor=#2f6f43;strokeWidth=2;fontSize=12;fontStyle=1;fontColor=#172033;",
+            },
         );
     }
 
-    fn drawio_text(
-        out: &mut String,
-        id: &str,
-        x: f64,
-        y: f64,
-        w: f64,
-        h: f64,
-        label: &str,
-        style: &str,
-    ) {
-        drawio_vertex(out, id, x, y, w, h, label, style);
+    fn drawio_text(out: &mut String, id: &str, rect: Rect, label: &str, style: &str) {
+        drawio_vertex(
+            out,
+            VertexSpec {
+                id,
+                rect,
+                value: label,
+                style,
+            },
+        );
     }
 
-    fn drawio_vertex(
-        out: &mut String,
-        id: &str,
-        x: f64,
-        y: f64,
-        w: f64,
-        h: f64,
-        value: &str,
-        style: &str,
-    ) {
+    fn drawio_vertex(out: &mut String, spec: VertexSpec<'_>) {
         let _ = write!(
             out,
             r#"<mxCell id="{}" value="{}" style="{}" vertex="1" parent="1"><mxGeometry x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" as="geometry"/></mxCell>"#,
-            xml_escape(id),
-            xml_escape(value),
-            xml_escape(style),
-            x,
-            y,
-            w,
-            h
+            xml_escape(spec.id),
+            xml_escape(spec.value),
+            xml_escape(spec.style),
+            spec.rect.x,
+            spec.rect.y,
+            spec.rect.w,
+            spec.rect.h
         );
     }
 
