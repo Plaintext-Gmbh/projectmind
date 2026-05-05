@@ -544,11 +544,7 @@ pub fn render_c4_container(repo: &Repository, framework: &dyn FrameworkPlugin) -
         return out;
     }
 
-    let _ = writeln!(
-        out,
-        "    System_Boundary(repo, \"{}\") {{",
-        c4_label(title)
-    );
+    let _ = writeln!(out, "    System_Boundary(repo, \"{}\") {{", c4_label(title));
 
     // Stable order — modules are already sorted (BTreeMap keys).
     let mut module_ids: Vec<&String> = repo.modules.keys().collect();
@@ -563,10 +559,7 @@ pub fn render_c4_container(repo: &Repository, framework: &dyn FrameworkPlugin) -
         } else {
             format!("{class_count} classes")
         };
-        let _ = writeln!(
-            out,
-            "        Container({id}, \"{label}\", \"{descr}\")"
-        );
+        let _ = writeln!(out, "        Container({id}, \"{label}\", \"{descr}\")");
     }
     out.push_str("    }\n");
 
@@ -953,7 +946,10 @@ mod tests {
 
         let out = render_c4_container(&repo, &DummyFw);
         assert!(out.starts_with("C4Container\n"), "header missing:\n{out}");
-        assert!(out.contains("Person(developer"), "developer missing:\n{out}");
+        assert!(
+            out.contains("Person(developer"),
+            "developer missing:\n{out}"
+        );
         assert!(
             out.contains("Container(g_api, \"api\", \"2 classes\")"),
             "api container missing:\n{out}"
