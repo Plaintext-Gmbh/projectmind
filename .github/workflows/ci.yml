@@ -1,4 +1,4 @@
-name: CI
+name: ci
 
 on:
   push:
@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   rust:
-    name: Rust ${{ matrix.os }}
+    name: rust / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -80,8 +80,8 @@ jobs:
           PROJECTMIND_SKIP_TAURI_APP: ${{ runner.os == 'Linux' && '1' || '' }}
         run: ./scripts/ci.sh test
 
-  release-build:
-    name: Release build (Linux)
+  releaseBuild:
+    name: releaseBuild (linux)
     runs-on: ubuntu-22.04
     needs: rust
     permissions:

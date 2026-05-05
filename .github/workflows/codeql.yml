@@ -1,4 +1,4 @@
-name: CodeQL (advanced)
+name: codeqlAdvanced
 
 on:
   push:
@@ -12,7 +12,7 @@ on:
 
 jobs:
   analyze:
-    name: Analyze ${{ matrix.language }}
+    name: analyze / ${{ matrix.language }}
     runs-on: ${{ matrix.os }}
     permissions:
       security-events: write
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@0daab03d71ff584ef619d027a3fd9146679c5d84 # v3.35.3
+        uses: github/codeql-action/init@c3f298df8c1fea2fefe20c785e6aa00f32df8260 # v4.35.3
         with:
           languages: ${{ matrix.language }}
           queries: security-and-quality
@@ -72,13 +72,13 @@ jobs:
 
       - name: Autobuild
         if: matrix.language != 'rust'
-        uses: github/codeql-action/autobuild@0daab03d71ff584ef619d027a3fd9146679c5d84 # v3.35.3
+        uses: github/codeql-action/autobuild@c3f298df8c1fea2fefe20c785e6aa00f32df8260 # v4.35.3
 
       - name: Build Rust for CodeQL
         if: matrix.language == 'rust'
         run: cargo build --workspace --exclude projectmind-app
 
       - name: Analyze
-        uses: github/codeql-action/analyze@0daab03d71ff584ef619d027a3fd9146679c5d84 # v3.35.3
+        uses: github/codeql-action/analyze@c3f298df8c1fea2fefe20c785e6aa00f32df8260 # v4.35.3
         with:
           category: /language:${{ matrix.language }}
