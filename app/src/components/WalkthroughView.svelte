@@ -34,6 +34,7 @@
   import { openUrl } from '../lib/openUrl';
   import { expandStepRefs, matchLineAnchor } from '../lib/walkthroughText';
   import { compassFor, compassIconFor } from '../lib/compass';
+  import { isCorrect, scoreQuiz, type QuizAnswer } from '../lib/quiz';
 
   export let cursorId: string;
   export let cursorStep: number;
@@ -89,6 +90,25 @@
   /// abgeschlossen" card with an explicit "Schliessen" button.
   let tourFinished = false;
 
+  /// Quiz state (#124). The "Tour abgeschlossen" card surfaces a
+  /// "Wissen prüfen" button when the tour body carries a non-empty
+  /// `quiz` array; pressing it flips `quizActive` to `true` and the
+  /// rest of the state below tracks the user's progress through the
+  /// questions.
+  let quizActive = false;
+  let quizIdx = 0;
+  let quizAnswers: QuizAnswer[] = [];
+  /// 0-based choice the user clicked on the current question. `null`
+  /// means they haven't picked one yet — the "Antwort prüfen" button
+  /// stays disabled while this is null.
+  let quizPicked: number | null = null;
+  /// `true` after the user pressed "Antwort prüfen". Reveals the
+  /// correct answer + explanation; the next click advances to the
+  /// next question (or finishes the quiz).
+  let quizRevealed = false;
+  /// After the last question, flip to `true` to show the result card.
+  let quizFinished = false;
+
   $: void load(cursorId, cursorStep, nonce);
   $: step = body && body.steps[cursorStep] ? body.steps[cursorStep] : null;
   $: total = body?.steps.length ?? 0;
@@ -112,6 +132,7 @@
       lastQuestion = '';
       activeFeedbackKey = '';
       dismissedFeedbackKey = '';
+      resetQuizState();
       bodyLoading = true;
       try {
         body = await currentWalkthrough();
@@ -270,6 +291,66 @@
   function dismissWaiting() {
     dismissedFeedbackKey = activeFeedbackKey;
     waitingForFollowup = false;
+  }
+
+  // ----- Quiz (#124) --------------------------------------------------------
+
+  /// Wipe quiz progress. Called whenever a new tour body is loaded or the
+  /// user replays the current tour from the beginning.
+  function resetQuizState() {
+    quizActive = false;
+    quizIdx = 0;
+    quizAnswers = [];
+    quizPicked = null;
+    quizRevealed = false;
+    quizFinished = false;
+  }
+
+  $: quizQuestions = body?.quiz ?? [];
+  $: hasQuiz = quizQuestions.length > 0;
+  $: currentQuizQuestion = quizActive && !quizFinished ? quizQuestions[quizIdx] : null;
+  $: quizResult = quizFinished ? scoreQuiz(quizQuestions, quizAnswers) : null;
+
+  function startQuiz() {
+    if (!hasQuiz) return;
+    quizActive = true;
+    quizIdx = 0;
+    quizAnswers = [];
+    quizPicked = null;
+    quizRevealed = false;
+    quizFinished = false;
+  }
+
+  function pickChoice(idx: number) {
+    if (quizRevealed) return;
+    quizPicked = idx;
+  }
+
+  function revealAnswer() {
+    if (quizPicked === null || !currentQuizQuestion) return;
+    quizAnswers = [...quizAnswers, quizPicked];
+    quizRevealed = true;
+  }
+
+  function advanceQuiz() {
+    if (!quizRevealed) return;
+    if (quizIdx + 1 >= quizQuestions.length) {
+      quizFinished = true;
+    } else {
+      quizIdx += 1;
+      quizPicked = null;
+      quizRevealed = false;
+    }
+  }
+
+  /// Jump back to a step the user got wrong. Hides the quiz card so the
+  /// step rendering takes over; the user can re-open the quiz by acking
+  /// the last step again. The quiz progress is preserved so they can
+  /// resume answering instead of starting over.
+  async function replayStep(stepIdx: number) {
+    quizActive = false;
+    tourFinished = false;
+    await goTo(stepIdx);
   }
 
   /// Close the tour. Removes body + feedback, returns the GUI to the
@@ -552,6 +633,101 @@
       </div>
     </div>
   </section>
+{:else if tourFinished && quizActive && !quizFinished && currentQuizQuestion}
+  <section class="state-card">
+    <div class="card quiz">
+      <div class="quiz-pos">Frage {quizIdx + 1} von {quizQuestions.length}</div>
+      <h2 class="quiz-prompt">{currentQuizQuestion.prompt}</h2>
+      <ol class="quiz-choices">
+        {#each currentQuizQuestion.choices as choice, i (i)}
+          <li>
+            <button
+              type="button"
+              class="quiz-choice"
+              class:picked={quizPicked === i && !quizRevealed}
+              class:correct={quizRevealed && i === currentQuizQuestion.answer}
+              class:wrong={quizRevealed && quizPicked === i && i !== currentQuizQuestion.answer}
+              disabled={quizRevealed}
+              on:click={() => pickChoice(i)}
+            >
+              <span class="quiz-letter">{String.fromCharCode(65 + i)}</span>
+              <span class="quiz-choice-text">{choice}</span>
+            </button>
+          </li>
+        {/each}
+      </ol>
+      {#if quizRevealed}
+        <div class="quiz-feedback" class:quiz-feedback-correct={isCorrect(currentQuizQuestion, quizPicked)}>
+          {#if isCorrect(currentQuizQuestion, quizPicked)}
+            ✓ Richtig.
+          {:else}
+            ✗ Richtig wäre: <strong>{currentQuizQuestion.choices[currentQuizQuestion.answer]}</strong>.
+          {/if}
+          {#if currentQuizQuestion.explanation}
+            <span class="quiz-explanation">{currentQuizQuestion.explanation}</span>
+          {/if}
+        </div>
+      {/if}
+      <div class="state-actions">
+        {#if !quizRevealed}
+          <button class="btn btn-primary big" on:click={revealAnswer} disabled={quizPicked === null}>
+            Antwort prüfen
+          </button>
+          <button class="btn btn-secondary" on:click={() => (quizActive = false)}>
+            Zurück
+          </button>
+        {:else}
+          <button class="btn btn-primary big" on:click={advanceQuiz}>
+            {quizIdx + 1 >= quizQuestions.length ? 'Ergebnis ansehen' : 'Nächste Frage'}
+          </button>
+        {/if}
+      </div>
+    </div>
+  </section>
+{:else if tourFinished && quizFinished && quizResult}
+  <section class="state-card">
+    <div class="card finished">
+      <div class="check">{quizResult.correct === quizResult.total ? '★' : '✓'}</div>
+      <h2>Quiz-Ergebnis</h2>
+      <p>
+        <strong>{quizResult.correct} von {quizResult.total}</strong>
+        {quizResult.correct === quizResult.total ? '— alles richtig.' : 'richtig.'}
+      </p>
+      {#if quizResult.replay.length > 0}
+        <div class="quiz-replay">
+          <p class="quiz-replay-label">Schritte zum Wiederholen:</p>
+          <ul class="quiz-replay-list">
+            {#each quizResult.replay as stepIdx (stepIdx)}
+              {#if body && body.steps[stepIdx]}
+                <li>
+                  <button
+                    type="button"
+                    class="quiz-replay-link"
+                    on:click={() => void replayStep(stepIdx)}
+                  >
+                    Schritt {stepIdx + 1}: {body.steps[stepIdx].title}
+                  </button>
+                </li>
+              {/if}
+            {/each}
+          </ul>
+        </div>
+      {/if}
+      <div class="state-actions">
+        <button class="btn btn-primary big" on:click={closeTour}>Schliessen</button>
+        <button
+          class="btn btn-secondary"
+          on:click={() => {
+            resetQuizState();
+            tourFinished = false;
+            void goTo(0);
+          }}
+        >
+          Tour erneut durchgehen
+        </button>
+      </div>
+    </div>
+  </section>
 {:else if tourFinished}
   <section class="state-card">
     <div class="card finished">
@@ -559,7 +735,14 @@
       <h2>Tour abgeschlossen</h2>
       <p><strong>{body.title}</strong> — {body.steps.length} Schritte durchgegangen.</p>
       <div class="state-actions">
-        <button class="btn btn-primary big" on:click={closeTour}>Schliessen</button>
+        {#if hasQuiz}
+          <button class="btn btn-primary big" on:click={startQuiz}>
+            Wissen prüfen ({quizQuestions.length} Frage{quizQuestions.length === 1 ? '' : 'n'})
+          </button>
+          <button class="btn btn-secondary" on:click={closeTour}>Schliessen</button>
+        {:else}
+          <button class="btn btn-primary big" on:click={closeTour}>Schliessen</button>
+        {/if}
         <button
           class="btn btn-secondary"
           on:click={() => {
@@ -756,6 +939,124 @@
   .card.finished {
     border-color: var(--accent);
     background: color-mix(in srgb, var(--accent) 8%, var(--bg-1));
+  }
+  /* Quiz card (#124). Wider than the other state cards because the
+     question prompt and choices need horizontal room. */
+  .card.quiz {
+    max-width: 640px;
+    text-align: left;
+    border-color: var(--accent-2);
+    background: color-mix(in srgb, var(--accent-2) 6%, var(--bg-1));
+  }
+  .quiz-pos {
+    font-size: 11px;
+    color: var(--fg-2);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .quiz-prompt {
+    margin: 8px 0 18px;
+    font-size: 18px;
+  }
+  .quiz-choices {
+    list-style: none;
+    margin: 0 0 14px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .quiz-choice {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    gap: 10px;
+    width: 100%;
+    text-align: left;
+    background: var(--bg-1);
+    border: 1px solid var(--bg-3);
+    border-radius: 6px;
+    padding: 10px 12px;
+    color: var(--fg-0);
+    font: inherit;
+    cursor: pointer;
+  }
+  .quiz-choice:hover:not(:disabled) {
+    border-color: var(--accent-2);
+  }
+  .quiz-choice.picked {
+    border-color: var(--accent-2);
+    background: color-mix(in srgb, var(--accent-2) 14%, var(--bg-1));
+  }
+  .quiz-choice.correct {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, var(--bg-1));
+  }
+  .quiz-choice.wrong {
+    border-color: var(--warn);
+    background: color-mix(in srgb, var(--warn) 14%, var(--bg-1));
+  }
+  .quiz-choice:disabled {
+    cursor: default;
+  }
+  .quiz-letter {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    background: var(--bg-2);
+    color: var(--fg-1);
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 12px;
+  }
+  .quiz-feedback {
+    margin: 4px 0 16px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--warn) 12%, var(--bg-1));
+    color: var(--fg-0);
+  }
+  .quiz-feedback-correct {
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg-1));
+  }
+  .quiz-explanation {
+    display: block;
+    margin-top: 6px;
+    color: var(--fg-1);
+    font-size: 12px;
+  }
+  .quiz-replay {
+    margin-top: 16px;
+    text-align: left;
+  }
+  .quiz-replay-label {
+    margin: 0 0 6px;
+    font-size: 12px;
+    color: var(--fg-2);
+  }
+  .quiz-replay-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .quiz-replay-link {
+    background: none;
+    border: none;
+    padding: 4px 8px;
+    color: var(--accent-2);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .quiz-replay-link:hover {
+    background: color-mix(in srgb, var(--accent-2) 10%, var(--bg-1));
+    text-decoration: underline;
   }
   .card .check {
     font-size: 48px;

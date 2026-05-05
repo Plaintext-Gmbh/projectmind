@@ -10,7 +10,7 @@ use projectmind_browser_host::{self as browser_host, BrowserHostConfig};
 use projectmind_core::file_access;
 use projectmind_core::files;
 use projectmind_core::state::{self, UiState, ViewIntent};
-use projectmind_core::walkthrough::{self as wt, Walkthrough, WalkthroughStep};
+use projectmind_core::walkthrough::{self as wt, QuizQuestion, Walkthrough, WalkthroughStep};
 use projectmind_core::{diagram, git, html};
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_plugin_api::FrameworkPlugin;
@@ -169,9 +169,37 @@ fn walkthrough_start_schema() -> Value {
                 "type": "array",
                 "description": "Ordered tour. Must contain at least one step.",
                 "items": walkthrough_step_schema()
+            },
+            "quiz": {
+                "type": "array",
+                "description": "Optional end-of-tour learning quiz. The GUI shows a quiz card after the user acks the last step. Omit for tours that don't need recall.",
+                "items": quiz_question_schema()
             }
         },
         "required": ["title", "steps"]
+    })
+}
+
+fn quiz_question_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "prompt":  { "type": "string", "description": "The question text." },
+            "choices": {
+                "type": "array",
+                "description": "Possible answers in render order. 2-5 reads cleanly; tours with more get harder to scan.",
+                "items": { "type": "string" },
+                "minItems": 2
+            },
+            "answer":      { "type": "integer", "minimum": 0, "description": "0-based index into `choices` of the correct answer." },
+            "step_refs":   {
+                "type": "array",
+                "description": "Optional 0-based step indices that explain this question. Wrong answers can offer to replay them.",
+                "items": { "type": "integer", "minimum": 0 }
+            },
+            "explanation": { "type": "string", "description": "Optional one-line explanation shown after the user answers. Plain text — not markdown." }
+        },
+        "required": ["prompt", "choices", "answer"]
     })
 }
 
@@ -984,6 +1012,8 @@ struct WalkthroughStartArgs {
     #[serde(default)]
     summary: String,
     steps: Vec<WalkthroughStep>,
+    #[serde(default)]
+    quiz: Vec<QuizQuestion>,
 }
 
 fn walkthrough_start(args: Value) -> DispatchResult {
@@ -1007,6 +1037,7 @@ fn walkthrough_start(args: Value) -> DispatchResult {
         title: args.title,
         summary: args.summary,
         steps: args.steps,
+        quiz: args.quiz,
         updated_at: 0,
     };
     let written = wt::write_body(body)
