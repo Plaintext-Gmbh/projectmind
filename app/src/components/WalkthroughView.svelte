@@ -33,6 +33,7 @@
   import { readZoom, writeZoom, clampZoom, wheelDelta } from '../lib/shiftWheelZoom';
   import { openUrl } from '../lib/openUrl';
   import { expandStepRefs, matchLineAnchor } from '../lib/walkthroughText';
+  import { compassFor, compassIconFor } from '../lib/compass';
 
   export let cursorId: string;
   export let cursorStep: number;
@@ -184,6 +185,7 @@
     const idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
     return idx === -1 ? p : p.slice(idx + 1);
   }
+
 
   // ----- Navigation ---------------------------------------------------------
 
@@ -626,6 +628,16 @@
               {/if}
             </div>
           {/if}
+          {#if compassFor(step.target).length > 0}
+            <nav class="compass" aria-label="Tour compass — where this step sits in the codebase">
+              <span class="compass-icon" aria-hidden="true">{compassIconFor(step.target)}</span>
+              <ol class="compass-trail">
+                {#each compassFor(step.target) as crumb, i (crumb + i)}
+                  <li class="compass-crumb" class:compass-tail={i === compassFor(step.target).length - 1}>{crumb}</li>
+                {/each}
+              </ol>
+            </nav>
+          {/if}
         </header>
 
         <div class="target" bind:this={targetEl}>
@@ -978,6 +990,52 @@
     background: var(--bg-2);
     padding: 1px 6px;
     border-radius: 3px;
+  }
+
+  /* Change-compass strip (#127). Sits below the target hint and shows where
+     this step lives — module breadcrumb for class targets, folder
+     breadcrumb for file targets, ref range for diff targets. */
+  .compass {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    font-size: 10px;
+    color: var(--fg-2);
+  }
+  .compass-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    background: var(--bg-2);
+    color: var(--fg-1);
+    font-family: var(--mono);
+    font-weight: 600;
+  }
+  .compass-trail {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .compass-crumb {
+    font-family: var(--mono);
+    color: var(--fg-2);
+  }
+  .compass-crumb:not(:last-child)::after {
+    content: '›';
+    color: var(--bg-3);
+    margin-left: 4px;
+  }
+  .compass-tail {
+    color: var(--fg-1);
+    font-weight: 600;
   }
 
   .target {
