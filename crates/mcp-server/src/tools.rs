@@ -89,7 +89,8 @@ fn diagram_schema() -> Value {
                     "folder-map",
                     "inheritance-tree",
                     "doc-graph",
-                    "c4-container"
+                    "c4-container",
+                    "architecture-layers"
                 ]
             }
         },
@@ -658,6 +659,9 @@ async fn show_diagram(state: &Mutex<ServerState>, args: Value) -> DispatchResult
         "folder-map" => Ok(text_result(diagram::render_folder_map(repo))),
         "inheritance-tree" => Ok(text_result(diagram::render_inheritance_tree(repo))),
         "c4-container" => Ok(text_result(diagram::render_c4_container(repo, &spring))),
+        "architecture-layers" => Ok(text_result(diagram::render_architecture_layers_drawio(
+            repo,
+        ))),
         "doc-graph" => Ok(text_result(
             serde_json::to_string(&projectmind_core::doc_graph::build(&repo.root))
                 .map_err(|e| DispatchError::internal(format!("doc-graph failed: {e}")))?,
@@ -992,7 +996,14 @@ struct DiagramKindArgs {
 fn view_diagram(args: Value) -> DispatchResult {
     let args: DiagramKindArgs = serde_json::from_value(args)
         .map_err(|e| DispatchError::invalid_params(format!("view_diagram: {e}")))?;
-    if args.kind != "bean-graph" && args.kind != "package-tree" && args.kind != "folder-map" {
+    if args.kind != "bean-graph"
+        && args.kind != "package-tree"
+        && args.kind != "folder-map"
+        && args.kind != "inheritance-tree"
+        && args.kind != "doc-graph"
+        && args.kind != "c4-container"
+        && args.kind != "architecture-layers"
+    {
         return Err(DispatchError::invalid_params(format!(
             "unknown diagram type: {}",
             args.kind

@@ -12,7 +12,14 @@
 
 import { derived, get, writable, type Writable } from 'svelte/store';
 
-export type DiagramKind = 'bean-graph' | 'package-tree' | 'folder-map' | 'inheritance-tree';
+export type DiagramKind =
+  | 'bean-graph'
+  | 'package-tree'
+  | 'folder-map'
+  | 'inheritance-tree'
+  | 'doc-graph'
+  | 'c4-container'
+  | 'architecture-layers';
 export type FolderMapLayout = 'hierarchy' | 'solar' | 'td';
 
 /// Frozen snapshot of every navigation-relevant piece of state.

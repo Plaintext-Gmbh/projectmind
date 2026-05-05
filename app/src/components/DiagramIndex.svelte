@@ -34,6 +34,8 @@
         return $t('diagram.docGraph');
       case 'c4-container':
         return $t('diagram.c4Container');
+      case 'architecture-layers':
+        return $t('diagram.architectureLayers');
       default:
         return kind;
     }
@@ -53,6 +55,8 @@
         return $t('diagram.description.docGraph');
       case 'c4-container':
         return $t('diagram.description.c4Container');
+      case 'architecture-layers':
+        return $t('diagram.description.architectureLayers');
       default:
         return '';
     }

@@ -630,7 +630,10 @@
             v.diagram_kind === 'bean-graph' ||
             v.diagram_kind === 'package-tree' ||
             v.diagram_kind === 'folder-map' ||
-            v.diagram_kind === 'inheritance-tree'
+            v.diagram_kind === 'inheritance-tree' ||
+            v.diagram_kind === 'doc-graph' ||
+            v.diagram_kind === 'c4-container' ||
+            v.diagram_kind === 'architecture-layers'
           ) {
             diagramKind = v.diagram_kind;
           }

@@ -193,6 +193,7 @@ impl Engine {
             // independently of which framework/language plugin produced it.
             if !repo.modules.is_empty() {
                 out.insert("c4-container".to_string());
+                out.insert("architecture-layers".to_string());
             }
             for lang in &self.languages {
                 for d in lang.provided_diagrams() {
