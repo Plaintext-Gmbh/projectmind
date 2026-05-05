@@ -105,10 +105,54 @@ pub struct Walkthrough {
     pub summary: String,
     /// Ordered steps. Length ≥ 1 once the tour has started.
     pub steps: Vec<WalkthroughStep>,
+    /// Optional end-of-tour learning quiz (#124). Empty means the GUI
+    /// shows the existing "Tour finished" card without quiz UI; tours
+    /// authored before this field existed deserialize cleanly because
+    /// of the `default`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub quiz: Vec<QuizQuestion>,
     /// Unix-seconds timestamp of last write — coarse `mtime` so the GUI
     /// can detect stale tours without consulting the FS.
     #[serde(default)]
     pub updated_at: u64,
+}
+
+/// One end-of-tour multiple-choice question.
+///
+/// The data shape mirrors the sketch in
+/// [#124](https://github.com/Plaintext-Gmbh/projectmind/issues/124):
+/// a prompt, a small list of choices, the index of the correct answer,
+/// and an optional list of step indices the user can replay if they
+/// got the question wrong.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuizQuestion {
+    /// The question text.
+    pub prompt: String,
+    /// Possible answers in the order they will be rendered. The GUI
+    /// expects 2-5 choices; tours that send more get rendered as-is
+    /// but become hard to scan.
+    pub choices: Vec<String>,
+    /// 0-based index into `choices` of the correct answer.
+    pub answer: usize,
+    /// Optional 0-based step indices that explain this question. The
+    /// GUI shows them as "replay these steps" links when the user gets
+    /// the question wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub step_refs: Vec<u32>,
+    /// Optional one-line explanation shown after the user answers.
+    /// Renders as plain text — markdown intentionally not supported
+    /// here so the explanation reads identically across viewers.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub explanation: String,
+}
+
+impl QuizQuestion {
+    /// `true` when `answer` points at a valid index in `choices`.
+    /// Tours with malformed quiz entries are rendered without scoring.
+    #[must_use]
+    pub fn is_well_formed(&self) -> bool {
+        !self.choices.is_empty() && self.answer < self.choices.len()
+    }
 }
 
 /// One feedback event from the user, tied to a step. Append-only.
@@ -294,6 +338,7 @@ mod tests {
                 narration: "hello".into(),
                 target: WalkthroughTarget::Note,
             }],
+            quiz: vec![],
             updated_at: 0,
         };
         let written = write_body(body).unwrap();
@@ -343,6 +388,7 @@ mod tests {
             title: "x".into(),
             summary: String::new(),
             steps: vec![],
+            quiz: vec![],
             updated_at: 0,
         })
         .unwrap();
@@ -369,5 +415,67 @@ mod tests {
     fn slugify_id_falls_back_when_empty() {
         let id = slugify_id("!!! ??? ###");
         assert!(id.starts_with("wt-"));
+    }
+
+    #[test]
+    fn quiz_question_well_formed_when_answer_in_range() {
+        let q = QuizQuestion {
+            prompt: "Which?".into(),
+            choices: vec!["A".into(), "B".into()],
+            answer: 1,
+            step_refs: vec![],
+            explanation: String::new(),
+        };
+        assert!(q.is_well_formed());
+    }
+
+    #[test]
+    fn quiz_question_malformed_when_answer_out_of_range() {
+        let q = QuizQuestion {
+            prompt: "Which?".into(),
+            choices: vec!["A".into(), "B".into()],
+            answer: 9,
+            step_refs: vec![],
+            explanation: String::new(),
+        };
+        assert!(!q.is_well_formed());
+    }
+
+    #[test]
+    fn walkthrough_quiz_field_is_optional_in_json() {
+        // Tour authored before quiz existed: the field is missing entirely.
+        let json = r#"{"id":"old","title":"old","steps":[]}"#;
+        let body: Walkthrough = serde_json::from_str(json).unwrap();
+        assert!(body.quiz.is_empty());
+
+        // Tour with quiz: round-trip preserves it; missing optional fields
+        // (`step_refs`, `explanation`) deserialize to defaults.
+        let with_quiz = r#"{
+            "id":"new","title":"new","steps":[],
+            "quiz":[{"prompt":"P","choices":["A","B"],"answer":1}]
+        }"#;
+        let body: Walkthrough = serde_json::from_str(with_quiz).unwrap();
+        assert_eq!(body.quiz.len(), 1);
+        assert_eq!(body.quiz[0].answer, 1);
+        assert!(body.quiz[0].step_refs.is_empty());
+        assert!(body.quiz[0].explanation.is_empty());
+    }
+
+    #[test]
+    fn walkthrough_quiz_field_is_omitted_when_empty() {
+        // Empty quiz round-trips without polluting the on-disk JSON.
+        let body = Walkthrough {
+            id: "x".into(),
+            title: "x".into(),
+            summary: String::new(),
+            steps: vec![],
+            quiz: vec![],
+            updated_at: 0,
+        };
+        let serialized = serde_json::to_string(&body).unwrap();
+        assert!(
+            !serialized.contains("\"quiz\""),
+            "empty quiz should be skipped in serialization, got: {serialized}"
+        );
     }
 }

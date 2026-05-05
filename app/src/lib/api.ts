@@ -428,11 +428,28 @@ export interface WalkthroughStep {
   target: WalkthroughTarget;
 }
 
+export interface QuizQuestion {
+  prompt: string;
+  choices: string[];
+  /// 0-based index into `choices` of the correct answer.
+  answer: number;
+  /// 0-based step indices that explain this question. The GUI shows
+  /// them as "replay these steps" links when the user gets the
+  /// question wrong.
+  step_refs?: number[];
+  /// Plain-text explanation shown after the user answers. Not markdown.
+  explanation?: string;
+}
+
 export interface Walkthrough {
   id: string;
   title: string;
   summary?: string;
   steps: WalkthroughStep[];
+  /// Optional end-of-tour quiz. Empty / missing when the tour author
+  /// didn't include one — the GUI then keeps the existing "Tour
+  /// finished" card without any quiz UI.
+  quiz?: QuizQuestion[];
   updated_at: number;
 }
 
