@@ -3,7 +3,7 @@
   import { get } from 'svelte/store';
   import mermaid from 'mermaid';
   import DrawIoFrame from './DrawIoFrame.svelte';
-  import { showDiagram, fileRecency, listChangesSince } from '../lib/api';
+  import { showDiagram, fileRecency, listChangesSince, revealInFileManager } from '../lib/api';
   import type { ChangedFile, ClassEntry, DiagramKind } from '../lib/api';
   import {
     classes,
@@ -76,12 +76,31 @@
     external_count: number;
   }
 
+  interface LanguageBucket {
+    language: string;
+    extension: string | null;
+    files: number;
+    bytes: number;
+  }
+
+  interface LanguageStats {
+    root: string;
+    total_files: number;
+    total_bytes: number;
+    truncated: boolean;
+    buckets: LanguageBucket[];
+  }
+
   let stage: HTMLDivElement;
   let mermaidSource = '';
   let svg = '';
   let drawIoXml = '';
   let docGraph: DocGraph | null = null;
+  let folderMap: FolderMap | null = null;
+  let languageStats: LanguageStats | null = null;
   let selectedDocId: string | null = null;
+  let selectedFolderNode: FolderMapNode | null = null;
+  let revealError: string | null = null;
   let docGraphLayout: 'network' | 'radial' | 'orphans' = 'network';
   let loading = false;
   let error: string | null = null;
@@ -319,6 +338,26 @@
     viewMode.set('file');
   }
 
+  function showFolderInfo(node: FolderMapNode) {
+    selectedFolderNode = node;
+    revealError = null;
+  }
+
+  function closeFolderInfo() {
+    selectedFolderNode = null;
+    revealError = null;
+  }
+
+  async function revealSelectedFolder() {
+    if (!selectedFolderNode) return;
+    revealError = null;
+    try {
+      await revealInFileManager(selectedFolderNode.path);
+    } catch (err) {
+      revealError = String(err);
+    }
+  }
+
   async function render(
     k: DiagramKind,
     layout: 'hierarchy' | 'solar' | 'td',
@@ -339,9 +378,23 @@
       const payload = await showDiagram(k);
       docGraph = null;
       drawIoXml = '';
+      if (k !== 'folder-map') {
+        folderMap = null;
+        selectedFolderNode = null;
+      }
+      if (k !== 'language-stats') {
+        languageStats = null;
+      }
       if (k === 'folder-map') {
         mermaidSource = '';
-        svg = renderFolderMap(JSON.parse(payload) as FolderMap, layout);
+        folderMap = JSON.parse(payload) as FolderMap;
+        if (
+          selectedFolderNode &&
+          !folderMap.nodes.some((n) => n.path === selectedFolderNode!.path)
+        ) {
+          selectedFolderNode = null;
+        }
+        svg = renderFolderMap(folderMap, layout);
       } else if (k === 'doc-graph') {
         mermaidSource = '';
         docGraph = JSON.parse(payload) as DocGraph;
@@ -353,6 +406,10 @@
         mermaidSource = '';
         svg = '';
         drawIoXml = payload;
+      } else if (k === 'language-stats') {
+        mermaidSource = '';
+        languageStats = JSON.parse(payload) as LanguageStats;
+        svg = renderLanguageStats(languageStats);
       } else {
         mermaidSource = payload;
         const id = `mermaid-${Date.now()}`;
@@ -886,6 +943,12 @@
     viewMode.set('file');
   }
 
+  function jumpToDoc(docId: string) {
+    selectedDocId = docId;
+    const target = docGraph?.nodes.find((n) => n.id === docId);
+    if (target) openDoc(target.abs);
+  }
+
   function groupByParent(nodes: FolderMapNode[]): Map<string, FolderMapNode[]> {
     const out = new Map<string, FolderMapNode[]>();
     for (const n of nodes) {
@@ -936,6 +999,88 @@
     return label.length <= max ? label : `${label.slice(0, max - 1)}…`;
   }
 
+  // ----- language-stats renderer ------------------------------------------
+  // Renders a horizontal-bar chart with the file count per language. Bars
+  // sorted by file count desc (already done server-side); the "Other"
+  // bucket sticks to the bottom. Bar width is proportional to file count
+  // relative to the largest bucket.
+  function renderLanguageStats(stats: LanguageStats): string {
+    if (stats.buckets.length === 0) {
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 480">
+        <rect width="100%" height="100%" fill="#090d14"/>
+        <text x="450" y="240" text-anchor="middle" fill="#94a3b8" font-size="18" font-family="ui-sans-serif,system-ui">No files found</text>
+      </svg>`;
+    }
+    const PALETTE = [
+      '#3b82f6',
+      '#10b981',
+      '#f59e0b',
+      '#ef4444',
+      '#8b5cf6',
+      '#ec4899',
+      '#14b8a6',
+      '#f97316',
+      '#22d3ee',
+      '#a3e635',
+      '#eab308',
+      '#6366f1',
+    ];
+    const buckets = stats.buckets;
+    const maxFiles = Math.max(1, ...buckets.map((b) => b.files));
+    const totalFiles = Math.max(1, stats.total_files);
+    const ROW = 28;
+    const TOP = 60;
+    const LEFT_LABEL = 200;
+    const BAR_LEFT = LEFT_LABEL + 12;
+    const RIGHT_PADDING = 160;
+    const width = 960;
+    const barTrack = width - BAR_LEFT - RIGHT_PADDING;
+    const height = TOP + buckets.length * ROW + 40;
+    const truncatedNote = stats.truncated
+      ? `<text x="24" y="${height - 18}" class="caption">truncated at ${stats.total_files} files</text>`
+      : '';
+    const totalLine = formatBytes(stats.total_bytes);
+    const rows = buckets
+      .map((b, i) => {
+        const w = Math.max(2, Math.round((b.files / maxFiles) * barTrack));
+        const y = TOP + i * ROW;
+        const color = PALETTE[i % PALETTE.length];
+        const pct = ((b.files / totalFiles) * 100).toFixed(1);
+        const extLabel = b.extension ? `.${b.extension}` : '—';
+        return `<g class="row">
+          <text x="${LEFT_LABEL}" y="${y + 14}" class="lang" text-anchor="end">${esc(b.language)}</text>
+          <text x="${LEFT_LABEL - 8}" y="${y + 14}" class="ext" text-anchor="end" dx="-44">${esc(extLabel)}</text>
+          <rect x="${BAR_LEFT}" y="${y + 4}" width="${w}" height="${ROW - 10}" rx="3" fill="${color}" opacity="0.85"/>
+          <text x="${BAR_LEFT + w + 8}" y="${y + 14}" class="value">${b.files} · ${pct}% · ${formatBytes(b.bytes)}</text>
+        </g>`;
+      })
+      .join('');
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">
+      <style>
+        text{fill:#dce3f0;font:13px ui-sans-serif,system-ui,sans-serif}
+        .title{font-size:18px;font-weight:600}
+        .caption{font-size:11px;fill:#94a3b8}
+        .lang{font-weight:600}
+        .ext{font-family:ui-monospace,monospace;font-size:11px;fill:#94a3b8}
+        .value{font-family:ui-monospace,monospace;font-size:11px;fill:#cbd5e1}
+        .ruler{stroke:#1f2937;stroke-width:1}
+      </style>
+      <rect width="100%" height="100%" fill="#090d14"/>
+      <text x="24" y="32" class="title">Sprachenverteilung</text>
+      <text x="24" y="50" class="caption">${stats.total_files} Dateien · ${totalLine} · ${buckets.length} Buckets</text>
+      <line x1="${BAR_LEFT}" y1="${TOP - 4}" x2="${BAR_LEFT}" y2="${TOP + buckets.length * ROW}" class="ruler"/>
+      ${rows}
+      ${truncatedNote}
+    </svg>`;
+  }
+
+  function formatBytes(n: number): string {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+    if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
+
   function esc(s: string): string {
     return s.replace(/[&<>"']/g, (ch) => {
       const map: Record<string, string> = {
@@ -957,11 +1102,22 @@
     if (kind === 'folder-map') {
       const path = node.dataset.path;
       const nodeKind = node.dataset.kind;
-      if (path && nodeKind) openFolderNode(path, nodeKind);
+      if (!path || !nodeKind) return;
+      if (nodeKind === 'file') {
+        openFolderNode(path, nodeKind);
+        return;
+      }
+      // folder / root → show info popover with "reveal in file manager"
+      const fmNode = folderMap?.nodes.find((n) => n.path === path) ?? null;
+      if (fmNode) showFolderInfo(fmNode);
       return;
     }
     const docId = node.dataset.id;
-    if (docId) selectedDocId = docId;
+    if (docId) {
+      selectedDocId = docId;
+      const target = docGraph?.nodes.find((n) => n.id === docId);
+      if (target) openDoc(target.abs);
+    }
   }
 
   function applyScale(s: number) {
@@ -976,7 +1132,10 @@
   }
 
   function onWheel(e: WheelEvent) {
-    if (!e.shiftKey) return;
+    // Plain wheel = zoom (matches user expectation from every IDE / map app).
+    // Shift+wheel keeps working as zoom too, for trackpads that emit deltaX
+    // on horizontal swipes. ctrlKey/metaKey would conflict with browser zoom,
+    // so we don't gate on them.
     e.preventDefault();
     const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
     if (delta === 0) return;
@@ -1025,9 +1184,9 @@
 
 <div class="root">
   <div class="toolbar">
-    <button on:click={() => zoomBy(1.25)} title="Zoom in">＋</button>
-    <button on:click={() => zoomBy(0.8)} title="Zoom out">－</button>
-    <button on:click={resetView} title="Reset view">⌂</button>
+    <button on:click={() => zoomBy(1.25)} title="Zoom in" disabled={!!drawIoXml}>＋</button>
+    <button on:click={() => zoomBy(0.8)} title="Zoom out" disabled={!!drawIoXml}>－</button>
+    <button on:click={resetView} title="Reset view" disabled={!!drawIoXml}>⌂</button>
     {#if kind === 'folder-map'}
       <span class="divider"></span>
       <button
@@ -1114,9 +1273,15 @@
         {docGraph.nodes.length} docs · {docGraph.edges.length} links · {docGraph.orphan_count} orphans · {docGraph.dangling_count} dangling
       </span>
     {:else if kind === 'architecture-layers'}
-      <span class="doc-summary">draw.io architecture layer map</span>
+      <span class="doc-summary">draw.io architecture layer map — use the embedded toolbar for zoom/pan</span>
+    {:else if kind === 'language-stats' && languageStats}
+      <span class="doc-summary">
+        {languageStats.total_files} Dateien · {languageStats.buckets.length} Buckets
+      </span>
     {/if}
-    <span class="hint">Drag to pan • Shift + wheel to zoom</span>
+    {#if !drawIoXml}
+      <span class="hint">Drag to pan • Wheel to zoom</span>
+    {/if}
   </div>
   {#if loading}
     <div class="placeholder">Rendering diagram…</div>
@@ -1141,7 +1306,7 @@
       on:mouseup={endDrag}
       on:mouseleave={endDrag}
       role="img"
-      aria-label="Diagram canvas (drag to pan, Shift plus wheel to zoom)"
+      aria-label="Diagram canvas (drag to pan, wheel to zoom)"
     >
       <div
         class="diagram"
@@ -1167,7 +1332,7 @@
               <ul>
                 {#each selectedIncoming.slice(0, 8) as edge}
                   <li>
-                    <button on:click={() => (selectedDocId = edge.from)}>{edge.from}</button>
+                    <button on:click={() => jumpToDoc(edge.from)}>{edge.from}</button>
                   </li>
                 {/each}
               </ul>
@@ -1177,7 +1342,7 @@
               <ul>
                 {#each selectedOutgoing.slice(0, 8) as edge}
                   <li>
-                    <button on:click={() => (selectedDocId = edge.to)}>{edge.to}</button>
+                    <button on:click={() => jumpToDoc(edge.to)}>{edge.to}</button>
                   </li>
                 {/each}
               </ul>
@@ -1201,6 +1366,26 @@
               <span>{docGraph.dangling_count} dangling links</span>
               <span>{docGraph.external_count} external links</span>
             </div>
+          {/if}
+        </aside>
+      {/if}
+      {#if kind === 'folder-map' && selectedFolderNode}
+        <aside class="doc-panel">
+          <header>
+            <h3>{selectedFolderNode.label}</h3>
+            <button on:click={closeFolderInfo} title="Close">×</button>
+          </header>
+          <div class="doc-path" title={selectedFolderNode.path}>{selectedFolderNode.path}</div>
+          <div class="metrics">
+            <span>{selectedFolderNode.kind}</span>
+            <span>depth {selectedFolderNode.depth}</span>
+            <span>{selectedFolderNode.weight} files</span>
+          </div>
+          <div class="actions">
+            <button on:click={revealSelectedFolder}>Im Finder zeigen</button>
+          </div>
+          {#if revealError}
+            <div class="reveal-error">{revealError}</div>
           {/if}
         </aside>
       {/if}
@@ -1366,6 +1551,33 @@
 
   .doc-panel button {
     font-size: 12px;
+  }
+
+  .actions {
+    margin-top: 12px;
+  }
+
+  .actions button {
+    padding: 6px 10px;
+    background: var(--accent, #3b82f6);
+    color: white;
+    border: 0;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+
+  .actions button:hover {
+    filter: brightness(1.1);
+  }
+
+  .reveal-error {
+    margin-top: 8px;
+    padding: 6px 8px;
+    background: color-mix(in srgb, var(--error, #ef4444) 18%, transparent);
+    border-radius: 4px;
+    color: var(--fg-1);
+    font-size: 11px;
   }
 
   .doc-path {

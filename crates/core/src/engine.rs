@@ -180,6 +180,10 @@ impl Engine {
     pub fn available_diagrams(&self, repo: &Repository) -> Vec<String> {
         let mut out: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         out.insert("folder-map".to_string());
+        // language-stats walks the working tree and groups files by
+        // extension. Always meaningful — even a docs-only repo has at
+        // least Markdown to count — so it's unconditional.
+        out.insert("language-stats".to_string());
         // doc-graph is always meaningful when the repo has at least one
         // markdown file. Unconditional on plugins because it's purely a
         // filesystem scan, not language-specific parsing.

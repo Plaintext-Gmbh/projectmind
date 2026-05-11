@@ -36,6 +36,8 @@
         return $t('diagram.c4Container');
       case 'architecture-layers':
         return $t('diagram.architectureLayers');
+      case 'language-stats':
+        return $t('diagram.languageStats') || 'Sprachenverteilung';
       default:
         return kind;
     }
@@ -57,6 +59,11 @@
         return $t('diagram.description.c4Container');
       case 'architecture-layers':
         return $t('diagram.description.architectureLayers');
+      case 'language-stats':
+        return (
+          $t('diagram.description.languageStats') ||
+          'Dateienverteilung nach Sprache — Anzahl + Bytes je Bucket.'
+        );
       default:
         return '';
     }

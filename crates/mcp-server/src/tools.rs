@@ -90,7 +90,8 @@ fn diagram_schema() -> Value {
                     "inheritance-tree",
                     "doc-graph",
                     "c4-container",
-                    "architecture-layers"
+                    "architecture-layers",
+                    "language-stats"
                 ]
             }
         },
@@ -337,7 +338,7 @@ pub(crate) fn list() -> Value {
             },
             {
                 "name": "list_module_files",
-                "description": "List PDFs and images (.pdf .png .jpg .jpeg .webp .gif) inside a module's root. Source files (.java .rs) are excluded — those are surfaced by list_classes.",
+                "description": "List PDFs and images (.pdf .png .jpg .jpeg .webp .gif .svg .bmp .ico) inside a module's root. Source files (.java .rs) are excluded — those are surfaced by list_classes.",
                 "inputSchema": list_module_files_schema()
             },
             {
@@ -666,6 +667,10 @@ async fn show_diagram(state: &Mutex<ServerState>, args: Value) -> DispatchResult
             serde_json::to_string(&projectmind_core::doc_graph::build(&repo.root))
                 .map_err(|e| DispatchError::internal(format!("doc-graph failed: {e}")))?,
         )),
+        "language-stats" => Ok(text_result(
+            serde_json::to_string(&projectmind_core::language_stats::build(&repo.root))
+                .map_err(|e| DispatchError::internal(format!("language-stats failed: {e}")))?,
+        )),
         other => Err(DispatchError::invalid_params(format!(
             "unknown diagram: {other}"
         ))),
@@ -816,8 +821,12 @@ async fn list_module_files(state: &Mutex<ServerState>, args: Value) -> DispatchR
         let module = repo.modules.get(&args.module).ok_or_else(|| {
             DispatchError::invalid_params(format!("module not found: {}", args.module))
         })?;
-        let entries =
-            files::list_module_files(&module.root, &["pdf", "png", "jpg", "jpeg", "webp", "gif"]);
+        let entries = files::list_module_files(
+            &module.root,
+            &[
+                "pdf", "png", "jpg", "jpeg", "webp", "gif", "svg", "bmp", "ico",
+            ],
+        );
         Ok(text_result(
             serde_json::to_string_pretty(&entries).unwrap_or_else(|_| "[]".into()),
         ))
@@ -1003,6 +1012,7 @@ fn view_diagram(args: Value) -> DispatchResult {
         && args.kind != "doc-graph"
         && args.kind != "c4-container"
         && args.kind != "architecture-layers"
+        && args.kind != "language-stats"
     {
         return Err(DispatchError::invalid_params(format!(
             "unknown diagram type: {}",

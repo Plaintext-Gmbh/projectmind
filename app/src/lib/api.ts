@@ -295,7 +295,8 @@ export type DiagramKind =
   | 'inheritance-tree'
   | 'doc-graph'
   | 'c4-container'
-  | 'architecture-layers';
+  | 'architecture-layers'
+  | 'language-stats';
 
 export async function showDiagram(kind: DiagramKind): Promise<string> {
   if (!isTauriRuntime()) return api<string>(`/api/show_diagram${query({ kind })}`);
@@ -310,6 +311,16 @@ export async function showDiff(reference: string, to?: string): Promise<string> 
 export async function readFileText(path: string): Promise<string> {
   if (!isTauriRuntime()) return api<string>(`/api/read_file_text${query({ path })}`);
   return invoke<string>('read_file_text', { path });
+}
+
+/**
+ * Reveal a file or folder in the OS file manager (Finder / Explorer / Files).
+ * Desktop-only; in browser mode this is a no-op since the host file manager
+ * isn't reachable from a remote browser session.
+ */
+export async function revealInFileManager(path: string): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await invoke('reveal_in_file_manager', { path });
 }
 
 export async function fileAssetUrl(path: string): Promise<string> {
