@@ -969,7 +969,8 @@ pub fn run() {
         ));
     }
     let setup_state = Arc::clone(&state);
-    builder
+    let run_state = Arc::clone(&state);
+    let app = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -1014,8 +1015,26 @@ pub fn run() {
             spawn_heartbeat();
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    // macOS delivers Finder-double-click paths via the Apple `openFiles` event,
+    // not argv and not the `single_instance` callback. Tauri 2 surfaces this as
+    // `RunEvent::Opened`; we route the first markdown URL through the same
+    // queue the argv / single-instance paths use, so the frontend reacts the
+    // same way regardless of how the file got to us.
+    app.run(move |app_handle, event| {
+        if let tauri::RunEvent::Opened { urls } = event {
+            for url in urls {
+                if let Ok(path) = url.to_file_path() {
+                    if is_markdown_path(&path) {
+                        queue_markdown_file(app_handle, &run_state, path);
+                        break;
+                    }
+                }
+            }
+        }
+    });
 }
 
 #[cfg(test)]
