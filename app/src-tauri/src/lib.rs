@@ -1020,22 +1020,30 @@ pub fn run() {
 
     // macOS delivers Finder-double-click paths via the Apple `openFiles` event,
     // not argv and not the `single_instance` callback. Tauri 2 surfaces this as
-    // `RunEvent::Opened`; we route the first markdown URL through the same
-    // queue the argv / single-instance paths use, so the frontend reacts the
-    // same way regardless of how the file got to us.
+    // `RunEvent::Opened`, which only exists on macOS — Linux/Windows builds
+    // would fail to compile against the variant, so the handler is cfg-gated
+    // to a helper that's a no-op there.
     app.run(move |app_handle, event| {
-        if let tauri::RunEvent::Opened { urls } = event {
-            for url in urls {
-                if let Ok(path) = url.to_file_path() {
-                    if is_markdown_path(&path) {
-                        queue_markdown_file(app_handle, &run_state, path);
-                        break;
-                    }
+        handle_run_event(app_handle, &run_state, event);
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn handle_run_event(app: &AppHandle, state: &Arc<AppState>, event: tauri::RunEvent) {
+    if let tauri::RunEvent::Opened { urls } = event {
+        for url in urls {
+            if let Ok(path) = url.to_file_path() {
+                if is_markdown_path(&path) {
+                    queue_markdown_file(app, state, path);
+                    break;
                 }
             }
         }
-    });
+    }
 }
+
+#[cfg(not(target_os = "macos"))]
+fn handle_run_event(_app: &AppHandle, _state: &Arc<AppState>, _event: tauri::RunEvent) {}
 
 #[cfg(test)]
 mod tests {
