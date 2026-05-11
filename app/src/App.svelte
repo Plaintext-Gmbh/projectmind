@@ -126,7 +126,16 @@
 
   function activateTab(tab: TabDescriptor) {
     followingMcp.set(false);
-    viewMode.set(tab.view_mode as Parameters<typeof viewMode.set>[0]);
+    const target = tab.view_mode as Parameters<typeof viewMode.set>[0];
+    viewMode.set(target);
+    // Files tab is a hub for several render modes; activating it from a sub-mode
+    // (md / html / pdf / image / file) should return to the class+file overview,
+    // not just light up the tab marker. Also clear any previously selected class
+    // so the user sees the full list rather than a stale detail view.
+    if (tab.id === 'files') {
+      selectedClass.set(null);
+      fileView.set(null);
+    }
   }
 
   function toggleLang() {
@@ -693,7 +702,16 @@
   function viewModeForExt(ext: string): 'file' | 'pdf' | 'image' | null {
     if (ext === 'md' || ext === 'markdown' || ext === 'mdx') return 'file';
     if (ext === 'pdf') return 'pdf';
-    if (ext === 'png' || ext === 'jpg' || ext === 'jpeg' || ext === 'webp' || ext === 'gif') {
+    if (
+      ext === 'png' ||
+      ext === 'jpg' ||
+      ext === 'jpeg' ||
+      ext === 'webp' ||
+      ext === 'gif' ||
+      ext === 'svg' ||
+      ext === 'bmp' ||
+      ext === 'ico'
+    ) {
       return 'image';
     }
     return null;

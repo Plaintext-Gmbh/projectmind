@@ -22,6 +22,7 @@ pub mod files;
 pub mod git;
 pub mod heartbeat;
 pub mod html;
+pub mod language_stats;
 pub mod maven;
 pub mod repository;
 pub mod state;

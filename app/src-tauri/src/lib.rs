@@ -399,8 +399,13 @@ fn show_diagram(kind: String, state: State<'_, Arc<AppState>>) -> Result<String,
         "folder-map" => Ok(diagram::render_folder_map(repo)),
         "inheritance-tree" => Ok(diagram::render_inheritance_tree(repo)),
         "c4-container" => Ok(diagram::render_c4_container(repo, &spring)),
+        "architecture-layers" => Ok(diagram::render_architecture_layers_drawio(repo)),
         "doc-graph" => serde_json::to_string(&projectmind_core::doc_graph::build(&repo.root))
             .map_err(|e| e.to_string()),
+        "language-stats" => {
+            serde_json::to_string(&projectmind_core::language_stats::build(&repo.root))
+                .map_err(|e| e.to_string())
+        }
         other => Err(format!("unknown diagram kind: {other}")),
     }
 }
@@ -566,6 +571,24 @@ fn end_walkthrough() -> Result<(), String> {
     Ok(())
 }
 
+/// Reveal a file or folder in the OS file manager (Finder on macOS,
+/// Explorer on Windows, default file manager on Linux). Used by the
+/// folder-map info popover so a click can lead the user back to the
+/// filesystem context.
+#[tauri::command]
+fn reveal_in_file_manager(app: AppHandle, path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.is_absolute() {
+        return Err(format!("path must be absolute: {path}"));
+    }
+    if !p.exists() {
+        return Err(format!("path does not exist: {path}"));
+    }
+    app.opener()
+        .reveal_item_in_dir(p)
+        .map_err(|e| e.to_string())
+}
+
 /// Open an external URL in the user's default browser. The narration
 /// in walk-through tours often contains GitHub / docs links; we route
 /// those through `tauri-plugin-opener` so they don't accidentally
@@ -683,7 +706,9 @@ fn list_module_files(
         .ok_or_else(|| format!("module not found: {module_id}"))?;
     Ok(files::list_module_files(
         &module.root,
-        &["pdf", "png", "jpg", "jpeg", "webp", "gif"],
+        &[
+            "pdf", "png", "jpg", "jpeg", "webp", "gif", "svg", "bmp", "ico",
+        ],
     ))
 }
 
@@ -1005,6 +1030,7 @@ pub fn run() {
             set_walkthrough_step,
             end_walkthrough,
             open_external,
+            reveal_in_file_manager,
             get_build_integrity,
         ])
         .setup(move |app| {

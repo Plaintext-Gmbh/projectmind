@@ -5,7 +5,7 @@
     readFileText,
   } from '../lib/api';
   import type { HtmlFile, HtmlSnippet } from '../lib/api';
-  import { repo, modules, moduleFilter } from '../lib/store';
+  import { repo, modules, moduleFilter, viewMode, selectedClass, fileView } from '../lib/store';
   import { t } from '../lib/i18n';
   import { resizable } from '../lib/resizable';
   import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
@@ -237,7 +237,18 @@
 <section class="root">
   <header class="bar">
     <div class="title-block">
-      <h2>{$t('html.title')}</h2>
+      <div class="title-row">
+        <button
+          class="back-btn"
+          on:click={() => {
+            selectedClass.set(null);
+            fileView.set(null);
+            viewMode.set('classes');
+          }}
+          title={$t('html.backToFiles') || 'Zurück zur Datei-Übersicht'}
+        >‹ {$t('nav.files') || 'Dateien'}</button>
+        <h2>{$t('html.title')}</h2>
+      </div>
       {#if $repo}
         <span class="subtitle">
           {$t('html.summary', {
@@ -435,6 +446,24 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+  }
+  .title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .back-btn {
+    padding: 4px 10px;
+    background: var(--bg-2);
+    color: var(--fg-1);
+    border: 1px solid var(--bg-3);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .back-btn:hover {
+    background: var(--bg-3);
+    color: var(--fg-0);
   }
   .title-block h2 {
     margin: 0;

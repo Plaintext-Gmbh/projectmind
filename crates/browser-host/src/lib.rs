@@ -499,6 +499,9 @@ fn route_api(
                 "doc-graph" => Ok(json!(serde_json::to_string(
                     &projectmind_core::doc_graph::build(&repo.root)
                 )?)),
+                "language-stats" => Ok(json!(serde_json::to_string(
+                    &projectmind_core::language_stats::build(&repo.root)
+                )?)),
                 other => anyhow::bail!("unknown diagram kind: {other}"),
             }
         }
@@ -560,7 +563,9 @@ fn route_api(
             ensure_under_repo(&guard, &module.root)?;
             Ok(serde_json::to_value(files::list_module_files(
                 &module.root,
-                &["pdf", "png", "jpg", "jpeg", "webp", "gif"],
+                &[
+                    "pdf", "png", "jpg", "jpeg", "webp", "gif", "svg", "bmp", "ico",
+                ],
             ))?)
         }
         ("GET", "/api/current_walkthrough") => Ok(serde_json::to_value(wt::read_body()?)?),
