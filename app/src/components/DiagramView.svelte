@@ -14,6 +14,7 @@
     stereotypeFilter,
     viewMode,
     repo,
+    followingMcp,
   } from '../lib/store';
   import {
     recencyColor,
@@ -330,6 +331,7 @@
 
   function openFolderNode(path: string, nodeKind: string) {
     if (nodeKind !== 'file') return;
+    followingMcp.set(false);
     fileView.update((cur) => ({
       path,
       anchor: null,
@@ -935,6 +937,9 @@
   }
 
   function openDoc(path: string) {
+    // The user is taking an explicit action; if we were mirroring an MCP
+    // intent, stop doing so or applyState will clobber the view shortly.
+    followingMcp.set(false);
     fileView.update((cur) => ({
       path,
       anchor: null,
@@ -1133,10 +1138,10 @@
 
   function onWheel(e: WheelEvent) {
     // Plain wheel = zoom (matches user expectation from every IDE / map app).
-    // Shift+wheel keeps working as zoom too, for trackpads that emit deltaX
-    // on horizontal swipes. ctrlKey/metaKey would conflict with browser zoom,
-    // so we don't gate on them.
+    // `preventDefault` only works when the listener is registered as
+    // non-passive, which `nonPassiveWheel` (below) guarantees.
     e.preventDefault();
+    e.stopPropagation();
     const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
     if (delta === 0) return;
     const rect = stage.getBoundingClientRect();
@@ -1148,6 +1153,27 @@
     tx = cx - (cx - tx) * (nextScale / scale);
     ty = cy - (cy - ty) * (nextScale / scale);
     scale = nextScale;
+  }
+
+  // Svelte's `on:wheel` registers a passive listener on browsers that
+  // default `wheel` to passive (Chrome on document scrollers, some
+  // embeddings). A passive listener silently ignores `preventDefault`,
+  // which means the browser keeps its default scroll behaviour — the
+  // exact "wheel only scrolls left/right" symptom users were seeing.
+  // This action explicitly registers a non-passive listener so the zoom
+  // handler can suppress the default scroll.
+  function nonPassiveWheel(node: HTMLDivElement, handler: (e: WheelEvent) => void) {
+    let current = handler;
+    const fn = (e: WheelEvent) => current(e);
+    node.addEventListener('wheel', fn, { passive: false });
+    return {
+      update(next: (e: WheelEvent) => void) {
+        current = next;
+      },
+      destroy() {
+        node.removeEventListener('wheel', fn);
+      },
+    };
   }
 
   function onMouseDown(e: MouseEvent) {
@@ -1299,7 +1325,7 @@
       class="stage"
       class:dragging
       bind:this={stage}
-      on:wheel={onWheel}
+      use:nonPassiveWheel={onWheel}
       on:click={onClick}
       on:mousedown={onMouseDown}
       on:mousemove={onMouseMove}

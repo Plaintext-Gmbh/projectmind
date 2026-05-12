@@ -3,6 +3,7 @@
   "app.noRepository": "no repository",
   "nav.code": "Code",
   "nav.files": "Files",
+  "nav.home": "Home — Overview with filters cleared",
   "nav.diagrams": "Diagrams",
   "nav.markdownTitle": "Browse markdown files in this repository",
   "nav.htmlTitle": "Browse HTML files and snippets in this repository",

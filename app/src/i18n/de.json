@@ -3,6 +3,7 @@
   "app.noRepository": "kein Repository",
   "nav.code": "Code",
   "nav.files": "Dateien",
+  "nav.home": "Home — Übersicht mit gelöschten Filtern",
   "nav.diagrams": "Diagramme",
   "nav.markdownTitle": "Markdown-Dateien in diesem Repository durchsuchen",
   "nav.htmlTitle": "HTML-Dateien und Snippets in diesem Repository durchsuchen",

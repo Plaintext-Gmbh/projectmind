@@ -138,6 +138,22 @@
     }
   }
 
+  /// "Home" — return to the file/class overview with every filter axis
+  /// cleared. This is the user's escape hatch from any sub-mode (md, html,
+  /// file, diagram detail, walkthrough, diff) and is intentionally more
+  /// aggressive than `activateTab(files)`: it also drops the module,
+  /// stereotype, file-kind and package filters so the list is fresh.
+  function goHome() {
+    followingMcp.set(false);
+    selectedClass.set(null);
+    fileView.set(null);
+    moduleFilter.set(null);
+    packageFilter.set(null);
+    stereotypeFilter.set(null);
+    fileKindFilter.set(null);
+    viewMode.set('classes');
+  }
+
   function toggleLang() {
     // Cycle through the configured languages (codex's i18n module ships
     // five). Wrap to the first one once we hit the end.
@@ -642,7 +658,8 @@
             v.diagram_kind === 'inheritance-tree' ||
             v.diagram_kind === 'doc-graph' ||
             v.diagram_kind === 'c4-container' ||
-            v.diagram_kind === 'architecture-layers'
+            v.diagram_kind === 'architecture-layers' ||
+            v.diagram_kind === 'language-stats'
           ) {
             diagramKind = v.diagram_kind;
           }
@@ -962,6 +979,12 @@
     </div>
     <nav>
       {#if $repo}
+        <button
+          class="home-btn"
+          on:click={goHome}
+          title={$t('nav.home') || 'Home — Filter zurücksetzen'}
+          aria-label={$t('nav.home') || 'Home'}
+        >⌂</button>
         {#each $repo.tabs as tab (tab.id)}
           <button
             class:active={isTabActive(tab, $viewMode)}
@@ -1710,6 +1733,19 @@
     font-size: 11px;
     font-weight: 600;
     line-height: 1;
+  }
+
+  .home-btn {
+    width: 34px;
+    padding: 6px 0;
+    text-align: center;
+    font-size: 17px;
+    line-height: 1;
+    color: var(--fg-1);
+  }
+  .home-btn:hover {
+    color: var(--accent-2);
+    border-color: var(--accent-2);
   }
 
   .sidebars-toggle {

@@ -19,7 +19,8 @@ export type DiagramKind =
   | 'inheritance-tree'
   | 'doc-graph'
   | 'c4-container'
-  | 'architecture-layers';
+  | 'architecture-layers'
+  | 'language-stats';
 export type FolderMapLayout = 'hierarchy' | 'solar' | 'td';
 
 /// Frozen snapshot of every navigation-relevant piece of state.
