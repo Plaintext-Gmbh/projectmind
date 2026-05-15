@@ -564,7 +564,11 @@ fn route_api(
             Ok(serde_json::to_value(files::list_module_files(
                 &module.root,
                 &[
+                    // Image / PDF
                     "pdf", "png", "jpg", "jpeg", "webp", "gif", "svg", "bmp", "ico",
+                    // Markdown + HTML — per-module so the kind-filter chips
+                    // can show an accurate count when a module is selected.
+                    "md", "markdown", "html", "htm",
                 ],
             ))?)
         }

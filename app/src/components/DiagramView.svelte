@@ -21,6 +21,7 @@
     authorColor,
     authorIdentity,
   } from '../lib/folderMapColors';
+  import { wheelDelta } from '../lib/shiftWheelZoom';
 
   export let kind: DiagramKind;
   export let folderLayout: 'hierarchy' | 'solar' | 'td' = 'solar';
@@ -268,13 +269,21 @@
   let dragStartTx = 0;
   let dragStartTy = 0;
 
-  // SVG size at scale=1 (after fit-to-stage). Zoom is applied by resizing the
-  // SVG itself (so the vector re-rasterises crisply at the new resolution)
-  // rather than by CSS `transform: scale()` which would blur a bitmap.
+  // SVG fit-to-stage size at scale=1. We still set width/height once during
+  // render() so the SVG occupies the stage sensibly; live zoom is then
+  // applied via a CSS transform on the wrapper (see `diagramTransform`
+  // below). The previous approach — mutating SVG width/height on every
+  // wheel tick — was crisper at extreme zoom but unreliable under WKWebView:
+  // querySelector('svg') sometimes missed the freshly-attached node after
+  // HMR / async render, so the wrapper translated without the SVG scaling
+  // ("ganze Panel verschoben, aber nicht skaliert"). CSS transform always
+  // applies regardless of when the SVG mounts.
   let baseW = 0;
   let baseH = 0;
 
-  $: applyScale(scale);
+  // Combined translate + scale for the .diagram wrapper. Reactive so any
+  // tx/ty/scale update lands in one transform string.
+  $: diagramTransform = `translate(${tx}px, ${ty}px) scale(${scale})`;
 
   $: if (kind) {
     void render(kind, folderLayout, docGraphLayout);
@@ -439,7 +448,7 @@
           baseH = sh;
         }
         node.style.display = 'block';
-        applyScale(scale);
+        applyBaseSize();
       }
     } catch (err) {
       error = String(err);
@@ -1125,24 +1134,28 @@
     }
   }
 
-  function applyScale(s: number) {
+  function applyBaseSize() {
+    // Stamp the SVG at scale=1 once per render so it fills the stage; live
+    // zoom then happens via `diagramTransform`. Safe to call multiple times
+    // — idempotent for a given baseW/baseH and current SVG node.
     if (!stage || !baseW || !baseH) return;
     const node = stage.querySelector('svg');
     if (!node) return;
-    // Resize the SVG so the renderer re-rasterises the vector at the new size.
-    // `width`/`height` attributes (rather than CSS) keep `viewBox` scaling
-    // crisp at any zoom level.
-    node.setAttribute('width', String(baseW * s));
-    node.setAttribute('height', String(baseH * s));
+    node.setAttribute('width', String(baseW));
+    node.setAttribute('height', String(baseH));
   }
 
   function onWheel(e: WheelEvent) {
     // Plain wheel = zoom (matches user expectation from every IDE / map app).
+    // Shift+wheel also zooms, for parity with the text/code viewers across
+    // the rest of the app — the user-facing rule is "Shift+Wheel zooms in
+    // every viewer". `wheelDelta` handles the macOS axis-swap so the same
+    // gesture works on Linux/Windows where deltaY survives intact.
     // `preventDefault` only works when the listener is registered as
     // non-passive, which `nonPassiveWheel` (below) guarantees.
-    e.preventDefault();
+    if (e.cancelable) e.preventDefault();
     e.stopPropagation();
-    const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+    const delta = wheelDelta(e);
     if (delta === 0) return;
     const rect = stage.getBoundingClientRect();
     const cx = e.clientX - rect.left;
@@ -1153,6 +1166,8 @@
     tx = cx - (cx - tx) * (nextScale / scale);
     ty = cy - (cy - ty) * (nextScale / scale);
     scale = nextScale;
+    // The `diagramTransform` reactive picks scale + tx + ty up in a single
+    // transform string applied via inline style — no querySelector needed.
   }
 
   // Svelte's `on:wheel` registers a passive listener on browsers that
@@ -1306,7 +1321,7 @@
       </span>
     {/if}
     {#if !drawIoXml}
-      <span class="hint">Drag to pan • Wheel to zoom</span>
+      <span class="hint">Drag to pan • Wheel or Shift+Wheel to zoom</span>
     {/if}
   </div>
   {#if loading}
@@ -1336,7 +1351,7 @@
     >
       <div
         class="diagram"
-        style="transform: translate({tx}px, {ty}px); transform-origin: 0 0;"
+        style="transform: {diagramTransform}; transform-origin: 0 0;"
       >
         {@html svg}
       </div>

@@ -7,6 +7,7 @@
   import type { MarkdownFile } from '../lib/api';
   import { repo, fileView } from '../lib/store';
   import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
+  import { openUrl } from '../lib/openUrl';
 
   export let path: string;
   /// Optional heading slug to scroll to after rendering. If a slug doesn't
@@ -299,6 +300,55 @@
     if (current !== activeHeadingId) activeHeadingId = current;
   }
 
+  /// Intercept link clicks inside rendered markdown. Without this, anchor tags
+  /// follow browser-default navigation — which replaces the SPA in the webview
+  /// and kills the back history. We route:
+  ///   - `#slug` → smooth-scroll inside the current document
+  ///   - `http(s)://` / `mailto:` → openUrl (system browser)
+  ///   - relative / absolute filesystem path → update fileView store so the
+  ///     viewer loads it; App.svelte's history snapshot then captures the move
+  ///     and the back button works.
+  /// Unknown schemes are blocked rather than allowed to navigate away.
+  function onContentClick(ev: MouseEvent) {
+    let node: HTMLElement | null = ev.target as HTMLElement | null;
+    while (node && node !== host) {
+      if (node.tagName === 'A') break;
+      node = node.parentElement;
+    }
+    if (!node || node.tagName !== 'A') return;
+    const href = (node as HTMLAnchorElement).getAttribute('href') ?? '';
+    if (!href) return;
+    if (href.startsWith('#')) {
+      ev.preventDefault();
+      void scrollToAnchor(href.slice(1));
+      return;
+    }
+    if (/^(https?:|mailto:)/i.test(href)) {
+      ev.preventDefault();
+      void openUrl(href);
+      return;
+    }
+    if (/^[a-z][a-z0-9+.-]*:/i.test(href)) {
+      // Unknown scheme — don't let the webview wander off.
+      ev.preventDefault();
+      console.warn('FileView: unsupported link scheme', href);
+      return;
+    }
+    ev.preventDefault();
+    const hashIdx = href.indexOf('#');
+    const targetRaw = hashIdx === -1 ? href : href.slice(0, hashIdx);
+    const targetAnchor = hashIdx === -1 ? null : href.slice(hashIdx + 1) || null;
+    if (!targetRaw) {
+      if (targetAnchor) void scrollToAnchor(targetAnchor);
+      return;
+    }
+    const dir = parentDir(path);
+    const abs = targetRaw.startsWith('/')
+      ? normalizePath(targetRaw)
+      : normalizePath(`${dir}/${targetRaw}`);
+    fileView.set({ path: abs, anchor: targetAnchor, nonce: Date.now() });
+  }
+
   async function rewriteImages(filePath: string) {
     if (!host) return;
     const dir = parentDir(filePath);
@@ -544,6 +594,8 @@
             class="content"
             bind:this={host}
             style="font-size: {$zoom}em;"
+            on:click={onContentClick}
+            role="presentation"
           >
             {@html html}
           </div>

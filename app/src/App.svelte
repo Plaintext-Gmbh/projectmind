@@ -65,6 +65,7 @@
   import type { HistoryEntry, DiagramKind, FolderMapLayout } from './lib/navigation';
   import * as recents from './lib/recentRepos';
   import { recentRepos } from './lib/recentRepos';
+  import { openUrl } from './lib/openUrl';
   const lazyDiagramIndex = () =>
     loadComponent('DiagramIndex', () => import('./components/DiagramIndex.svelte'));
   const lazyFileView = () =>
@@ -402,9 +403,22 @@
 
   // Distinct kinds present in the visible files — drives the filter pills
   // shown next to the stereotype pills. Sorted for stable UI ordering.
+  //
+  // md/html are special-cased: when no module is filtered, the repo-wide
+  // markdown_count / html_count shortcut chips below already represent
+  // those buckets (and link into the dedicated MarkdownIndex / HtmlIndex
+  // viewers), so adding them here too would double up. When a module is
+  // active those shortcuts hide, and md/html chips here become the
+  // per-module filter — single source of truth in each mode.
   $: fileKindsPresent = (() => {
     const set = new Set<string>();
     for (const f of $filteredModuleFiles) set.add(f.kind);
+    if (!$moduleFilter) {
+      set.delete('md');
+      set.delete('markdown');
+      set.delete('html');
+      set.delete('htm');
+    }
     return Array.from(set).sort();
   })();
 
@@ -446,6 +460,12 @@
     }));
     if (f.kind === 'pdf') {
       viewMode.set('pdf');
+    } else if (f.kind === 'md' || f.kind === 'markdown' || f.kind === 'html' || f.kind === 'htm') {
+      // FileView renders both markdown (with TOC + anchor support) and html
+      // (sanitised). The dedicated MarkdownIndex / HtmlIndex viewers are
+      // still reachable via the repo-wide shortcut chips — these per-module
+      // chips just open the file directly.
+      viewMode.set('file');
     } else {
       viewMode.set('image');
     }
@@ -815,8 +835,31 @@
     );
   }
 
+  /// Last-line-of-defence link guard. Any `<a href="http(s)://…">` click that
+  /// bubbles up to the document — i.e. wasn't already prevented by a more
+  /// specific component handler (FileView, WalkthroughView) — is rerouted to
+  /// the system browser instead of letting the Tauri webview navigate away
+  /// from the SPA. Without this, a stray link in SVG / mermaid / any future
+  /// rendered HTML kills the entire app shell and the user gets stranded.
+  function globalLinkGuard(ev: MouseEvent) {
+    if (ev.defaultPrevented) return;
+    let node: HTMLElement | null = ev.target as HTMLElement | null;
+    while (node && node !== document.body) {
+      if (node.tagName === 'A') break;
+      node = node.parentElement;
+    }
+    if (!node || node.tagName !== 'A') return;
+    const href = (node as HTMLAnchorElement).getAttribute('href') ?? '';
+    if (!href) return;
+    if (/^(https?:|mailto:)/i.test(href)) {
+      ev.preventDefault();
+      void openUrl(href);
+    }
+  }
+
   onMount(async () => {
     window.addEventListener('keydown', onNavKey);
+    document.addEventListener('click', globalLinkGuard, true);
     startUpdateChecks();
     browserMode = !isTauriRuntime();
     if (browserMode && !browserToken()) {
@@ -893,6 +936,7 @@
 
   onDestroy(() => {
     window.removeEventListener('keydown', onNavKey);
+    document.removeEventListener('click', globalLinkGuard, true);
     unlistenState?.();
     unlistenOpenMarkdownFile?.();
     unlistenDragDrop?.();
@@ -984,7 +1028,25 @@
           on:click={goHome}
           title={$t('nav.home') || 'Home — Filter zurücksetzen'}
           aria-label={$t('nav.home') || 'Home'}
-        >⌂</button>
+        >
+          <!-- Inline SVG: bold house glyph. The Unicode ⌂ (U+2302) was too
+               thin at button size; this Lucide-style path has 2.2 px strokes
+               that read clearly at the 17 px font size we use. currentColor
+               so it inherits the button's hover/active palette. -->
+          <svg
+            class="home-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M3 11.5 12 4l9 7.5" />
+            <path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9" />
+          </svg>
+        </button>
         {#each $repo.tabs as tab (tab.id)}
           <button
             class:active={isTabActive(tab, $viewMode)}
@@ -1228,7 +1290,16 @@
                 {kind} <span class="count">{$filteredModuleFiles.filter((f) => f.kind === kind).length}</span>
               </button>
             {/each}
-            {#if $repo && $repo.markdown_count > 0}
+            <!-- md / html chips are repo-wide shortcuts into the dedicated
+                 MarkdownIndex / HtmlIndex viewers — they show *every*
+                 markdown/html file in the repo, not just the ones inside
+                 the active module. Hiding them when a module filter is
+                 active keeps the chip row honest: every chip shown there
+                 reflects the count of files that actually live in the
+                 selected module. When no module filter is active ("All
+                 modules"), the global counts are accurate and the chips
+                 stay as quick-access tabs. -->
+            {#if !$moduleFilter && $repo && $repo.markdown_count > 0}
               <button
                 class="chip md"
                 on:click={() => {
@@ -1240,7 +1311,7 @@
                 md <span class="count">{$repo.markdown_count}</span>
               </button>
             {/if}
-            {#if $repo && $repo.html_count > 0}
+            {#if !$moduleFilter && $repo && $repo.html_count > 0}
               <button
                 class="chip html"
                 on:click={() => {
@@ -1738,14 +1809,20 @@
   .home-btn {
     width: 34px;
     padding: 6px 0;
-    text-align: center;
-    font-size: 17px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     line-height: 1;
     color: var(--fg-1);
   }
   .home-btn:hover {
     color: var(--accent-2);
     border-color: var(--accent-2);
+  }
+  .home-icon {
+    width: 18px;
+    height: 18px;
+    display: block;
   }
 
   .sidebars-toggle {
@@ -2034,7 +2111,9 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 8px;
+    /* Right padding mirrors .filter so the .pane-collapse button
+       cannot overlap the package-path readout when both are shown. */
+    padding: 6px 36px 6px 8px;
     background: color-mix(in srgb, var(--accent-2) 15%, var(--bg-1));
     border-bottom: 1px solid var(--bg-3);
     font-size: 12px;
@@ -2072,7 +2151,13 @@
   }
 
   .filter {
-    padding: 8px;
+    /* Right padding reserves space for the absolutely-positioned
+       .pane-collapse button so the last chip in the top row doesn't
+       slip underneath it (the chevron used to overlap "MD"/"HTML"
+       chips on narrow sidebars). flex-wrap means overflow chips
+       cleanly fall onto a second line — no hidden-with-chevron
+       overflow control needed. */
+    padding: 8px 36px 8px 8px;
     display: flex;
     flex-wrap: wrap;
     gap: 4px;

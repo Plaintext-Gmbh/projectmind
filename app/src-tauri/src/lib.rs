@@ -707,7 +707,14 @@ fn list_module_files(
     Ok(files::list_module_files(
         &module.root,
         &[
+            // Image / PDF
             "pdf", "png", "jpg", "jpeg", "webp", "gif", "svg", "bmp", "ico",
+            // Markdown + HTML — surfaced as module-scoped filter chips so
+            // the user sees the per-module count when they pick a module.
+            // The repo-wide MarkdownIndex / HtmlIndex remain reachable via
+            // the "md" / "html" shortcut chips shown when no module is
+            // filtered.
+            "md", "markdown", "html", "htm",
         ],
     ))
 }
