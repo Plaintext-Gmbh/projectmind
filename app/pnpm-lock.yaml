@@ -32,7 +32,7 @@ importers:
     devDependencies:
       '@sveltejs/vite-plugin-svelte':
         specifier: ^7.0.0
-        version: 7.0.0(svelte@5.55.5(@typescript-eslint/types@8.59.1))(vite@8.0.10(@types/node@25.6.0))
+        version: 7.0.0(svelte@5.55.7(@typescript-eslint/types@8.59.1))(vite@8.0.10(@types/node@25.6.0))
       '@tauri-apps/cli':
         specifier: ^2.0.0
         version: 2.10.1
@@ -53,7 +53,7 @@ importers:
         version: 9.39.4
       eslint-plugin-svelte:
         specifier: ^2.40.0
-        version: 2.46.1(eslint@9.39.4)(svelte@5.55.5(@typescript-eslint/types@8.59.1))
+        version: 2.46.1(eslint@9.39.4)(svelte@5.55.7(@typescript-eslint/types@8.59.1))
       happy-dom:
         specifier: ^20.9.0
         version: 20.9.0
@@ -62,13 +62,13 @@ importers:
         version: 3.8.3
       prettier-plugin-svelte:
         specifier: ^3.2.0
-        version: 3.5.1(prettier@3.8.3)(svelte@5.55.5(@typescript-eslint/types@8.59.1))
+        version: 3.5.1(prettier@3.8.3)(svelte@5.55.7(@typescript-eslint/types@8.59.1))
       svelte:
-        specifier: ^5.0.0
-        version: 5.55.5(@typescript-eslint/types@8.59.1)
+        specifier: ^5.55.7
+        version: 5.55.7(@typescript-eslint/types@8.59.1)
       svelte-check:
         specifier: ^4.0.0
-        version: 4.4.6(picomatch@4.0.4)(svelte@5.55.5(@typescript-eslint/types@8.59.1))(typescript@5.9.3)
+        version: 4.4.6(picomatch@4.0.4)(svelte@5.55.7(@typescript-eslint/types@8.59.1))(typescript@5.9.3)
       tslib:
         specifier: ^2.7.0
         version: 2.8.1
@@ -116,15 +116,15 @@ packages:
     resolution: {integrity: sha512-LMGQLS9EuADloEFkcTBR3BwV/CGHV7zyDxVRtVDTwdI2Ca4it0CCVTT9wCkxSgokjE5Ho41hEPgb8OEUwoXr6Q==}
     engines: {node: '>=20.19.0'}
 
-  '@csstools/css-calc@3.2.0':
-    resolution: {integrity: sha512-bR9e6o2BDB12jzN/gIbjHa5wLJ4UjD1CB9pM7ehlc0ddk6EBz+yYS1EV2MF55/HUxrHcB/hehAyt5vhsA3hx7w==}
+  '@csstools/css-calc@3.2.1':
+    resolution: {integrity: sha512-DtdHlgXh5ZkA43cwBcAm+huzgJiwx3ZTWVjBs94kwz2xKqSimDA3lBgCjphYgwgVUMWatSM0pDd8TILB1yrVVg==}
     engines: {node: '>=20.19.0'}
     peerDependencies:
       '@csstools/css-parser-algorithms': ^4.0.0
       '@csstools/css-tokenizer': ^4.0.0
 
-  '@csstools/css-color-parser@4.1.0':
-    resolution: {integrity: sha512-U0KhLYmy2GVj6q4T3WaAe6NPuFYCPQoE3b0dRGxejWDgcPp8TP7S5rVdM5ZrFaqu4N67X8YaPBw14dQSYx3IyQ==}
+  '@csstools/css-color-parser@4.1.1':
+    resolution: {integrity: sha512-eZ5XOtyhK+mggRafYUWzA0tvaYOFgdY8AkgQiCJF9qNAePnUo/zmsqqYubBBb3sQ8uNUaSKTY9s9klfRaAXL0g==}
     engines: {node: '>=20.19.0'}
     peerDependencies:
       '@csstools/css-parser-algorithms': ^4.0.0
@@ -136,8 +136,8 @@ packages:
     peerDependencies:
       '@csstools/css-tokenizer': ^4.0.0
 
-  '@csstools/css-syntax-patches-for-csstree@1.1.3':
-    resolution: {integrity: sha512-SH60bMfrRCJF3morcdk57WklujF4Jr/EsQUzqkarfHXEFcAR1gg7fS/chAE922Sehgzc1/+Tz5H3Ypa1HiEKrg==}
+  '@csstools/css-syntax-patches-for-csstree@1.1.4':
+    resolution: {integrity: sha512-wgsqt92b7C7tQhIdPNxj0n9zuUbQlvAuI1exyzeNrOKOi62SD7ren8zqszmpVREjAOqg8cD2FqYhQfAuKjk4sw==}
     peerDependencies:
       css-tree: ^3.2.1
     peerDependenciesMeta:
@@ -559,6 +559,9 @@ packages:
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
 
+  '@types/estree@1.0.9':
+    resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
+
   '@types/geojson@7946.0.16':
     resolution: {integrity: sha512-6C8nqWur3j98U6+lXDfTUWIfgvZU+EumvpHKcYjujKH7woYyLj2sUmff0tRhrqM7BohUw7Pz3ZB1jj2gW9Fvmg==}
 
@@ -971,8 +974,8 @@ packages:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
 
-  devalue@5.7.1:
-    resolution: {integrity: sha512-MUbZ586EgQqdRnC4yDrlod3BEdyvE4TapGYHMW2CiaW+KkkFmWEFqBUaLltEZCGi0iFXCEjRF0OjF0DV2QHjOA==}
+  devalue@5.8.1:
+    resolution: {integrity: sha512-4CXDYRBGqN+57wVJkuXBYmpAVUSg3L6JAQa/DFqm238G73E1wuyc/JhGQJzN7vUf/CMphYau2zXbfWzDR5aTEw==}
 
   dompurify@3.4.2:
     resolution: {integrity: sha512-lHeS9SA/IKeIFFyYciHBr2n0v1VMPlSj843HdLOwjb2OxNwdq9Xykxqhk+FE42MzAdHvInbAolSE4mhahPpjXA==}
@@ -1056,8 +1059,8 @@ packages:
     resolution: {integrity: sha512-Ap6G0WQwcU/LHsvLwON1fAQX9Zp0A2Y6Y/cJBl9r/JbW90Zyg4/zbG6zzKa2OTALELarYHmKu0GhpM5EO+7T0g==}
     engines: {node: '>=0.10'}
 
-  esrap@2.2.5:
-    resolution: {integrity: sha512-/yLB1538mag+dn0wsePTe8C0rDIjUOaJpMs2McodSzmM2msWcZsBSdRtg6HOBt0A/r82BN+Md3pgwSc/uWt2Ig==}
+  esrap@2.2.9:
+    resolution: {integrity: sha512-4KijP+NxCWthMCUC3qHbE6n4vCjqgJS1uAYKhuT/GWfFTf1Qyive2TgOjep+gzbSzRfnNyaN/UU9YmdOt8Eg0A==}
     peerDependencies:
       '@typescript-eslint/types': ^8.2.0
     peerDependenciesMeta:
@@ -1582,8 +1585,8 @@ packages:
       svelte:
         optional: true
 
-  svelte@5.55.5:
-    resolution: {integrity: sha512-2uCs/LZ9us+AktdzYJM8OcxQ8qnPS1kpaO7syGT/MgO+6Qr1Ybl+TqPq+97u7PHqmmMlye5ZkoyXONy5mjjAbw==}
+  svelte@5.55.7:
+    resolution: {integrity: sha512-ymI5ykLPwIHW839E053FQbI1G+jnRFJEw3Kv5Y4njixVWywQBx+NUFpkkKyk5LIb36Fg9DVXSYpqiGekLD0hyw==}
     engines: {node: '>=18'}
 
   symbol-tree@3.2.4:
@@ -1832,8 +1835,8 @@ snapshots:
   '@asamuzakjp/css-color@5.1.11':
     dependencies:
       '@asamuzakjp/generational-cache': 1.0.1
-      '@csstools/css-calc': 3.2.0(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
-      '@csstools/css-color-parser': 4.1.0(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
+      '@csstools/css-calc': 3.2.1(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
+      '@csstools/css-color-parser': 4.1.1(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-parser-algorithms': 4.0.0(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-tokenizer': 4.0.0
     optional: true
@@ -1865,16 +1868,16 @@ snapshots:
   '@csstools/color-helpers@6.0.2':
     optional: true
 
-  '@csstools/css-calc@3.2.0(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)':
+  '@csstools/css-calc@3.2.1(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)':
     dependencies:
       '@csstools/css-parser-algorithms': 4.0.0(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-tokenizer': 4.0.0
     optional: true
 
-  '@csstools/css-color-parser@4.1.0(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)':
+  '@csstools/css-color-parser@4.1.1(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)':
     dependencies:
       '@csstools/color-helpers': 6.0.2
-      '@csstools/css-calc': 3.2.0(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
+      '@csstools/css-calc': 3.2.1(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-parser-algorithms': 4.0.0(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-tokenizer': 4.0.0
     optional: true
@@ -1884,7 +1887,7 @@ snapshots:
       '@csstools/css-tokenizer': 4.0.0
     optional: true
 
-  '@csstools/css-syntax-patches-for-csstree@1.1.3(css-tree@3.2.1)':
+  '@csstools/css-syntax-patches-for-csstree@1.1.4(css-tree@3.2.1)':
     optionalDependencies:
       css-tree: 3.2.1
     optional: true
@@ -2072,12 +2075,12 @@ snapshots:
     dependencies:
       acorn: 8.16.0
 
-  '@sveltejs/vite-plugin-svelte@7.0.0(svelte@5.55.5(@typescript-eslint/types@8.59.1))(vite@8.0.10(@types/node@25.6.0))':
+  '@sveltejs/vite-plugin-svelte@7.0.0(svelte@5.55.7(@typescript-eslint/types@8.59.1))(vite@8.0.10(@types/node@25.6.0))':
     dependencies:
       deepmerge: 4.3.1
       magic-string: 0.30.21
       obug: 2.1.1
-      svelte: 5.55.5(@typescript-eslint/types@8.59.1)
+      svelte: 5.55.7(@typescript-eslint/types@8.59.1)
       vite: 8.0.10(@types/node@25.6.0)
       vitefu: 1.1.3(vite@8.0.10(@types/node@25.6.0))
 
@@ -2274,6 +2277,8 @@ snapshots:
   '@types/deep-eql@4.0.2': {}
 
   '@types/estree@1.0.8': {}
+
+  '@types/estree@1.0.9': {}
 
   '@types/geojson@7946.0.16': {}
 
@@ -2744,7 +2749,7 @@ snapshots:
 
   detect-libc@2.1.2: {}
 
-  devalue@5.7.1: {}
+  devalue@5.8.1: {}
 
   dompurify@3.4.2:
     optionalDependencies:
@@ -2766,7 +2771,7 @@ snapshots:
       eslint: 9.39.4
       semver: 7.7.4
 
-  eslint-plugin-svelte@2.46.1(eslint@9.39.4)(svelte@5.55.5(@typescript-eslint/types@8.59.1)):
+  eslint-plugin-svelte@2.46.1(eslint@9.39.4)(svelte@5.55.7(@typescript-eslint/types@8.59.1)):
     dependencies:
       '@eslint-community/eslint-utils': 4.9.1(eslint@9.39.4)
       '@jridgewell/sourcemap-codec': 1.5.5
@@ -2779,9 +2784,9 @@ snapshots:
       postcss-safe-parser: 6.0.0(postcss@8.5.12)
       postcss-selector-parser: 6.1.2
       semver: 7.7.4
-      svelte-eslint-parser: 0.43.0(svelte@5.55.5(@typescript-eslint/types@8.59.1))
+      svelte-eslint-parser: 0.43.0(svelte@5.55.7(@typescript-eslint/types@8.59.1))
     optionalDependencies:
-      svelte: 5.55.5(@typescript-eslint/types@8.59.1)
+      svelte: 5.55.7(@typescript-eslint/types@8.59.1)
     transitivePeerDependencies:
       - ts-node
 
@@ -2858,7 +2863,7 @@ snapshots:
     dependencies:
       estraverse: 5.3.0
 
-  esrap@2.2.5(@typescript-eslint/types@8.59.1):
+  esrap@2.2.9(@typescript-eslint/types@8.59.1):
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
     optionalDependencies:
@@ -2872,7 +2877,7 @@ snapshots:
 
   estree-walker@3.0.3:
     dependencies:
-      '@types/estree': 1.0.8
+      '@types/estree': 1.0.9
 
   esutils@2.0.3: {}
 
@@ -2970,7 +2975,7 @@ snapshots:
 
   is-reference@3.0.3:
     dependencies:
-      '@types/estree': 1.0.8
+      '@types/estree': 1.0.9
 
   isexe@2.0.0: {}
 
@@ -2983,7 +2988,7 @@ snapshots:
       '@asamuzakjp/css-color': 5.1.11
       '@asamuzakjp/dom-selector': 7.1.1
       '@bramus/specificity': 2.4.2
-      '@csstools/css-syntax-patches-for-csstree': 1.1.3(css-tree@3.2.1)
+      '@csstools/css-syntax-patches-for-csstree': 1.1.4(css-tree@3.2.1)
       '@exodus/bytes': 1.15.0
       css-tree: 3.2.1
       data-urls: 7.0.0
@@ -3234,10 +3239,10 @@ snapshots:
 
   prelude-ls@1.2.1: {}
 
-  prettier-plugin-svelte@3.5.1(prettier@3.8.3)(svelte@5.55.5(@typescript-eslint/types@8.59.1)):
+  prettier-plugin-svelte@3.5.1(prettier@3.8.3)(svelte@5.55.7(@typescript-eslint/types@8.59.1)):
     dependencies:
       prettier: 3.8.3
-      svelte: 5.55.5(@typescript-eslint/types@8.59.1)
+      svelte: 5.55.7(@typescript-eslint/types@8.59.1)
 
   prettier@3.8.3: {}
 
@@ -3323,19 +3328,19 @@ snapshots:
     dependencies:
       has-flag: 4.0.0
 
-  svelte-check@4.4.6(picomatch@4.0.4)(svelte@5.55.5(@typescript-eslint/types@8.59.1))(typescript@5.9.3):
+  svelte-check@4.4.6(picomatch@4.0.4)(svelte@5.55.7(@typescript-eslint/types@8.59.1))(typescript@5.9.3):
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       chokidar: 4.0.3
       fdir: 6.5.0(picomatch@4.0.4)
       picocolors: 1.1.1
       sade: 1.8.1
-      svelte: 5.55.5(@typescript-eslint/types@8.59.1)
+      svelte: 5.55.7(@typescript-eslint/types@8.59.1)
       typescript: 5.9.3
     transitivePeerDependencies:
       - picomatch
 
-  svelte-eslint-parser@0.43.0(svelte@5.55.5(@typescript-eslint/types@8.59.1)):
+  svelte-eslint-parser@0.43.0(svelte@5.55.7(@typescript-eslint/types@8.59.1)):
     dependencies:
       eslint-scope: 7.2.2
       eslint-visitor-keys: 3.4.3
@@ -3343,22 +3348,22 @@ snapshots:
       postcss: 8.5.12
       postcss-scss: 4.0.9(postcss@8.5.12)
     optionalDependencies:
-      svelte: 5.55.5(@typescript-eslint/types@8.59.1)
+      svelte: 5.55.7(@typescript-eslint/types@8.59.1)
 
-  svelte@5.55.5(@typescript-eslint/types@8.59.1):
+  svelte@5.55.7(@typescript-eslint/types@8.59.1):
     dependencies:
       '@jridgewell/remapping': 2.3.5
       '@jridgewell/sourcemap-codec': 1.5.5
       '@sveltejs/acorn-typescript': 1.0.9(acorn@8.16.0)
-      '@types/estree': 1.0.8
+      '@types/estree': 1.0.9
       '@types/trusted-types': 2.0.7
       acorn: 8.16.0
       aria-query: 5.3.1
       axobject-query: 4.1.0
       clsx: 2.1.1
-      devalue: 5.7.1
+      devalue: 5.8.1
       esm-env: 1.2.2
-      esrap: 2.2.5(@typescript-eslint/types@8.59.1)
+      esrap: 2.2.9(@typescript-eslint/types@8.59.1)
       is-reference: 3.0.3
       locate-character: 3.0.0
       magic-string: 0.30.21
