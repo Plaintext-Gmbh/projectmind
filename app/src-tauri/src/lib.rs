@@ -387,6 +387,15 @@ fn file_recency(state: State<'_, Arc<AppState>>) -> Result<Vec<git::FileRecency>
 }
 
 #[tauri::command]
+fn list_refs(state: State<'_, Arc<AppState>>) -> Result<Vec<git::GitRef>, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    git::list_refs(&repo.root).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn show_diagram(kind: String, state: State<'_, Arc<AppState>>) -> Result<String, String> {
     let guard = state.repo.read();
     let repo = guard
@@ -1018,6 +1027,7 @@ pub fn run() {
             class_outline,
             list_changes_since,
             file_recency,
+            list_refs,
             list_annotations,
             add_annotation,
             remove_annotation,

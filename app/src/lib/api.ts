@@ -206,6 +206,24 @@ export async function listChangesSince(reference: string, to?: string): Promise<
   return invoke<ChangedFile[]>('list_changes_since', { reference, to });
 }
 
+export type GitRefKind = 'branch' | 'tag';
+
+export interface GitRef {
+  /// Short name as the user types it ("master", "feature/foo", "v1.0.0").
+  name: string;
+  /// Branch vs tag.
+  kind: GitRefKind;
+  /// 7-char target commit SHA. Empty if the target could not be resolved.
+  target_sha: string;
+}
+
+/// List local branches + tags in the open repository. Branches come first
+/// (`master`/`main` floated to the top), then tags sorted descending by name.
+export async function listRefs(): Promise<GitRef[]> {
+  if (!isTauriRuntime()) return api<GitRef[]>('/api/list_refs');
+  return invoke<GitRef[]>('list_refs');
+}
+
 export interface FileRecency {
   /// Repository-relative path.
   path: string;

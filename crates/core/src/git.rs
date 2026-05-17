@@ -39,6 +39,29 @@ pub struct ChangedFile {
     pub status: FileStatus,
 }
 
+/// Kind of a git ref returned by [`list_refs`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitRefKind {
+    /// Local branch.
+    Branch,
+    /// Lightweight or annotated tag.
+    Tag,
+}
+
+/// One entry returned by [`list_refs`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitRef {
+    /// Short name as the user types it (e.g. `master`, `feature/foo`,
+    /// `v1.0.0`).
+    pub name: String,
+    /// Branch vs tag.
+    pub kind: GitRefKind,
+    /// Short (7-char) commit hash the ref points to. Empty if the target
+    /// could not be resolved (e.g. a tag pointing at a non-commit object).
+    pub target_sha: String,
+}
+
 /// Errors from git operations.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -121,6 +144,62 @@ fn split_range<'a>(from_ref: &'a str, to_ref: Option<&'a str>) -> (&'a str, Opti
         }
     }
     (from_ref, to_ref)
+}
+
+/// List local branches and tags from `repo_root`. Branches come first
+/// (`master`/`main` floated to the top, the rest alphabetical), followed by
+/// tags sorted descending by name (so semver tags surface newest-first).
+pub fn list_refs(repo_root: &Path) -> Result<Vec<GitRef>, GitError> {
+    let repo = GitRepo::discover(repo_root)?;
+
+    let mut branches: Vec<GitRef> = Vec::new();
+    for branch_res in repo.branches(Some(git2::BranchType::Local))? {
+        let (branch, _) = branch_res?;
+        let Some(name) = branch.name()? else { continue };
+        let target_sha = branch.get().target().map(short_sha).unwrap_or_default();
+        branches.push(GitRef {
+            name: name.to_string(),
+            kind: GitRefKind::Branch,
+            target_sha,
+        });
+    }
+    branches.sort_by(|a, b| {
+        let priority = |n: &str| match n {
+            "master" | "main" => 0,
+            _ => 1,
+        };
+        priority(&a.name)
+            .cmp(&priority(&b.name))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
+    let mut tags: Vec<GitRef> = Vec::new();
+    let tag_names = repo.tag_names(None)?;
+    for maybe_name in &tag_names {
+        let Some(name) = maybe_name else { continue };
+        // A tag may point at an annotated-tag object; peel to commit so the
+        // sha matches what `git log` would show.
+        let target_sha = repo
+            .revparse_single(name)
+            .ok()
+            .and_then(|obj| obj.peel_to_commit().ok())
+            .map(|c| short_sha(c.id()))
+            .unwrap_or_default();
+        tags.push(GitRef {
+            name: name.to_string(),
+            kind: GitRefKind::Tag,
+            target_sha,
+        });
+    }
+    tags.sort_by(|a, b| b.name.cmp(&a.name));
+
+    let mut out = branches;
+    out.extend(tags);
+    Ok(out)
+}
+
+fn short_sha(oid: git2::Oid) -> String {
+    oid.to_string().chars().take(7).collect()
 }
 
 fn resolve_tree<'a>(repo: &'a GitRepo, name: &str) -> Result<git2::Tree<'a>, GitError> {
@@ -551,5 +630,81 @@ mod tests {
         let out = unified_diff(tmp.path(), "HEAD~1..HEAD", None).expect("range diff");
         assert!(out.contains("-v1"), "diff should show old line: {out}");
         assert!(out.contains("+v2"), "diff should show new line: {out}");
+    }
+
+    #[test]
+    fn list_refs_returns_branches_and_tags() {
+        let tmp = TempDir::new();
+        let repo = init_repo(tmp.path());
+        commit_file(&repo, tmp.path(), "a.txt", "1", "first", 1_700_000_000);
+        let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("feature/foo", &head_commit, false).unwrap();
+        repo.tag_lightweight("v1.0.0", head_commit.as_object(), false)
+            .unwrap();
+
+        let refs = list_refs(tmp.path()).unwrap();
+        let names: Vec<&str> = refs.iter().map(|r| r.name.as_str()).collect();
+        assert!(names.contains(&"feature/foo"));
+        assert!(names.contains(&"v1.0.0"));
+
+        let foo = refs.iter().find(|r| r.name == "feature/foo").unwrap();
+        assert_eq!(foo.kind, GitRefKind::Branch);
+        assert_eq!(foo.target_sha.len(), 7);
+
+        let tag = refs.iter().find(|r| r.name == "v1.0.0").unwrap();
+        assert_eq!(tag.kind, GitRefKind::Tag);
+        assert_eq!(tag.target_sha.len(), 7);
+        // Tag and branch point at the same commit, so the shas match.
+        assert_eq!(tag.target_sha, foo.target_sha);
+    }
+
+    #[test]
+    fn list_refs_orders_default_branch_first_then_tags() {
+        let tmp = TempDir::new();
+        let repo = init_repo(tmp.path());
+        commit_file(&repo, tmp.path(), "a.txt", "1", "first", 1_700_000_000);
+        let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("alpha", &head_commit, false).unwrap();
+        repo.branch("zeta", &head_commit, false).unwrap();
+        repo.tag_lightweight("v2.0.0", head_commit.as_object(), false)
+            .unwrap();
+        repo.tag_lightweight("v1.0.0", head_commit.as_object(), false)
+            .unwrap();
+
+        let refs = list_refs(tmp.path()).unwrap();
+        let names: Vec<&str> = refs.iter().map(|r| r.name.as_str()).collect();
+
+        // Branches before tags.
+        let first_tag = refs
+            .iter()
+            .position(|r| r.kind == GitRefKind::Tag)
+            .expect("at least one tag");
+        let last_branch = refs
+            .iter()
+            .rposition(|r| r.kind == GitRefKind::Branch)
+            .expect("at least one branch");
+        assert!(last_branch < first_tag);
+
+        // master/main floats to the top of the branch group.
+        let first = &refs[0];
+        assert!(
+            first.name == "master" || first.name == "main",
+            "expected default branch first, got {}",
+            first.name
+        );
+
+        // Tags sorted descending by name (v2 before v1).
+        let pos_v2 = names.iter().position(|n| *n == "v2.0.0").unwrap();
+        let pos_v1 = names.iter().position(|n| *n == "v1.0.0").unwrap();
+        assert!(pos_v2 < pos_v1);
+    }
+
+    #[test]
+    fn list_refs_empty_repo_returns_no_branches() {
+        let tmp = TempDir::new();
+        let _repo = init_repo(tmp.path());
+        // No commits yet: branches() yields nothing, tag_names() is empty.
+        let refs = list_refs(tmp.path()).unwrap();
+        assert!(refs.is_empty(), "expected no refs, got {refs:?}");
     }
 }

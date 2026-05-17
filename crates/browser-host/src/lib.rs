@@ -437,6 +437,10 @@ fn route_api(
             let repo = repo(&guard)?;
             Ok(serde_json::to_value(git::file_recency(&repo.root)?)?)
         }
+        ("GET", "/api/list_refs") => {
+            let repo = repo(&guard)?;
+            Ok(serde_json::to_value(git::list_refs(&repo.root)?)?)
+        }
         ("GET", "/api/list_annotations") => {
             use projectmind_plugin_api::storage::AnnotationStore;
             let store = guard

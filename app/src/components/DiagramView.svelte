@@ -25,6 +25,11 @@
 
   export let kind: DiagramKind;
   export let folderLayout: 'hierarchy' | 'solar' | 'td' = 'solar';
+  /// Optional base ref for two-ref compare mode. When set, the folder-map is
+  /// rendered with diff-overlay between `compareWith` (base) and `diffRef`
+  /// (target), and the toolbar's colour-by / diff-ref controls are hidden —
+  /// they're driven by the embedding view instead.
+  export let compareWith: string | null = null;
 
   interface FolderMapNode {
     id: string;
@@ -130,7 +135,12 @@
   const COLOR_BY_KEY = 'projectmind.diagram.folderMap.colorBy';
   const DIFF_REF_KEY = 'projectmind.diagram.folderMap.diffRef';
   let colorBy: ColorBy = readColorByPref();
-  let diffRef: string = readDiffRefPref();
+  export let diffRef: string = readDiffRefPref();
+  /// Effective colour mode after compare-mode override. When `compareWith`
+  /// is set the diagram is forced to diff-overlay regardless of the user's
+  /// stored preference — that's the whole point of the embedded compare
+  /// view. Standalone usage falls back to the persisted `colorBy`.
+  $: effectiveColorBy = compareWith ? ('diff' as ColorBy) : colorBy;
   /// Per-path git fact: how long ago + who. Both recency and author modes
   /// read from this single cache so toggling between them doesn't re-fetch.
   /// `null` means "haven't loaded yet"; an empty Map means "loaded, repo
@@ -241,10 +251,15 @@
   async function ensureChangesForCurrentRepo(): Promise<void> {
     const root = $repo?.root ?? null;
     if (!root) return;
-    const key = `${root}@${diffRef}`;
+    // Cache key encodes both refs: in standalone mode the FROM half is
+    // empty (single-ref vs working tree); in compare mode it carries the
+    // base ref so flipping either side invalidates correctly.
+    const key = `${root}@${compareWith ?? ''}..${diffRef}`;
     if (changesForKey === key && changesByPath !== null) return;
     try {
-      const items = await listChangesSince(diffRef);
+      const items = compareWith
+        ? await listChangesSince(compareWith, diffRef)
+        : await listChangesSince(diffRef);
       const map = new Map<string, DiffStatus>();
       for (const item of items) {
         map.set(item.path.replace(/\\/g, '/'), item.status);
@@ -257,6 +272,18 @@
       changesByPath = new Map();
       changesForKey = key;
     }
+  }
+
+  /// Compare-mode prop changes from outside invalidate the diff cache and
+  /// trigger a re-render. Standalone changes go through `setDiffRef` so
+  /// we don't double-invoke here.
+  $: if (compareWith !== null) {
+    void onCompareRefsChanged(compareWith, diffRef);
+  }
+  async function onCompareRefsChanged(_from: string, _to: string): Promise<void> {
+    changesByPath = null;
+    changesForKey = null;
+    await render(kind, folderLayout, docGraphLayout);
   }
 
   // viewport state
@@ -381,9 +408,9 @@
       // the folder map in either git-driven mode. Cached per repo root,
       // so toggling between R and A re-renders without a re-fetch.
       const wantGitFacts =
-        k === 'folder-map' && (colorBy === 'recency' || colorBy === 'author');
+        k === 'folder-map' && (effectiveColorBy === 'recency' || effectiveColorBy === 'author');
       if (wantGitFacts) await ensureGitFactsForCurrentRepo();
-      const wantChanges = k === 'folder-map' && colorBy === 'diff';
+      const wantChanges = k === 'folder-map' && effectiveColorBy === 'diff';
       if (wantChanges) await ensureChangesForCurrentRepo();
 
       const payload = await showDiagram(k);
@@ -476,11 +503,11 @@
   function buildFillFor(
     map: FolderMap,
   ): (id: string, kind: 'root' | 'folder' | 'file') => string | null {
-    if (colorBy === 'diff') {
+    if (effectiveColorBy === 'diff') {
       return buildDiffFillFor(map);
     }
     if (
-      (colorBy !== 'recency' && colorBy !== 'author') ||
+      (effectiveColorBy !== 'recency' && effectiveColorBy !== 'author') ||
       !factsByPath ||
       factsByPath.size === 0
     ) {
@@ -517,7 +544,7 @@
     const rootNode = map.nodes.find((n) => n.parent === null);
     if (rootNode) visit(rootNode);
 
-    if (colorBy === 'recency') {
+    if (effectiveColorBy === 'recency') {
       return (id) => {
         const f = factById.get(id);
         return f ? recencyColor(f.secs_ago) : null;
@@ -1245,49 +1272,53 @@
         on:click={() => (folderLayout = 'td')}
         title="Top-down layout"
       >TD</button>
-      <span class="divider"></span>
-      <button
-        class:active={colorBy === 'structure'}
-        on:click={() => setColorBy('structure')}
-        title="Colour by node kind (default)"
-        aria-pressed={colorBy === 'structure'}
-      >S</button>
-      <button
-        class:active={colorBy === 'recency'}
-        on:click={() => setColorBy('recency')}
-        title="Colour by last commit recency — recent files glow, stale ones recede"
-        aria-pressed={colorBy === 'recency'}
-      >R</button>
-      <button
-        class:active={colorBy === 'author'}
-        on:click={() => setColorBy('author')}
-        title="Colour by last committer — same author always gets the same hue"
-        aria-pressed={colorBy === 'author'}
-      >A</button>
-      <button
-        class:active={colorBy === 'diff'}
-        on:click={() => setColorBy('diff')}
-        title="Overlay git status against a ref — added / modified / deleted"
-        aria-pressed={colorBy === 'diff'}
-      >D</button>
-      {#if colorBy === 'diff'}
-        <input
-          class="diff-ref"
-          type="text"
-          spellcheck="false"
-          autocomplete="off"
-          value={diffRef}
-          title="Git ref to compare against (e.g. HEAD~1, main, a1b2c3d)"
-          on:change={(e) => setDiffRef((e.target as HTMLInputElement).value)}
-          on:keydown={(e) => {
-            if (e.key === 'Enter') setDiffRef((e.target as HTMLInputElement).value);
-          }}
-        />
-      {/if}
-      {#if (colorBy === 'recency' || colorBy === 'author') && gitError}
-        <span class="hint" style="color: var(--error);" title={gitError}>⚠ git unavailable</span>
-      {/if}
-      {#if colorBy === 'diff' && diffError}
+      {#if !compareWith}
+        <span class="divider"></span>
+        <button
+          class:active={colorBy === 'structure'}
+          on:click={() => setColorBy('structure')}
+          title="Colour by node kind (default)"
+          aria-pressed={colorBy === 'structure'}
+        >S</button>
+        <button
+          class:active={colorBy === 'recency'}
+          on:click={() => setColorBy('recency')}
+          title="Colour by last commit recency — recent files glow, stale ones recede"
+          aria-pressed={colorBy === 'recency'}
+        >R</button>
+        <button
+          class:active={colorBy === 'author'}
+          on:click={() => setColorBy('author')}
+          title="Colour by last committer — same author always gets the same hue"
+          aria-pressed={colorBy === 'author'}
+        >A</button>
+        <button
+          class:active={colorBy === 'diff'}
+          on:click={() => setColorBy('diff')}
+          title="Overlay git status against a ref — added / modified / deleted"
+          aria-pressed={colorBy === 'diff'}
+        >D</button>
+        {#if colorBy === 'diff'}
+          <input
+            class="diff-ref"
+            type="text"
+            spellcheck="false"
+            autocomplete="off"
+            value={diffRef}
+            title="Git ref to compare against (e.g. HEAD~1, main, a1b2c3d)"
+            on:change={(e) => setDiffRef((e.target as HTMLInputElement).value)}
+            on:keydown={(e) => {
+              if (e.key === 'Enter') setDiffRef((e.target as HTMLInputElement).value);
+            }}
+          />
+        {/if}
+        {#if (colorBy === 'recency' || colorBy === 'author') && gitError}
+          <span class="hint" style="color: var(--error);" title={gitError}>⚠ git unavailable</span>
+        {/if}
+        {#if colorBy === 'diff' && diffError}
+          <span class="hint" style="color: var(--error);" title={diffError}>⚠ git unavailable</span>
+        {/if}
+      {:else if diffError}
         <span class="hint" style="color: var(--error);" title={diffError}>⚠ git unavailable</span>
       {/if}
     {:else if kind === 'doc-graph'}

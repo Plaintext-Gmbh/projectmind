@@ -47,6 +47,7 @@
   import ImageView from './components/ImageView.svelte';
   import PdfView from './components/PdfView.svelte';
   import DiffView from './components/DiffView.svelte';
+  import CompareView from './components/CompareView.svelte';
   import KeyboardHelp from './components/KeyboardHelp.svelte';
   import StatusBar from './components/StatusBar.svelte';
   import McpToast from './components/McpToast.svelte';
@@ -220,6 +221,7 @@
     if (mode === 'pdf' && file) return `PDF · ${file.split('/').pop()}`;
     if (mode === 'image' && file) return `Image · ${file.split('/').pop()}`;
     if (mode === 'diff') return 'Diff';
+    if (mode === 'compare') return 'Compare';
     if (mode === 'walkthrough') return 'Walkthrough';
     return mode;
   }
@@ -1069,6 +1071,15 @@
           ▶ {$t('nav.walkthrough')}
         </button>
       {/if}
+      {#if $repo}
+        <button
+          class:active={$viewMode === 'compare'}
+          on:click={() => { followingMcp.set(false); viewMode.set('compare'); }}
+          title={$t('nav.compareTitle')}
+        >
+          {$t('nav.compare')}
+        </button>
+      {/if}
       {#if $viewMode === 'diff'}
         <button class="active">{$t('nav.diff')}</button>
       {/if}
@@ -1428,6 +1439,8 @@
     {/await}
   {:else if $viewMode === 'diff' && $diffViewRef}
     <DiffView reference={$diffViewRef.reference} to={$diffViewRef.to} />
+  {:else if $viewMode === 'compare'}
+    <CompareView />
   {:else}
     <section class="empty">
       <div class="welcome">

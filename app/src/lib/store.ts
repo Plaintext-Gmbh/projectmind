@@ -23,6 +23,7 @@ export type ViewMode =
   | 'md'
   | 'file'
   | 'diff'
+  | 'compare'
   | 'walkthrough'
   | 'html'
   | 'pdf'
@@ -47,6 +48,16 @@ export interface FileView {
 }
 export const fileView = writable<FileView | null>(null);
 export const diffViewRef = writable<{ reference: string; to: string | null } | null>(null);
+
+/// Currently selected ref pair for the Compare view. `from` is the base,
+/// `to` is the target. Persists during the session via the in-memory store
+/// only — picks are intentionally not stored across reloads because the
+/// available refs depend on the open repo.
+export interface CompareRefs {
+  from: string;
+  to: string;
+}
+export const compareRefs = writable<CompareRefs | null>(null);
 /// When the GUI is currently following an MCP-driven view intent, this is true.
 /// Used purely for UI affordances (tooltip / banner) — MCP always wins, so the
 /// flag is informational, not a gate.
