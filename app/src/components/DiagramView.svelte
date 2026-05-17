@@ -1155,9 +1155,13 @@
     }
     const docId = node.dataset.id;
     if (docId) {
+      // Click on a doc-graph node opens the info panel only. The user must
+      // press the "Open" button in the panel to actually navigate into the
+      // file. Auto-opening on the first click duplicates the Open button,
+      // makes the user lose the diagram view they were exploring, and used
+      // to race with applyState (which clobbered the freshly-set viewMode
+      // back to 'diagram', leaving the impression that nothing reacted).
       selectedDocId = docId;
-      const target = docGraph?.nodes.find((n) => n.id === docId);
-      if (target) openDoc(target.abs);
     }
   }
 
