@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-05-17
+
+### Changed
+
+- **CI re-release of 0.8.0.** No code changes — 0.8.0 shipped from a local Mac build with only the macOS bundles attached. 0.8.1 reruns the full release workflow on GitHub Actions so the matching Linux and Windows binaries land alongside the macOS ones in the published release.
+
 ## [0.8.0] — 2026-05-17
 
 ### Changed
