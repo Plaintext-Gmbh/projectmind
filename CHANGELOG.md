@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-05-17
+
+### Added
+
+- **Three new interactive Custom-SVG diagrams.** Available via the diagram sidebar once a repo has at least one parsed module.
+  - `architecture-flow` — horizontal Controller / Service / Repository / Entity bands with inter-band flow arrows whose stroke width tracks the underlying relation count. Each band shows a class-chip grid, a stereotype histogram, and a cross-module-edge count. Backed by `crates/core/src/architecture_flow.rs` (classifies every parsed class by stereotype → annotation → name/path hint, fallback to `business`). Replaces the drawio `architecture-layers` as the recommended layered view; the drawio variant stays available for export.
+  - `module-chord` — modules as arcs around a circle, cross-module edges as Bezier chords. Arc width tracks class count, chord thickness tracks aggregated relation count; self-edges are folded into the module's metadata rather than drawn. Backed by `crates/core/src/module_chord.rs`.
+  - `activity-heatmap` — GitHub-style 7×52 commit-calendar for the last 12 months, with per-day tooltip (top-3 authors), longest streak, max commits / day, and a top-10 author summary. Backed by `crates/core/src/activity_heatmap.rs` using a Hinnant date algorithm so there's no `chrono` / `time` dependency for one date format. Renders a "no git" empty state for non-repo paths. Capped at 20 000 commits visited.
+- **Branch & tag compare view** with three sub-tabs (commits / changed files / unified diff). New top-bar action opens a side-by-side picker that streams `git log` / `git diff` output through the existing browser-host and Tauri command surfaces.
+
+### Fixed
+
+- **Doc-graph node click clobbered the diagram view.** Clicking a doc-node used to call `openDoc()` in addition to setting `selectedDocId`, which (a) immediately switched away from the diagram before the just-opened info panel could be read, making the panel's "Open" button look like a no-op, and (b) raced with `applyState()` running off a `state-changed` event that flipped `viewMode` back to `'diagram'` — the impression was that the entire navigation had stopped responding. The eager open is gone; the explicit "Open" button in the info panel is the single user-visible way to navigate into the file from a doc-graph.
+
+## [0.6.0] — 2026-05-15
+
 ### Fixed
 
 - **`open_browser_repo` failed inside the macOS `.app` and Linux `.deb` bundles** because `locate_web_dist()` searched `app/dist` next to the running executable — a path that only exists when running from the source tree. The bundles ship `projectmind-mcp` at `/Applications/ProjectMind.app/Contents/MacOS/` (macOS) or `/usr/bin/` (Linux), neither of which has a sibling `app/dist`, so the call bailed out with `set PROJECTMIND_WEB_DIST or run from the ProjectMind repo root` and the browser webapp could not be served. `app/dist` is now compiled into the MCP binary via `include_dir!` and extracted lazily to `<cache_dir>/projectmind/web-dist-<version>/` on first call when no on-disk copy is found. The `PROJECTMIND_WEB_DIST` override and the repo-root auto-detect still take precedence (so `cargo run --bin projectmind-mcp` from the source tree behaves exactly as before — no double-extract). One source of truth for the assets, one binary on disk; the cache copy is reproduced from the embedded payload, not duplicated into the release archives. Pinned by a smoke test that asserts `index.html` is in the embedded directory.
