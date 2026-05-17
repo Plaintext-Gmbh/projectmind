@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-05-17
+
+### Changed
+
+- **Dependency refresh.** `tauri` bumped from 2.10.3 to 2.11.1 (cargo, #147) and `svelte` bumped from 5.55.5 to 5.55.7 (dev-dep, #155). No behaviour changes — both are routine semver-patch updates, picked up so the v0.8.0 build sits on the latest patched runtime. Full workspace + frontend test suite stayed green across the bump.
+
 ## [0.7.0] — 2026-05-17
 
 ### Added
