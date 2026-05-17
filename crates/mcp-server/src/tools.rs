@@ -91,6 +91,9 @@ fn diagram_schema() -> Value {
                     "doc-graph",
                     "c4-container",
                     "architecture-layers",
+                    "architecture-flow",
+                    "module-chord",
+                    "activity-heatmap",
                     "language-stats"
                 ]
             }
@@ -671,6 +674,18 @@ async fn show_diagram(state: &Mutex<ServerState>, args: Value) -> DispatchResult
             serde_json::to_string(&projectmind_core::language_stats::build(&repo.root))
                 .map_err(|e| DispatchError::internal(format!("language-stats failed: {e}")))?,
         )),
+        "architecture-flow" => Ok(text_result(
+            serde_json::to_string(&projectmind_core::architecture_flow::build(repo, &spring))
+                .map_err(|e| DispatchError::internal(format!("architecture-flow failed: {e}")))?,
+        )),
+        "module-chord" => Ok(text_result(
+            serde_json::to_string(&projectmind_core::module_chord::build(repo, &spring))
+                .map_err(|e| DispatchError::internal(format!("module-chord failed: {e}")))?,
+        )),
+        "activity-heatmap" => Ok(text_result(
+            serde_json::to_string(&projectmind_core::activity_heatmap::build(&repo.root))
+                .map_err(|e| DispatchError::internal(format!("activity-heatmap failed: {e}")))?,
+        )),
         other => Err(DispatchError::invalid_params(format!(
             "unknown diagram: {other}"
         ))),
@@ -1012,6 +1027,9 @@ fn view_diagram(args: Value) -> DispatchResult {
         && args.kind != "doc-graph"
         && args.kind != "c4-container"
         && args.kind != "architecture-layers"
+        && args.kind != "architecture-flow"
+        && args.kind != "module-chord"
+        && args.kind != "activity-heatmap"
         && args.kind != "language-stats"
     {
         return Err(DispatchError::invalid_params(format!(
