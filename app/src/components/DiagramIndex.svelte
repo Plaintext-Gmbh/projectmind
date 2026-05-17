@@ -38,6 +38,12 @@
         return $t('diagram.architectureLayers');
       case 'language-stats':
         return $t('diagram.languageStats') || 'Sprachenverteilung';
+      case 'architecture-flow':
+        return $t('diagram.architectureFlow') || 'Architektur-Schichten';
+      case 'module-chord':
+        return $t('diagram.moduleChord') || 'Modul-Abhängigkeiten';
+      case 'activity-heatmap':
+        return $t('diagram.activityHeatmap') || 'Commit-Heatmap';
       default:
         return kind;
     }
@@ -63,6 +69,21 @@
         return (
           $t('diagram.description.languageStats') ||
           'Dateienverteilung nach Sprache — Anzahl + Bytes je Bucket.'
+        );
+      case 'architecture-flow':
+        return (
+          $t('diagram.description.architectureFlow') ||
+          'Spring-Schichten als horizontale Bänder mit Fluss-Pfeilen — Controller → Service → Repository → Entity, mit Bean-Histogramm.'
+        );
+      case 'module-chord':
+        return (
+          $t('diagram.description.moduleChord') ||
+          'Module als Kreis-Segmente, Cross-Module-Abhängigkeiten als Sehnen. Dicke = Anzahl Edges.'
+        );
+      case 'activity-heatmap':
+        return (
+          $t('diagram.description.activityHeatmap') ||
+          'GitHub-Style Kalender-Heatmap der letzten 12 Monate. Hover zeigt Commit-Anzahl + Top-Autoren.'
         );
       default:
         return '';

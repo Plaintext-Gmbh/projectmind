@@ -415,6 +415,18 @@ fn show_diagram(kind: String, state: State<'_, Arc<AppState>>) -> Result<String,
             serde_json::to_string(&projectmind_core::language_stats::build(&repo.root))
                 .map_err(|e| e.to_string())
         }
+        "architecture-flow" => {
+            serde_json::to_string(&projectmind_core::architecture_flow::build(repo, &spring))
+                .map_err(|e| e.to_string())
+        }
+        "module-chord" => {
+            serde_json::to_string(&projectmind_core::module_chord::build(repo, &spring))
+                .map_err(|e| e.to_string())
+        }
+        "activity-heatmap" => {
+            serde_json::to_string(&projectmind_core::activity_heatmap::build(&repo.root))
+                .map_err(|e| e.to_string())
+        }
         other => Err(format!("unknown diagram kind: {other}")),
     }
 }

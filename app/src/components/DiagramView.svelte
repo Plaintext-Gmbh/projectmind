@@ -98,6 +98,81 @@
     buckets: LanguageBucket[];
   }
 
+  interface FlowClass {
+    fqn: string;
+    name: string;
+    module: string;
+    stereotype: string | null;
+  }
+  interface FlowLayer {
+    id: string;
+    label: string;
+    description: string;
+    color: string;
+    classes: FlowClass[];
+    stereotypes: Record<string, number>;
+  }
+  interface FlowEdge {
+    from: string;
+    to: string;
+    count: number;
+  }
+  interface ArchitectureFlow {
+    root: string;
+    total_classes: number;
+    total_modules: number;
+    cross_module_edges: number;
+    layers: FlowLayer[];
+    edges: FlowEdge[];
+  }
+
+  interface ChordModule {
+    id: string;
+    label: string;
+    classes: number;
+    outgoing: number;
+    incoming: number;
+    internal: number;
+  }
+  interface ChordEdge {
+    from: string;
+    to: string;
+    count: number;
+  }
+  interface ModuleChord {
+    root: string;
+    modules: ChordModule[];
+    edges: ChordEdge[];
+    total_relations: number;
+  }
+
+  interface ActivityAuthorSlice {
+    name: string;
+    commits: number;
+  }
+  interface ActivityDay {
+    date: string;
+    commits: number;
+    top_authors: ActivityAuthorSlice[];
+  }
+  interface ActivityAuthorTotals {
+    name: string;
+    commits: number;
+  }
+  interface ActivityHeatmap {
+    root: string;
+    start_date: string;
+    end_date: string;
+    days: ActivityDay[];
+    total_commits: number;
+    distinct_authors: number;
+    top_authors: ActivityAuthorTotals[];
+    max_commits_per_day: number;
+    longest_streak_days: number;
+    truncated: boolean;
+    no_git: boolean;
+  }
+
   let stage: HTMLDivElement;
   let mermaidSource = '';
   let svg = '';
@@ -105,6 +180,9 @@
   let docGraph: DocGraph | null = null;
   let folderMap: FolderMap | null = null;
   let languageStats: LanguageStats | null = null;
+  let architectureFlow: ArchitectureFlow | null = null;
+  let moduleChord: ModuleChord | null = null;
+  let activityHeatmap: ActivityHeatmap | null = null;
   let selectedDocId: string | null = null;
   let selectedFolderNode: FolderMapNode | null = null;
   let revealError: string | null = null;
@@ -423,6 +501,15 @@
       if (k !== 'language-stats') {
         languageStats = null;
       }
+      if (k !== 'architecture-flow') {
+        architectureFlow = null;
+      }
+      if (k !== 'module-chord') {
+        moduleChord = null;
+      }
+      if (k !== 'activity-heatmap') {
+        activityHeatmap = null;
+      }
       if (k === 'folder-map') {
         mermaidSource = '';
         folderMap = JSON.parse(payload) as FolderMap;
@@ -448,6 +535,18 @@
         mermaidSource = '';
         languageStats = JSON.parse(payload) as LanguageStats;
         svg = renderLanguageStats(languageStats);
+      } else if (k === 'architecture-flow') {
+        mermaidSource = '';
+        architectureFlow = JSON.parse(payload) as ArchitectureFlow;
+        svg = renderArchitectureFlow(architectureFlow);
+      } else if (k === 'module-chord') {
+        mermaidSource = '';
+        moduleChord = JSON.parse(payload) as ModuleChord;
+        svg = renderModuleChord(moduleChord);
+      } else if (k === 'activity-heatmap') {
+        mermaidSource = '';
+        activityHeatmap = JSON.parse(payload) as ActivityHeatmap;
+        svg = renderActivityHeatmap(activityHeatmap);
       } else {
         mermaidSource = payload;
         const id = `mermaid-${Date.now()}`;
@@ -1115,6 +1214,370 @@
     </svg>`;
   }
 
+  // ----- architecture-flow renderer ---------------------------------------
+  // Horizontal layer bands stacked top→bottom. Each band shows its name,
+  // class chips coloured by stereotype, a stereotype histogram, and an
+  // overall class count. Aggregated cross-layer edges become inter-band
+  // arrows whose stroke width encodes the underlying relation count.
+  function renderArchitectureFlow(flow: ArchitectureFlow): string {
+    const W = 1100;
+    const PAD_X = 40;
+    const PAD_TOP = 80;
+    const PAD_BETWEEN = 20;
+    const BAND_H = 150;
+    const CHIP_H = 26;
+    const CHIP_W = 132;
+    const CHIPS_PER_ROW = Math.max(1, Math.floor((W - 2 * PAD_X - 16) / (CHIP_W + 8)));
+
+    if (flow.total_classes === 0) {
+      const H = 320;
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
+        <rect width="100%" height="100%" fill="#090d14"/>
+        <text x="${W / 2}" y="${H / 2}" text-anchor="middle" fill="#94a3b8" font-size="18" font-family="ui-sans-serif,system-ui">Keine Klassen erkannt — Architektur-Schichten benötigen geparsten Code.</text>
+      </svg>`;
+    }
+
+    type Band = { layer: FlowLayer; y: number; h: number; rows: number };
+    const bands: Band[] = [];
+    let cursor = PAD_TOP;
+    for (const layer of flow.layers) {
+      const rows = layer.classes.length === 0 ? 1 : Math.ceil(layer.classes.length / CHIPS_PER_ROW);
+      const h = Math.max(BAND_H, 56 + rows * (CHIP_H + 8));
+      bands.push({ layer, y: cursor, h, rows });
+      cursor += h + PAD_BETWEEN;
+    }
+    const H = cursor + 40;
+
+    const bandSvg = bands
+      .map(({ layer, y, h }) => {
+        const total = layer.classes.length;
+        const stripe = `<rect x="${PAD_X}" y="${y}" width="${W - 2 * PAD_X}" height="${h}" rx="14" ry="14" fill="${layer.color}" fill-opacity="0.08" stroke="${layer.color}" stroke-width="1.4"/>`;
+        const accent = `<rect x="${PAD_X}" y="${y}" width="6" height="${h}" rx="3" fill="${layer.color}"/>`;
+        const head = `
+          <text x="${PAD_X + 22}" y="${y + 28}" class="band-title" fill="${layer.color}">${esc(layer.label)}</text>
+          <text x="${PAD_X + 22}" y="${y + 48}" class="band-desc">${esc(layer.description)}</text>
+          <text x="${W - PAD_X - 16}" y="${y + 28}" text-anchor="end" class="band-count" fill="${layer.color}">${total} ${total === 1 ? 'Klasse' : 'Klassen'}</text>`;
+
+        const stereoEntries = Object.entries(layer.stereotypes).sort((a, b) => b[1] - a[1]);
+        const stereoBadges = stereoEntries
+          .slice(0, 4)
+          .map(([s, n], i) => {
+            const bx = W - PAD_X - 16 - (stereoEntries.length > 4 ? 110 : 0) - i * 86;
+            return `<g><rect x="${bx - 78}" y="${y + 36}" width="78" height="18" rx="9" fill="${layer.color}" fill-opacity="0.18" stroke="${layer.color}" stroke-opacity="0.5"/><text x="${bx - 39}" y="${y + 49}" text-anchor="middle" class="stereo">${esc(s)} · ${n}</text></g>`;
+          })
+          .join('');
+
+        const chips = layer.classes
+          .map((c, i) => {
+            const col = i % CHIPS_PER_ROW;
+            const row = Math.floor(i / CHIPS_PER_ROW);
+            const cx = PAD_X + 22 + col * (CHIP_W + 8);
+            const cy = y + 60 + row * (CHIP_H + 8);
+            const label = shortChipLabel(c.name);
+            return `<g class="chip"><rect x="${cx}" y="${cy}" width="${CHIP_W}" height="${CHIP_H}" rx="6" fill="${layer.color}" fill-opacity="0.18" stroke="${layer.color}" stroke-opacity="0.55"/><text x="${cx + 10}" y="${cy + 17}" class="chip-text">${esc(label)}</text><title>${esc(c.fqn)}\n${esc(c.module)}${c.stereotype ? `\n@${esc(c.stereotype)}` : ''}</title></g>`;
+          })
+          .join('');
+
+        const empty =
+          total === 0
+            ? `<text x="${PAD_X + 22}" y="${y + 80}" class="empty">— keine Klassen in dieser Schicht —</text>`
+            : '';
+
+        return `${stripe}${accent}${head}${stereoBadges}${chips}${empty}`;
+      })
+      .join('');
+
+    // Edges between bands. Stroke width scales with count, capped at 8px.
+    const layerY = new Map(bands.map((b) => [b.layer.id, b.y + b.h / 2]));
+    const layerColor = new Map(bands.map((b) => [b.layer.id, b.layer.color]));
+    const maxEdge = Math.max(1, ...flow.edges.map((e) => e.count));
+    const xCenter = W / 2;
+    const edgeSvg = flow.edges
+      .map((edge, i) => {
+        const yFrom = layerY.get(edge.from);
+        const yTo = layerY.get(edge.to);
+        if (yFrom === undefined || yTo === undefined) return '';
+        const width = Math.max(1.4, Math.min(8, (edge.count / maxEdge) * 7 + 1.4));
+        // Curve sideways so multiple edges don't overlap.
+        const offset = (i - flow.edges.length / 2) * 26;
+        const xMid = xCenter + offset;
+        const midY = (yFrom + yTo) / 2;
+        const arrow = yFrom < yTo ? '▼' : '▲';
+        const color = layerColor.get(edge.from) ?? '#9ca3af';
+        const path = `M ${xCenter} ${yFrom} C ${xMid} ${(yFrom + midY) / 2}, ${xMid} ${(midY + yTo) / 2}, ${xCenter} ${yTo}`;
+        return `<g class="edge"><path d="${path}" stroke="${color}" stroke-width="${width}" stroke-opacity="0.55" fill="none"/><text x="${xMid}" y="${midY + 4}" text-anchor="middle" class="edge-label">${arrow} ${edge.count}</text></g>`;
+      })
+      .join('');
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
+      <style>
+        text{fill:#dce3f0;font:13px ui-sans-serif,system-ui,sans-serif}
+        .title{font-size:20px;font-weight:600}
+        .subtitle{font-size:12px;fill:#94a3b8}
+        .band-title{font-size:16px;font-weight:700}
+        .band-desc{font-size:12px;fill:#94a3b8}
+        .band-count{font-size:12px;font-weight:600}
+        .stereo{font-size:10px;font-family:ui-monospace,monospace;fill:#cbd5e1}
+        .chip{cursor:default}
+        .chip-text{font-size:11px;font-family:ui-monospace,monospace}
+        .empty{font-size:12px;fill:#64748b;font-style:italic}
+        .edge-label{font-size:10px;fill:#cbd5e1;font-family:ui-monospace,monospace}
+      </style>
+      <rect width="100%" height="100%" fill="#090d14"/>
+      <text x="${PAD_X}" y="40" class="title">Architektur-Schichten</text>
+      <text x="${PAD_X}" y="60" class="subtitle">${flow.total_classes} Klassen · ${flow.total_modules} Module · ${flow.cross_module_edges} Cross-Module-Edges</text>
+      ${edgeSvg}
+      ${bandSvg}
+    </svg>`;
+  }
+
+  function shortChipLabel(name: string): string {
+    return name.length <= 16 ? name : `${name.slice(0, 15)}…`;
+  }
+
+  // ----- module-chord renderer --------------------------------------------
+  // Modules as arcs on a circle, edges as Bezier chords through the centre.
+  // Width of each chord encodes the underlying relation count. Self-edges
+  // are not drawn (the module's `internal` count is shown on the label).
+  function renderModuleChord(chord: ModuleChord): string {
+    const W = 900;
+    const H = 700;
+    const cx = W / 2;
+    const cy = H / 2 + 12;
+    const R = 270;
+    const innerR = R - 18;
+    const labelR = R + 28;
+
+    if (chord.modules.length === 0) {
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
+        <rect width="100%" height="100%" fill="#090d14"/>
+        <text x="${cx}" y="${cy}" text-anchor="middle" fill="#94a3b8" font-size="18" font-family="ui-sans-serif,system-ui">Keine Module erkannt.</text>
+      </svg>`;
+    }
+
+    const PALETTE = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#22d3ee', '#a3e635', '#eab308', '#6366f1'];
+
+    // Position each module on the rim with weight proportional to its
+    // class count (so big modules get a wider arc).
+    const totalWeight = chord.modules.reduce((s, m) => s + Math.max(1, m.classes), 0);
+    const arcs = new Map<string, { start: number; end: number; mid: number; color: string }>();
+    let theta = -Math.PI / 2; // start at top
+    chord.modules.forEach((m, i) => {
+      const w = Math.max(1, m.classes) / totalWeight;
+      const span = w * 2 * Math.PI * 0.94; // leave 6% gap total
+      const start = theta + 0.03 * (2 * Math.PI) / chord.modules.length;
+      const end = start + span;
+      arcs.set(m.id, { start, end, mid: (start + end) / 2, color: PALETTE[i % PALETTE.length] });
+      theta = end + 0.03 * (2 * Math.PI) / chord.modules.length;
+    });
+
+    const arcSvg = chord.modules
+      .map((m) => {
+        const a = arcs.get(m.id)!;
+        const x1 = cx + R * Math.cos(a.start);
+        const y1 = cy + R * Math.sin(a.start);
+        const x2 = cx + R * Math.cos(a.end);
+        const y2 = cy + R * Math.sin(a.end);
+        const x3 = cx + innerR * Math.cos(a.end);
+        const y3 = cy + innerR * Math.sin(a.end);
+        const x4 = cx + innerR * Math.cos(a.start);
+        const y4 = cy + innerR * Math.sin(a.start);
+        const large = a.end - a.start > Math.PI ? 1 : 0;
+        const path = `M ${x1} ${y1} A ${R} ${R} 0 ${large} 1 ${x2} ${y2} L ${x3} ${y3} A ${innerR} ${innerR} 0 ${large} 0 ${x4} ${y4} Z`;
+        const lx = cx + labelR * Math.cos(a.mid);
+        const ly = cy + labelR * Math.sin(a.mid);
+        const anchor = Math.cos(a.mid) > 0 ? 'start' : 'end';
+        const rotation = (a.mid * 180) / Math.PI;
+        const niceRot = rotation > 90 || rotation < -90 ? rotation + 180 : rotation;
+        const labelText = `${esc(m.label)} · ${m.classes}`;
+        return `<g class="rim"><path d="${path}" fill="${a.color}" fill-opacity="0.85" stroke="${a.color}" stroke-width="1"/><text x="${lx}" y="${ly}" text-anchor="${anchor}" transform="rotate(${niceRot.toFixed(1)} ${lx} ${ly})" class="rim-label">${labelText}</text><title>${esc(m.id)}\n${m.classes} Klassen · ↗ ${m.outgoing} · ↘ ${m.incoming} · ⤾ ${m.internal}</title></g>`;
+      })
+      .join('');
+
+    const maxEdge = Math.max(1, ...chord.edges.map((e) => e.count));
+    const chordSvg = chord.edges
+      .map((edge) => {
+        const a1 = arcs.get(edge.from);
+        const a2 = arcs.get(edge.to);
+        if (!a1 || !a2) return '';
+        // Tap each chord into a sub-portion of the arc proportional to
+        // edge weight relative to the module's total outgoing.
+        const x1 = cx + innerR * Math.cos(a1.mid);
+        const y1 = cy + innerR * Math.sin(a1.mid);
+        const x2 = cx + innerR * Math.cos(a2.mid);
+        const y2 = cy + innerR * Math.sin(a2.mid);
+        const w = Math.max(1, Math.min(6, (edge.count / maxEdge) * 5 + 1));
+        return `<path d="M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}" stroke="${a1.color}" stroke-width="${w}" stroke-opacity="0.45" fill="none"><title>${esc(edge.from)} → ${esc(edge.to)}: ${edge.count}</title></path>`;
+      })
+      .join('');
+
+    const top = chord.edges.slice(0, 6);
+    const topList = top
+      .map(
+        (e, i) =>
+          `<text x="24" y="${600 + i * 16}" class="top-line">${i + 1}. ${esc(e.from)} → ${esc(e.to)} · ${e.count}</text>`,
+      )
+      .join('');
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
+      <style>
+        text{fill:#dce3f0;font:13px ui-sans-serif,system-ui,sans-serif}
+        .title{font-size:20px;font-weight:600}
+        .subtitle{font-size:12px;fill:#94a3b8}
+        .rim-label{font-size:11px;font-family:ui-monospace,monospace}
+        .top-title{font-size:12px;font-weight:600;fill:#cbd5e1}
+        .top-line{font-size:11px;font-family:ui-monospace,monospace;fill:#94a3b8}
+      </style>
+      <rect width="100%" height="100%" fill="#090d14"/>
+      <text x="24" y="34" class="title">Modul-Kopplung</text>
+      <text x="24" y="52" class="subtitle">${chord.modules.length} Module · ${chord.edges.length} Cross-Module-Edges · ${chord.total_relations} Beziehungen gesamt</text>
+      ${chordSvg}
+      ${arcSvg}
+      ${top.length > 0 ? `<text x="24" y="584" class="top-title">Top Cross-Module-Kanten</text>${topList}` : ''}
+    </svg>`;
+  }
+
+  // ----- activity-heatmap renderer ----------------------------------------
+  // GitHub-style 7×N calendar grid. Each column is one week, each row a
+  // weekday (Mo top). Colour ramps linearly with commits-per-day relative
+  // to the busiest day. The side panel lists totals + top-10 authors.
+  function renderActivityHeatmap(heat: ActivityHeatmap): string {
+    const CELL = 13;
+    const GAP = 3;
+    const LEFT = 60;
+    const TOP = 90;
+    const PANEL = 240;
+
+    // Layout: bucket days into 7-row columns starting on the first
+    // ISO-Monday at or before the start_date.
+    const days = heat.days;
+    if (days.length === 0) {
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 360">
+        <rect width="100%" height="100%" fill="#090d14"/>
+        <text x="550" y="180" text-anchor="middle" fill="#94a3b8" font-size="18">Keine Aktivität verfügbar.</text>
+      </svg>`;
+    }
+
+    // weekday(0=Mo … 6=So) for each day, derived from the date string.
+    function weekdayMondayBased(iso: string): number {
+      const d = new Date(iso + 'T00:00:00Z');
+      const w = d.getUTCDay(); // 0=Sun..6=Sat
+      return (w + 6) % 7; // 0=Mon..6=Sun
+    }
+
+    const first = days[0];
+    const firstW = weekdayMondayBased(first.date);
+    // Number of leading empty cells in column 0.
+    const totalCells = firstW + days.length;
+    const columns = Math.ceil(totalCells / 7);
+    const W = LEFT + columns * (CELL + GAP) + 16 + PANEL + 24;
+    const H = TOP + 7 * (CELL + GAP) + 80;
+
+    const max = Math.max(1, heat.max_commits_per_day);
+    const ramp = (n: number): string => {
+      if (n === 0) return '#1f2937';
+      const t = Math.min(1, n / max);
+      // 5 buckets, dark → bright green
+      if (t < 0.2) return '#0e3b27';
+      if (t < 0.45) return '#1c6c45';
+      if (t < 0.7) return '#2ea264';
+      if (t < 0.9) return '#3fcf83';
+      return '#7ee787';
+    };
+
+    const cells = days
+      .map((d, i) => {
+        const idx = firstW + i;
+        const col = Math.floor(idx / 7);
+        const row = idx % 7;
+        const x = LEFT + col * (CELL + GAP);
+        const y = TOP + row * (CELL + GAP);
+        const top = d.top_authors
+          .map((a) => `${a.name} · ${a.commits}`)
+          .join('\n');
+        const tip = `${d.date} — ${d.commits} ${d.commits === 1 ? 'Commit' : 'Commits'}${top ? `\n${top}` : ''}`;
+        return `<rect x="${x}" y="${y}" width="${CELL}" height="${CELL}" rx="2" fill="${ramp(d.commits)}"><title>${esc(tip)}</title></rect>`;
+      })
+      .join('');
+
+    // Weekday labels (Mo, Mi, Fr).
+    const weekdayLabels = ['Mo', '', 'Mi', '', 'Fr', '', 'So']
+      .map((lbl, i) => `<text x="${LEFT - 8}" y="${TOP + i * (CELL + GAP) + 11}" text-anchor="end" class="wd">${lbl}</text>`)
+      .join('');
+
+    // Month labels: one per first-Monday-of-month visible.
+    const monthLabels: string[] = [];
+    let lastMonth = '';
+    for (let i = 0; i < days.length; i += 1) {
+      const month = days[i].date.slice(0, 7);
+      if (month !== lastMonth) {
+        const idx = firstW + i;
+        const col = Math.floor(idx / 7);
+        const x = LEFT + col * (CELL + GAP);
+        const m = days[i].date.slice(5, 7);
+        const names = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+        monthLabels.push(`<text x="${x}" y="${TOP - 8}" class="mlbl">${names[parseInt(m, 10) - 1] ?? m}</text>`);
+        lastMonth = month;
+      }
+    }
+
+    // Side panel: stats + top authors.
+    const panelX = LEFT + columns * (CELL + GAP) + 24;
+    const noGit = heat.no_git
+      ? `<text x="${panelX}" y="${TOP + 16}" class="warn">Keine Git-Historie verfügbar.</text>`
+      : '';
+    const stats = !heat.no_git
+      ? `
+        <text x="${panelX}" y="${TOP}" class="panel-title">Übersicht</text>
+        <text x="${panelX}" y="${TOP + 22}" class="panel-line">Zeitraum: ${heat.start_date} – ${heat.end_date}</text>
+        <text x="${panelX}" y="${TOP + 40}" class="panel-line">Commits gesamt: ${heat.total_commits}</text>
+        <text x="${panelX}" y="${TOP + 58}" class="panel-line">Aktivste Tage: max. ${heat.max_commits_per_day}</text>
+        <text x="${panelX}" y="${TOP + 76}" class="panel-line">Längste Streak: ${heat.longest_streak_days} Tage</text>
+        <text x="${panelX}" y="${TOP + 94}" class="panel-line">Distincte Autoren: ${heat.distinct_authors}</text>
+        ${heat.truncated ? `<text x="${panelX}" y="${TOP + 112}" class="panel-warn">Walk bei ${heat.total_commits} Commits gestoppt.</text>` : ''}`
+      : '';
+    const authors = heat.top_authors
+      .map((a, i) => `<text x="${panelX}" y="${TOP + 140 + i * 16}" class="panel-line">${i + 1}. ${esc(a.name)} — ${a.commits}</text>`)
+      .join('');
+    const authorTitle = heat.top_authors.length > 0
+      ? `<text x="${panelX}" y="${TOP + 124}" class="panel-title">Top-Autoren</text>`
+      : '';
+
+    // Legend strip beneath the grid.
+    const legendY = TOP + 7 * (CELL + GAP) + 28;
+    const legend = ['#1f2937', '#0e3b27', '#1c6c45', '#2ea264', '#3fcf83', '#7ee787']
+      .map((c, i) => `<rect x="${LEFT + i * (CELL + GAP)}" y="${legendY}" width="${CELL}" height="${CELL}" rx="2" fill="${c}"/>`)
+      .join('');
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
+      <style>
+        text{fill:#dce3f0;font:13px ui-sans-serif,system-ui,sans-serif}
+        .title{font-size:20px;font-weight:600}
+        .subtitle{font-size:12px;fill:#94a3b8}
+        .wd{font-size:10px;font-family:ui-monospace,monospace;fill:#94a3b8}
+        .mlbl{font-size:10px;font-family:ui-monospace,monospace;fill:#94a3b8}
+        .panel-title{font-size:13px;font-weight:600;fill:#cbd5e1}
+        .panel-line{font-size:11px;font-family:ui-monospace,monospace;fill:#94a3b8}
+        .panel-warn{font-size:10px;font-family:ui-monospace,monospace;fill:#fbbf24}
+        .warn{font-size:13px;fill:#fbbf24}
+        .legend{font-size:10px;font-family:ui-monospace,monospace;fill:#94a3b8}
+      </style>
+      <rect width="100%" height="100%" fill="#090d14"/>
+      <text x="24" y="40" class="title">Commit-Aktivität</text>
+      <text x="24" y="60" class="subtitle">Letzte 12 Monate · ${heat.total_commits} Commits · ${heat.distinct_authors} Autoren</text>
+      ${monthLabels.join('')}
+      ${weekdayLabels}
+      ${cells}
+      <text x="${LEFT - 8}" y="${legendY + 11}" text-anchor="end" class="legend">weniger</text>
+      ${legend}
+      <text x="${LEFT + 6 * (CELL + GAP) + CELL + 8}" y="${legendY + 11}" class="legend">mehr</text>
+      ${noGit}
+      ${stats}
+      ${authorTitle}
+      ${authors}
+    </svg>`;
+  }
+
   function formatBytes(n: number): string {
     if (n < 1024) return `${n} B`;
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
@@ -1353,6 +1816,18 @@
     {:else if kind === 'language-stats' && languageStats}
       <span class="doc-summary">
         {languageStats.total_files} Dateien · {languageStats.buckets.length} Buckets
+      </span>
+    {:else if kind === 'architecture-flow' && architectureFlow}
+      <span class="doc-summary">
+        {architectureFlow.total_classes} Klassen · {architectureFlow.layers.length} Schichten · {architectureFlow.cross_module_edges} Cross-Module
+      </span>
+    {:else if kind === 'module-chord' && moduleChord}
+      <span class="doc-summary">
+        {moduleChord.modules.length} Module · {moduleChord.edges.length} Kanten · {moduleChord.total_relations} Beziehungen
+      </span>
+    {:else if kind === 'activity-heatmap' && activityHeatmap}
+      <span class="doc-summary">
+        {activityHeatmap.total_commits} Commits · {activityHeatmap.distinct_authors} Autoren · Streak {activityHeatmap.longest_streak_days}d
       </span>
     {/if}
     {#if !drawIoXml}

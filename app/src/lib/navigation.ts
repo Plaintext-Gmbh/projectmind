@@ -20,6 +20,9 @@ export type DiagramKind =
   | 'doc-graph'
   | 'c4-container'
   | 'architecture-layers'
+  | 'architecture-flow'
+  | 'module-chord'
+  | 'activity-heatmap'
   | 'language-stats';
 export type FolderMapLayout = 'hierarchy' | 'solar' | 'td';
 

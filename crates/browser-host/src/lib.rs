@@ -506,6 +506,15 @@ fn route_api(
                 "language-stats" => Ok(json!(serde_json::to_string(
                     &projectmind_core::language_stats::build(&repo.root)
                 )?)),
+                "architecture-flow" => Ok(json!(serde_json::to_string(
+                    &projectmind_core::architecture_flow::build(repo, &spring)
+                )?)),
+                "module-chord" => Ok(json!(serde_json::to_string(
+                    &projectmind_core::module_chord::build(repo, &spring)
+                )?)),
+                "activity-heatmap" => Ok(json!(serde_json::to_string(
+                    &projectmind_core::activity_heatmap::build(&repo.root)
+                )?)),
                 other => anyhow::bail!("unknown diagram kind: {other}"),
             }
         }

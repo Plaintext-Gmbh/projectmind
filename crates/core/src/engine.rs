@@ -184,6 +184,10 @@ impl Engine {
         // extension. Always meaningful — even a docs-only repo has at
         // least Markdown to count — so it's unconditional.
         out.insert("language-stats".to_string());
+        // activity-heatmap reads commit history. Unconditional too: the
+        // payload renderer has a "no git" empty state so we don't need
+        // to gate this on `.git/` presence in the engine.
+        out.insert("activity-heatmap".to_string());
         // doc-graph is always meaningful when the repo has at least one
         // markdown file. Unconditional on plugins because it's purely a
         // filesystem scan, not language-specific parsing.
@@ -198,6 +202,15 @@ impl Engine {
             if !repo.modules.is_empty() {
                 out.insert("c4-container".to_string());
                 out.insert("architecture-layers".to_string());
+                // architecture-flow is the prettier, interactive variant
+                // of architecture-layers — both stay available because
+                // they serve different use cases (drawio export vs. live
+                // navigation).
+                out.insert("architecture-flow".to_string());
+                // module-chord shows cross-module coupling as a circular
+                // chord diagram. Needs ≥2 modules to be interesting but
+                // still renders an "only one module" hint for the rest.
+                out.insert("module-chord".to_string());
             }
             for lang in &self.languages {
                 for d in lang.provided_diagrams() {

@@ -12,7 +12,9 @@
 
 #![warn(missing_docs)]
 
+pub mod activity_heatmap;
 pub mod annotations;
+pub mod architecture_flow;
 pub mod cargo;
 pub mod diagram;
 pub mod doc_graph;
@@ -24,6 +26,7 @@ pub mod heartbeat;
 pub mod html;
 pub mod language_stats;
 pub mod maven;
+pub mod module_chord;
 pub mod repository;
 pub mod state;
 pub mod walkthrough;

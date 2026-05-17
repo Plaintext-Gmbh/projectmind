@@ -314,6 +314,9 @@ export type DiagramKind =
   | 'doc-graph'
   | 'c4-container'
   | 'architecture-layers'
+  | 'architecture-flow'
+  | 'module-chord'
+  | 'activity-heatmap'
   | 'language-stats';
 
 export async function showDiagram(kind: DiagramKind): Promise<string> {
