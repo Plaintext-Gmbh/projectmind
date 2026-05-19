@@ -262,6 +262,70 @@ fn view_file_rejects_paths_outside_open_repo() {
     );
 }
 
+#[test]
+fn pattern_check_rejects_unknown_pattern() {
+    let tmp = TempRepo::create_with_java_class();
+    let mut s = Server::spawn();
+    let path = tmp.root.to_string_lossy().into_owned();
+    s.call(&format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"open_repo","arguments":{{"path":"{path}"}}}}}}"#
+    ));
+    let resp = s.call(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"pattern_check","arguments":{"pattern":"made_up"}}}"#,
+    );
+    assert_eq!(resp["error"]["code"], -32602);
+    assert!(resp["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("unknown pattern"));
+}
+
+#[test]
+fn pattern_check_layered_returns_result_envelope() {
+    let tmp = TempRepo::create_with_java_class();
+    let mut s = Server::spawn();
+    let path = tmp.root.to_string_lossy().into_owned();
+    s.call(&format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"open_repo","arguments":{{"path":"{path}"}}}}}}"#
+    ));
+    let resp = s.call(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"pattern_check","arguments":{"pattern":"layered"}}}"#,
+    );
+    let body: serde_json::Value =
+        serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(body["pattern"], "layered");
+    assert!(body["holds"].is_array());
+    assert!(body["violations"].is_array());
+    assert!(body["confidence"].is_number());
+}
+
+#[test]
+fn risk_atlas_returns_envelope_with_window_and_weights() {
+    let tmp = TempRepo::create_git_repo_with_class();
+    let mut s = Server::spawn();
+    let path = tmp.root.to_string_lossy().into_owned();
+    s.call(&format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"open_repo","arguments":{{"path":"{path}"}}}}}}"#
+    ));
+    let resp = s.call(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"risk_atlas","arguments":{"top":5}}}"#,
+    );
+    assert!(resp["error"].is_null(), "unexpected error: {resp}");
+    let body: serde_json::Value =
+        serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(body["window_days"], 90);
+    assert!(body["weights"]["churn"].is_number());
+    assert!(body["scores"].is_array());
+    let scores = body["scores"].as_array().unwrap();
+    assert!(!scores.is_empty(), "expected at least one scored class");
+    let first = &scores[0];
+    for k in [
+        "fqn", "module", "file", "score", "churn", "cx", "sloc", "why",
+    ] {
+        assert!(first.get(k).is_some(), "missing field {k} in score entry");
+    }
+}
+
 // ----- helpers -----
 
 struct TempRepo {
@@ -315,6 +379,48 @@ impl TempRepo {
             std::env::temp_dir().join(format!("projectmind-it-{}-{}", std::process::id(), uniq()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join(name), contents).unwrap();
+        Self { root }
+    }
+
+    /// Builds a temporary directory that is also a real git repo with one
+    /// commit touching `Hello.java`. Needed by `risk_atlas` which walks git
+    /// history to compute churn.
+    fn create_git_repo_with_class() -> Self {
+        use std::process::Command;
+        let root =
+            std::env::temp_dir().join(format!("projectmind-it-{}-{}", std::process::id(), uniq()));
+        std::fs::create_dir_all(&root).unwrap();
+        let java = "package demo;\npublic class Hello {\n    public void greet(String name) {\n        if (name != null && !name.isEmpty()) {\n            System.out.println(\"hi \" + name);\n        }\n    }\n}\n";
+        std::fs::write(root.join("Hello.java"), java).unwrap();
+        // libgit2 requires a configured identity; pass via env rather than
+        // touching the test runner's git config.
+        let env = [
+            ("GIT_AUTHOR_NAME", "Test"),
+            ("GIT_AUTHOR_EMAIL", "test@example.com"),
+            ("GIT_COMMITTER_NAME", "Test"),
+            ("GIT_COMMITTER_EMAIL", "test@example.com"),
+        ];
+        let mut init = Command::new("git");
+        init.args(["init", "-q"]).current_dir(&root);
+        init.env("GIT_CONFIG_GLOBAL", "/dev/null");
+        init.env("GIT_CONFIG_SYSTEM", "/dev/null");
+        let init_ok = init.status().is_ok_and(|s| s.success());
+        assert!(init_ok, "git init failed in temp repo {}", root.display());
+
+        let mut add = Command::new("git");
+        add.args(["add", "Hello.java"]).current_dir(&root);
+        let _ = add.status();
+
+        let mut commit = Command::new("git");
+        commit
+            .args(["commit", "-q", "-m", "seed"])
+            .current_dir(&root);
+        commit.env("GIT_CONFIG_GLOBAL", "/dev/null");
+        commit.env("GIT_CONFIG_SYSTEM", "/dev/null");
+        for (k, v) in env {
+            commit.env(k, v);
+        }
+        let _ = commit.status();
         Self { root }
     }
 }
