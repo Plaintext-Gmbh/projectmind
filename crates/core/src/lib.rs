@@ -27,7 +27,9 @@ pub mod html;
 pub mod language_stats;
 pub mod maven;
 pub mod module_chord;
+pub mod patterns;
 pub mod repository;
+pub mod risk;
 pub mod state;
 pub mod walkthrough;
 

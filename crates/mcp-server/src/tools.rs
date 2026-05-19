@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use projectmind_browser_host::{self as browser_host, BrowserHostConfig};
 use projectmind_core::file_access;
 use projectmind_core::files;
+use projectmind_core::patterns::{self as core_patterns, Pattern, Scope as PatternScope};
+use projectmind_core::risk::{self, Options as RiskOptions, Weights as RiskWeights};
 use projectmind_core::state::{self, UiState, ViewIntent};
 use projectmind_core::walkthrough::{self as wt, QuizQuestion, Walkthrough, WalkthroughStep};
 use projectmind_core::{diagram, git, html};
@@ -267,6 +269,42 @@ fn list_module_files_schema() -> Value {
     })
 }
 
+fn risk_atlas_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "module":      { "type": "string", "description": "Optional module id filter (as returned by module_summary)." },
+            "top":         { "type": "integer", "minimum": 1, "default": 20, "description": "Maximum number of classes to return, sorted highest-risk first." },
+            "window_days": { "type": "integer", "minimum": 1, "default": 90, "description": "Churn lookback window in days. Commits older than this are ignored." },
+            "weights": {
+                "type": "object",
+                "description": "Optional override of the score weights. Missing fields keep the default.",
+                "properties": {
+                    "churn": { "type": "number" },
+                    "cx":    { "type": "number" },
+                    "cov":   { "type": "number" },
+                    "deps":  { "type": "number" }
+                }
+            }
+        }
+    })
+}
+
+fn pattern_check_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "pattern": {
+                "type": "string",
+                "enum": ["no_static_state", "tx_on_service", "layered"],
+                "description": "Which pattern to evaluate. v1 ships three Spring-flavoured detectors."
+            },
+            "module": { "type": "string", "description": "Optional module id filter. Omit to check across the whole repo." }
+        },
+        "required": ["pattern"]
+    })
+}
+
 fn open_browser_repo_schema() -> Value {
     json!({
         "type": "object",
@@ -415,6 +453,16 @@ pub(crate) fn list() -> Value {
                 "inputSchema": walkthrough_feedback_schema()
             },
             {
+                "name": "risk_atlas",
+                "description": "Composite per-class risk scores for the open repository. Combines git churn (commits touching the file in the last `window_days` days) and cyclomatic complexity (decision-point heuristic over the class's source lines). Returns the top-N classes sorted by score descending with raw signals and a `why` hint. Use to find the hotspots before reading any source — much cheaper than grepping the repo.",
+                "inputSchema": risk_atlas_schema()
+            },
+            {
+                "name": "pattern_check",
+                "description": "Evaluate an architectural pattern against the open repository. v1 supports `no_static_state` (Spring components must not own mutable static fields), `tx_on_service` (@Transactional belongs on @Service, not @Controller), and `layered` (web/controller classes must not reference repositories or entities directly). Returns per-module compliance counts and a list of violations with file:line.",
+                "inputSchema": pattern_check_schema()
+            },
+            {
                 "name": "open_browser_repo",
                 "description": "Start the in-process browser host that serves the ProjectMind webapp at a tokenized URL, then surface that URL to the user verbatim — they will open it themselves; you cannot. Use after `open in browser` / `im Browser zeigen` / `show me on my iPad / phone / laptop`. Pass `lan: true` whenever the user mentions a remote device (iPad, phone, second machine on the same WLAN) — otherwise the URL is `http://127.0.0.1:...` and unreachable from anything but this machine. The bearer token in the URL fragment gates every API call regardless of bind address. Idempotent: calling again with a different `path` reopens the host on the existing port; call `browser_status` first to avoid restarting the host. Once the user has opened the URL, every subsequent `view_*` / `walkthrough_*` push will mirror to that browser tab in addition to the Desktop GUI.",
                 "inputSchema": open_browser_repo_schema()
@@ -469,6 +517,8 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "walkthrough_set_step" => walkthrough_set_step(parsed.arguments),
         "walkthrough_clear" => walkthrough_clear_handler(),
         "walkthrough_feedback" => walkthrough_feedback(parsed.arguments),
+        "risk_atlas" => risk_atlas(state, parsed.arguments).await,
+        "pattern_check" => pattern_check(state, parsed.arguments).await,
         "open_browser_repo" => open_browser_repo(state, parsed.arguments).await,
         "browser_status" => browser_status(),
         "stop_browser" => stop_browser(),
@@ -1296,6 +1346,105 @@ fn stop_browser() -> DispatchResult {
     Ok(text_result(json!({"ok": true}).to_string()))
 }
 
+#[derive(Deserialize, Default)]
+struct RiskAtlasArgs {
+    #[serde(default)]
+    module: Option<String>,
+    #[serde(default)]
+    top: Option<u32>,
+    #[serde(default)]
+    window_days: Option<u32>,
+    #[serde(default)]
+    weights: Option<RiskWeightArgs>,
+}
+
+#[derive(Deserialize, Default)]
+struct RiskWeightArgs {
+    #[serde(default)]
+    churn: Option<f64>,
+    #[serde(default)]
+    cx: Option<f64>,
+    #[serde(default)]
+    cov: Option<f64>,
+    #[serde(default)]
+    deps: Option<f64>,
+}
+
+async fn risk_atlas(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
+    let args: RiskAtlasArgs = if args.is_null() {
+        RiskAtlasArgs::default()
+    } else {
+        serde_json::from_value(args)
+            .map_err(|e| DispatchError::invalid_params(format!("risk_atlas: {e}")))?
+    };
+
+    let state = state.lock().await;
+    with_repo(&state, |repo| {
+        let mut weights = RiskWeights::default();
+        if let Some(w) = args.weights {
+            if let Some(v) = w.churn {
+                weights.churn = v;
+            }
+            if let Some(v) = w.cx {
+                weights.cx = v;
+            }
+            if let Some(v) = w.cov {
+                weights.cov = v;
+            }
+            if let Some(v) = w.deps {
+                weights.deps = v;
+            }
+        }
+        let opts = RiskOptions {
+            module: args.module,
+            top: args.top.map_or(20, |v| v as usize).max(1),
+            window_days: args.window_days.unwrap_or(risk::DEFAULT_CHURN_WINDOW_DAYS),
+            weights,
+        };
+        let scores = risk::compute(repo, &opts)
+            .map_err(|e| DispatchError::internal(format!("risk_atlas: {e}")))?;
+        let body = serde_json::to_string_pretty(&json!({
+            "window_days": opts.window_days,
+            "weights": {
+                "churn": opts.weights.churn,
+                "cx": opts.weights.cx,
+                "cov": opts.weights.cov,
+                "deps": opts.weights.deps,
+            },
+            "scores": scores,
+        }))
+        .unwrap_or_else(|_| "{}".into());
+        Ok(text_result(body))
+    })
+}
+
+#[derive(Deserialize)]
+struct PatternCheckArgs {
+    pattern: String,
+    #[serde(default)]
+    module: Option<String>,
+}
+
+async fn pattern_check(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
+    let args: PatternCheckArgs = serde_json::from_value(args)
+        .map_err(|e| DispatchError::invalid_params(format!("pattern_check: {e}")))?;
+    let pattern = Pattern::parse(&args.pattern).ok_or_else(|| {
+        DispatchError::invalid_params(format!(
+            "pattern_check: unknown pattern `{}` (expected no_static_state | tx_on_service | layered)",
+            args.pattern
+        ))
+    })?;
+    let scope = PatternScope {
+        module: args.module,
+    };
+    let state = state.lock().await;
+    with_repo(&state, |repo| {
+        let result = core_patterns::check(repo, pattern, &scope);
+        let body = serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".into());
+        Ok(text_result(body))
+    })
+}
+
 /// Web frontend embedded into the MCP binary at compile time.
 ///
 /// The `app/dist` directory must exist at build time — the workspace CI
@@ -1399,6 +1548,47 @@ mod tests {
         assert!(names.contains(&"open_repo"));
         assert!(names.contains(&"show_class"));
         assert!(names.contains(&"list_changes_since"));
+        assert!(names.contains(&"risk_atlas"));
+        assert!(names.contains(&"pattern_check"));
+    }
+
+    #[test]
+    fn risk_atlas_schema_documents_weights() {
+        let v = list();
+        let tools = v["tools"].as_array().unwrap();
+        let atlas = tools
+            .iter()
+            .find(|t| t["name"] == "risk_atlas")
+            .expect("risk_atlas tool registered");
+        let schema = &atlas["inputSchema"];
+        assert_eq!(schema["type"], "object");
+        let props = &schema["properties"];
+        for k in ["module", "top", "window_days", "weights"] {
+            assert!(props.get(k).is_some(), "missing property {k}");
+        }
+        let wprops = &props["weights"]["properties"];
+        for k in ["churn", "cx", "cov", "deps"] {
+            assert!(wprops.get(k).is_some(), "missing weight {k}");
+        }
+    }
+
+    #[test]
+    fn pattern_check_schema_enumerates_v1_patterns() {
+        let v = list();
+        let tools = v["tools"].as_array().unwrap();
+        let pc = tools
+            .iter()
+            .find(|t| t["name"] == "pattern_check")
+            .expect("pattern_check tool registered");
+        let enum_values: Vec<&str> = pc["inputSchema"]["properties"]["pattern"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(enum_values.contains(&"no_static_state"));
+        assert!(enum_values.contains(&"tx_on_service"));
+        assert!(enum_values.contains(&"layered"));
     }
 
     #[test]
