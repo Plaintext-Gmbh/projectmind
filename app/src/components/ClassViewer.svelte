@@ -32,6 +32,10 @@
   // Shift + wheel zoom, persisted under the per-component key.
   const { zoom, action: zoomAction } = createShiftWheelZoom('projectmind.classviewer.zoom');
 
+  function zoomReset() {
+    zoom.set(1.0);
+  }
+
   // ----- Outline panel -----------------------------------------------------
 
   // The outline ships methods + fields without source so it's cheap to fetch
@@ -329,6 +333,13 @@
       >
         ☰
       </button>
+      <button
+        type="button"
+        class="header-toggle zoom-indicator"
+        on:click={zoomReset}
+        title={$t('file.zoomReset')}
+        aria-label={$t('file.zoomReset')}
+      >{Math.round($zoom * 100)}%</button>
     </div>
   </div>
 
@@ -550,6 +561,15 @@
     border-color: var(--accent-2);
     color: var(--accent-2);
   }
+  /* Zoom-Anzeige: zeigt aktuellen Zoom-Faktor; Klick setzt zurück auf 100 %. */
+  .header-toggle.zoom-indicator {
+    font-family: var(--mono);
+    min-width: 3.2em;
+    text-align: center;
+  }
+  .header-toggle.zoom-indicator:not(:hover) {
+    color: var(--fg-2);
+  }
 
   /* Source pane spans the full body until the outline is opened, at which
      point a fixed-width column is reserved on the right. */
@@ -605,10 +625,13 @@
 
   .lineno {
     display: inline-block;
-    width: 36px;
+    /* em statt px: skaliert mit dem Zoom-Level. 3em ≈ 36px bei Standard-Zoom
+       (0.78em root → 12.5px) und bleibt bei jedem Zoom breit genug für 5-stellige
+       Zeilennummern, die sonst über den fixen 36px-Container hinauslaufen. */
+    width: 3em;
     color: var(--fg-2);
     text-align: right;
-    margin-right: 12px;
+    margin-right: 1em;
     user-select: none;
   }
 
@@ -621,8 +644,11 @@
      (`@Service`, `@Override`, `@Autowired`) without truncating. */
   .gutter {
     display: inline-block;
-    width: 138px;
-    margin-right: 8px;
+    /* em statt px: skaliert mit dem Zoom-Level. 11em ≈ 138px bei Standard-Zoom,
+       wächst proportional mit der Schriftgrösse damit Annotation-Chips nicht
+       frühzeitig abgeschnitten werden. */
+    width: 11em;
+    margin-right: 0.65em;
     vertical-align: baseline;
     user-select: none;
     font-family: var(--mono);
@@ -636,14 +662,15 @@
 
   .gutter .vis {
     display: inline-block;
-    width: 16px;
+    /* em statt px: skaliert mit dem Zoom-Level. 1.25em ≈ 16px bei Standard-Zoom. */
+    width: 1.25em;
     text-align: center;
     color: var(--fg-2);
   }
 
   .gutter .chip {
     display: inline-block;
-    padding: 0 6px;
+    padding: 0 0.5em;
     border-radius: 8px;
     font-size: 0.85em;
     line-height: 1.3;
@@ -687,7 +714,8 @@
 
   .outline h3 {
     margin: 0 6px 6px;
-    font-size: 10px;
+    /* 0.8em statt 10px: skaliert mit dem Zoom des Outline-Panels. */
+    font-size: 0.8em;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -711,7 +739,8 @@
   .outline-row {
     width: 100%;
     display: grid;
-    grid-template-columns: 14px minmax(0, 1fr) auto auto;
+    /* 1.1em statt 14px: Sichtbarkeitsglyph-Spalte skaliert mit Zoom. */
+    grid-template-columns: 1.1em minmax(0, 1fr) auto auto;
     align-items: baseline;
     gap: 6px;
     padding: 4px 6px;
@@ -743,24 +772,27 @@
     white-space: nowrap;
   }
   .outline-row .anno {
-    font-size: 10px;
+    /* 0.8em statt 10px: skaliert mit Zoom. */
+    font-size: 0.8em;
     color: var(--accent-2);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 80px;
+    max-width: 6em;
   }
   .outline-row .ftype {
-    font-size: 10px;
+    /* 0.8em statt 10px: skaliert mit Zoom. */
+    font-size: 0.8em;
     color: var(--fg-2);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 80px;
+    max-width: 6em;
   }
   .outline-row .line-no {
     color: var(--fg-2);
-    font-size: 10px;
+    /* 0.8em statt 10px: skaliert mit Zoom. */
+    font-size: 0.8em;
   }
 
   .outline-placeholder {
