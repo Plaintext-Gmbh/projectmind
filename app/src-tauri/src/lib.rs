@@ -27,7 +27,7 @@ use projectmind_core::state::{self, UiState, ViewIntent};
 use projectmind_core::walkthrough::{
     self as wt, FeedbackEvent, FeedbackKind, FeedbackLog, Walkthrough,
 };
-use projectmind_core::{diagram, Engine, Repository};
+use projectmind_core::{diagram, risk, Engine, Repository};
 use projectmind_framework_lombok::LombokPlugin;
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_lang_java::JavaPlugin;
@@ -329,6 +329,67 @@ fn list_modules(state: State<'_, Arc<AppState>>) -> Result<Vec<ModuleEntry>, Str
     }
     out.sort_by_key(|b| std::cmp::Reverse(b.classes));
     Ok(out)
+}
+
+/// Optionale Gewichts-Overrides aus der GUI (Cockpit Risk Atlas, #157).
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+pub struct RiskWeightsArg {
+    pub churn: Option<f64>,
+    pub cx: Option<f64>,
+    pub cov: Option<f64>,
+    pub deps: Option<f64>,
+}
+
+/// Ergebnis von [`risk_atlas`] – Fenster, effektive Gewichte und die Scores für die Treemap.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RiskAtlasResult {
+    pub window_days: u32,
+    pub weights: risk::Weights,
+    pub scores: Vec<risk::RiskScore>,
+}
+
+/// Risk Atlas (Cockpit 2.1): Churn + Komplexität je Klasse, gewichteter Score. Spiegelt die Logik
+/// des `risk_atlas`-MCP-Tools, hier als Tauri-Command, damit die GUI die Treemap füttern kann.
+#[tauri::command]
+fn risk_atlas(
+    module: Option<String>,
+    top: Option<u32>,
+    window_days: Option<u32>,
+    weights: Option<RiskWeightsArg>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<RiskAtlasResult, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    let mut w = risk::Weights::default();
+    if let Some(a) = weights {
+        if let Some(v) = a.churn {
+            w.churn = v;
+        }
+        if let Some(v) = a.cx {
+            w.cx = v;
+        }
+        if let Some(v) = a.cov {
+            w.cov = v;
+        }
+        if let Some(v) = a.deps {
+            w.deps = v;
+        }
+    }
+    let opts = risk::Options {
+        module,
+        // Treemap zeigt viele Kacheln -> grosszügiges Default-Top, per GUI überschreibbar.
+        top: top.map_or(200, |v| v as usize).max(1),
+        window_days: window_days.unwrap_or(risk::DEFAULT_CHURN_WINDOW_DAYS),
+        weights: w,
+    };
+    let scores = risk::compute(repo, &opts).map_err(|e| e.to_string())?;
+    Ok(RiskAtlasResult {
+        window_days: opts.window_days,
+        weights: opts.weights,
+        scores,
+    })
 }
 
 #[tauri::command]
@@ -1035,6 +1096,7 @@ pub fn run() {
             pending_markdown_file,
             list_classes,
             list_modules,
+            risk_atlas,
             show_class,
             class_outline,
             list_changes_since,
