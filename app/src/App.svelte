@@ -48,6 +48,7 @@
   import PdfView from './components/PdfView.svelte';
   import DiffView from './components/DiffView.svelte';
   import CompareView from './components/CompareView.svelte';
+  import RiskAtlasView from './components/RiskAtlasView.svelte';
   import KeyboardHelp from './components/KeyboardHelp.svelte';
   import StatusBar from './components/StatusBar.svelte';
   import McpToast from './components/McpToast.svelte';
@@ -1083,6 +1084,15 @@
           {$t('nav.compare')}
         </button>
       {/if}
+      {#if $repo}
+        <button
+          class:active={$viewMode === 'risk'}
+          on:click={() => { followingMcp.set(false); viewMode.set('risk'); }}
+          title="Risk Atlas — Churn + Komplexität als Treemap"
+        >
+          Risk Atlas
+        </button>
+      {/if}
       {#if $viewMode === 'diff'}
         <button class="active">{$t('nav.diff')}</button>
       {/if}
@@ -1444,6 +1454,8 @@
     <DiffView reference={$diffViewRef.reference} to={$diffViewRef.to} />
   {:else if $viewMode === 'compare'}
     <CompareView />
+  {:else if $viewMode === 'risk'}
+    <RiskAtlasView />
   {:else}
     <section class="empty">
       <div class="welcome">

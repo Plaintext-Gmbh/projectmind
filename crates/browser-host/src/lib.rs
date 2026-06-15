@@ -25,7 +25,7 @@ use projectmind_core::state::{self, UiState, ViewIntent};
 use projectmind_core::walkthrough::{
     self as wt, FeedbackEvent, FeedbackKind, FeedbackLog, Walkthrough,
 };
-use projectmind_core::{diagram, Engine, Repository};
+use projectmind_core::{diagram, risk, Engine, Repository};
 use projectmind_framework_lombok::LombokPlugin;
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_lang_java::JavaPlugin;
@@ -417,6 +417,7 @@ fn route_api(
             )?)?)
         }
         ("GET", "/api/list_modules") => Ok(serde_json::to_value(list_modules_locked(&guard)?)?),
+        ("GET", "/api/risk_atlas") => Ok(serde_json::to_value(risk_atlas_locked(&guard, query)?)?),
         ("GET", "/api/show_class") => {
             let fqn = required(query, "fqn")?;
             Ok(serde_json::to_value(show_class_locked(&guard, fqn)?)?)
@@ -951,6 +952,55 @@ fn list_modules_locked(state: &HostState) -> anyhow::Result<Vec<ModuleEntry>> {
     }
     out.sort_by_key(|b| std::cmp::Reverse(b.classes));
     Ok(out)
+}
+
+/// Ergebnis von `risk_atlas` (Browser-Mode-Pendant zum Tauri-Command) für die Treemap-GUI.
+#[derive(serde::Serialize)]
+struct RiskAtlasResult {
+    window_days: u32,
+    weights: risk::Weights,
+    scores: Vec<risk::RiskScore>,
+}
+
+/// Risk Atlas (Cockpit 2.1) im Browser-Host. Gewichte/Filter kommen als Query-Parameter
+/// (module, top, window_days, churn, cx, cov, deps); fehlende -> Defaults aus `risk::Weights`.
+fn risk_atlas_locked(
+    state: &HostState,
+    query: &BTreeMap<String, String>,
+) -> anyhow::Result<RiskAtlasResult> {
+    let repo = repo(state)?;
+    let mut w = risk::Weights::default();
+    if let Some(v) = query.get("churn").and_then(|s| s.parse().ok()) {
+        w.churn = v;
+    }
+    if let Some(v) = query.get("cx").and_then(|s| s.parse().ok()) {
+        w.cx = v;
+    }
+    if let Some(v) = query.get("cov").and_then(|s| s.parse().ok()) {
+        w.cov = v;
+    }
+    if let Some(v) = query.get("deps").and_then(|s| s.parse().ok()) {
+        w.deps = v;
+    }
+    let opts = risk::Options {
+        module: query.get("module").cloned(),
+        top: query
+            .get("top")
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(200)
+            .max(1),
+        window_days: query
+            .get("window_days")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(risk::DEFAULT_CHURN_WINDOW_DAYS),
+        weights: w,
+    };
+    let scores = risk::compute(repo, &opts)?;
+    Ok(RiskAtlasResult {
+        window_days: opts.window_days,
+        weights: opts.weights,
+        scores,
+    })
 }
 
 fn show_class_locked(state: &HostState, fqn: &str) -> anyhow::Result<ClassDetails> {

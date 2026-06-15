@@ -589,3 +589,64 @@ export async function getBuildIntegrity(): Promise<BuildIntegrity | null> {
   if (!isTauriRuntime()) return null;
   return invoke<BuildIntegrity>('get_build_integrity');
 }
+
+// ---- Risk Atlas (Cockpit 2.1, Issue #157) -------------------------------
+
+export interface RiskScore {
+  fqn: string;
+  module: string;
+  file: string;
+  /** Composite score 0..=100. */
+  score: number;
+  churn: number;
+  cx: number;
+  sloc: number;
+  why: string;
+}
+
+export interface RiskWeights {
+  churn: number;
+  cx: number;
+  cov: number;
+  deps: number;
+}
+
+export interface RiskAtlasResult {
+  window_days: number;
+  weights: RiskWeights;
+  scores: RiskScore[];
+}
+
+export interface RiskAtlasOptions {
+  module?: string;
+  top?: number;
+  windowDays?: number;
+  weights?: Partial<RiskWeights>;
+}
+
+/**
+ * Risk Atlas: per-class churn+complexity score for the treemap. Dual-mode
+ * (Tauri invoke / browser-host HTTP), wie alle anderen Reads.
+ */
+export async function riskAtlas(opts: RiskAtlasOptions = {}): Promise<RiskAtlasResult> {
+  const { module, top, windowDays, weights } = opts;
+  if (!isTauriRuntime()) {
+    return api<RiskAtlasResult>(
+      `/api/risk_atlas${query({
+        module,
+        top,
+        window_days: windowDays,
+        churn: weights?.churn,
+        cx: weights?.cx,
+        cov: weights?.cov,
+        deps: weights?.deps,
+      })}`,
+    );
+  }
+  return invoke<RiskAtlasResult>('risk_atlas', {
+    module,
+    top,
+    windowDays,
+    weights,
+  });
+}

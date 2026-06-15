@@ -27,7 +27,8 @@ export type ViewMode =
   | 'walkthrough'
   | 'html'
   | 'pdf'
-  | 'image';
+  | 'image'
+  | 'risk';
 
 export interface WalkthroughCursor {
   id: string;
