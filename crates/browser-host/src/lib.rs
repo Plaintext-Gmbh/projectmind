@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
+use projectmind_core::artifact;
 use projectmind_core::files::{self, MarkdownFile, MarkdownHit, ModuleFile};
 use projectmind_core::git::{self, ChangedFile};
 use projectmind_core::html::{self, HtmlFile, HtmlSnippet};
@@ -586,6 +587,11 @@ fn route_api(
                 ],
             ))?)
         }
+        ("GET", "/api/list_artifacts") => Ok(serde_json::to_value(artifact::list()?)?),
+        ("GET", "/api/current_artifact") => {
+            let id = required(query, "id")?;
+            Ok(serde_json::to_value(artifact::read(id)?)?)
+        }
         ("GET", "/api/current_walkthrough") => Ok(serde_json::to_value(wt::read_body()?)?),
         ("GET", "/api/current_walkthrough_feedback") => Ok(serde_json::to_value(
             wt::read_feedback().unwrap_or_default(),
@@ -880,6 +886,11 @@ fn open_repository_locked(
         available_diagrams,
         tabs,
     };
+    // Switching to a different repo drops artifacts from the old one; must run
+    // before the state::write below overwrites the previous repo root.
+    if let Err(err) = artifact::clear_on_repo_change(&repo.root) {
+        tracing::warn!(error = %err, "failed to clear artifacts on repo change");
+    }
     state.repo_root = Some(repo.root.clone());
     state.annotations = match projectmind_core::annotations::JsonAnnotationStore::open(&repo.root) {
         Ok(store) => Some(store),

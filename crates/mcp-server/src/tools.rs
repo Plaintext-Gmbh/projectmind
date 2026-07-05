@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 
 use projectmind_browser_host::{self as browser_host, BrowserHostConfig};
+use projectmind_core::artifact::{self, ArtifactError, ArtifactFormat};
 use projectmind_core::file_access;
 use projectmind_core::files;
 use projectmind_core::patterns::{self as core_patterns, Pattern, Scope as PatternScope};
@@ -137,12 +138,13 @@ fn walkthrough_step_schema() -> Value {
             "narration": { "type": "string", "description": "Markdown shown alongside the target. Optional but strongly recommended — this is what the user reads." },
             "target": {
                 "type": "object",
-                "description": "What to render in the main pane. `kind` selects the viewer: class | file | diff | note.",
+                "description": "What to render in the main pane. `kind` selects the viewer: class | file | diff | artifact | note.",
                 "properties": {
-                    "kind": { "type": "string", "enum": ["class", "file", "diff", "note"] },
+                    "kind": { "type": "string", "enum": ["class", "file", "diff", "artifact", "note"] },
                     "fqn":  { "type": "string", "description": "Class FQN (kind=class)" },
                     "path": { "type": "string", "description": "Absolute file path (kind=file)" },
                     "anchor": { "type": "string", "description": "Heading slug (kind=file, markdown only)" },
+                    "id":   { "type": "string", "description": "Artifact id from present_artifact (kind=artifact)" },
                     "ref":  { "type": "string", "description": "Base git ref (kind=diff)" },
                     "to":   { "type": "string", "description": "Target git ref or omit for working tree (kind=diff)" },
                     "focus": {
@@ -317,6 +319,23 @@ fn open_browser_repo_schema() -> Value {
     })
 }
 
+fn present_artifact_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "title":   { "type": "string", "description": "Human-readable title (viewer header + list caption)." },
+            "format":  { "type": "string", "enum": ["html", "markdown"], "description": "How to render `content`. `html` is sandboxed in a locked-down iframe; `markdown` renders like a .md file (mermaid + images)." },
+            "content": { "type": "string", "description": "The document body. HTML source or Markdown. Max ~2 MB." },
+            "id":      { "type": "string", "description": "Optional stable handle. If omitted, derived from `title`. Re-using an id replaces that artifact in place — use it to iterate / stream." }
+        },
+        "required": ["title", "format", "content"]
+    })
+}
+
+fn list_artifacts_schema() -> Value {
+    no_args_schema()
+}
+
 /// Tool registry — also serves as the response of `tools/list`.
 #[allow(clippy::too_many_lines)]
 pub(crate) fn list() -> Value {
@@ -428,6 +447,16 @@ pub(crate) fn list() -> Value {
                 "inputSchema": diagram_schema()
             },
             {
+                "name": "present_artifact",
+                "description": "Render an AI-generated HTML or Markdown artifact live in every open ProjectMind viewer (Desktop GUI and/or browser webapp). Unlike view_file the content is NOT read from the repo — you pass it inline, so use this to show generated dashboards, notes, tables or diagrams without writing them to the user's disk. HTML is rendered inside a sandboxed, CSP-locked iframe (no script execution, no network); Markdown renders like a .md file (mermaid + images). Pass a stable `id` and call again with the same id to replace the body (iterate / stream). Auto-launches the Desktop GUI if nothing is open. Artifacts persist across viewer restarts and are cleared when a different repo is opened.",
+                "inputSchema": present_artifact_schema()
+            },
+            {
+                "name": "list_artifacts",
+                "description": "List the artifacts pushed via present_artifact: id, title, format, size, created/updated timestamps. Bodies are not included.",
+                "inputSchema": list_artifacts_schema()
+            },
+            {
                 "name": "walkthrough_start",
                 "description": "Start a guided tour. Pushes the tour body + step 0 to every viewer currently open (Desktop GUI and/or browser webapp from `open_browser_repo`). Use after `give me a tour` / `walk me through ...`. For `tour in the browser` / `tour me through this on my iPad`, call `open_browser_repo` first (with `lan: true` if a remote device is involved) so the user has a URL to open before the tour starts. Replaces any previous tour. Auto-launches the Desktop GUI if nothing else is open.",
                 "inputSchema": walkthrough_start_schema()
@@ -512,6 +541,8 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "view_diff" => view_diff(parsed.arguments),
         "view_file" => view_file(parsed.arguments),
         "view_diagram" => view_diagram(parsed.arguments),
+        "present_artifact" => present_artifact(parsed.arguments),
+        "list_artifacts" => list_artifacts(),
         "walkthrough_start" => walkthrough_start(parsed.arguments),
         "walkthrough_append" => walkthrough_append(parsed.arguments),
         "walkthrough_set_step" => walkthrough_set_step(parsed.arguments),
@@ -565,6 +596,13 @@ async fn open_repo(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
         "classes": repo.class_count(),
     });
     server_state.repo = Some(repo);
+
+    // Opening a *different* repo drops any AI-generated artifacts from the
+    // previous one; re-opening the same repo keeps them. Must run before the
+    // state write below, which overwrites the previous repo root.
+    if let Err(err) = artifact::clear_on_repo_change(&root) {
+        tracing::warn!(error = %err, "open_repo: failed to clear artifacts on repo change");
+    }
 
     // Tell the GUI to follow. Best-effort — if the statefile cannot be written
     // (read-only home, etc.), MCP-only usage still works.
@@ -1116,6 +1154,61 @@ fn view_diagram(args: Value) -> DispatchResult {
     ))
 }
 
+// ----- artifact tools -------------------------------------------------------
+
+#[derive(Deserialize)]
+struct PresentArtifactArgs {
+    title: String,
+    format: String,
+    content: String,
+    #[serde(default)]
+    id: Option<String>,
+}
+
+fn present_artifact(args: Value) -> DispatchResult {
+    let args: PresentArtifactArgs = serde_json::from_value(args)
+        .map_err(|e| DispatchError::invalid_params(format!("present_artifact: {e}")))?;
+    let format = ArtifactFormat::parse(&args.format).ok_or_else(|| {
+        DispatchError::invalid_params(format!(
+            "present_artifact: unknown format `{}` (expected html | markdown)",
+            args.format
+        ))
+    })?;
+    let stored = artifact::store(args.id.as_deref(), &args.title, format, &args.content).map_err(
+        |e| match e {
+            ArtifactError::TooLarge { .. } => DispatchError::invalid_params(format!(
+                "present_artifact: {e} — trim the artifact or split it"
+            )),
+            other => DispatchError::internal(format!("present_artifact: {other}")),
+        },
+    )?;
+    let prev = state::read().ok().flatten().unwrap_or_default();
+    publish_state(UiState {
+        repo_root: prev.repo_root,
+        view: ViewIntent::Artifact {
+            id: stored.id.clone(),
+        },
+        ..UiState::default()
+    });
+    Ok(text_result(
+        json!({
+            "ok": true,
+            "id": stored.id,
+            "format": stored.format.as_str(),
+            "size": stored.size,
+        })
+        .to_string(),
+    ))
+}
+
+fn list_artifacts() -> DispatchResult {
+    let metas =
+        artifact::list().map_err(|e| DispatchError::internal(format!("list_artifacts: {e}")))?;
+    Ok(text_result(
+        serde_json::to_string_pretty(&metas).unwrap_or_else(|_| "[]".into()),
+    ))
+}
+
 // ----- walkthrough_* tools --------------------------------------------------
 
 #[derive(Deserialize)]
@@ -1550,6 +1643,60 @@ mod tests {
         assert!(names.contains(&"list_changes_since"));
         assert!(names.contains(&"risk_atlas"));
         assert!(names.contains(&"pattern_check"));
+        assert!(names.contains(&"present_artifact"));
+        assert!(names.contains(&"list_artifacts"));
+    }
+
+    #[test]
+    fn present_artifact_schema_enumerates_formats() {
+        let v = list();
+        let tools = v["tools"].as_array().unwrap();
+        let pa = tools
+            .iter()
+            .find(|t| t["name"] == "present_artifact")
+            .expect("present_artifact tool registered");
+        let schema = &pa["inputSchema"];
+        for k in ["title", "format", "content", "id"] {
+            assert!(
+                schema["properties"].get(k).is_some(),
+                "missing property {k}"
+            );
+        }
+        let formats: Vec<&str> = schema["properties"]["format"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(formats.contains(&"html"));
+        assert!(formats.contains(&"markdown"));
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(required.contains(&"title"));
+        assert!(required.contains(&"format"));
+        assert!(required.contains(&"content"));
+    }
+
+    #[test]
+    fn walkthrough_step_schema_allows_artifact_target() {
+        let v = list();
+        let tools = v["tools"].as_array().unwrap();
+        let start = tools
+            .iter()
+            .find(|t| t["name"] == "walkthrough_start")
+            .expect("walkthrough_start tool registered");
+        let kinds: Vec<&str> = start["inputSchema"]["properties"]["steps"]["items"]["properties"]
+            ["target"]["properties"]["kind"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(kinds.contains(&"artifact"), "got kinds: {kinds:?}");
     }
 
     #[test]

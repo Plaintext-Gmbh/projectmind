@@ -15,6 +15,7 @@
 pub mod activity_heatmap;
 pub mod annotations;
 pub mod architecture_flow;
+pub mod artifact;
 pub mod cargo;
 pub mod diagram;
 pub mod doc_graph;

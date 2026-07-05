@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`present_artifact` / `list_artifacts` — AI-generated artifacts render live in the viewer.** A new MCP tool lets an LLM push a self-contained HTML or Markdown document straight into every open viewer (Desktop GUI + browser webapp) without writing it to the user's repo first — think generated dashboards, release notes, tables or diagrams. Content is passed inline (`{ title, format: "html"|"markdown", content, id? }`); an omitted `id` is derived as a stable slug from the title, and re-calling with the same `id` replaces the body in place so the model can iterate/stream. Bodies (capped at ~2 MB, with a clear error above the limit) are persisted to `artifacts/<id>.json` beside the statefile using the same body/pointer split as walk-throughs — only a `{"kind":"artifact","id":…}` pointer rides in the high-traffic `current.json`. `list_artifacts` returns metadata (id, title, format, size, created/updated) without bodies.
+  - **Security model.** HTML artifacts render **only** inside an `<iframe sandbox="">` whose injected CSP is `default-src 'none'; img-src data:; style-src 'unsafe-inline' data:; …; form-action 'none'; base-uri 'none'` — AI-authored `<script>` stays inert and never touches the app DOM. The wrapping is factored into a shared `app/src/lib/htmlSandbox.ts` now reused by the existing HTML browser too. Markdown artifacts render through the same `marked` + mermaid pipeline as `.md` files.
+  - **Walk-through integration.** A new step target `{ kind: "artifact", id }` lets guided tours embed generated artifacts as steps.
+  - **Lifecycle.** Artifacts survive viewer restarts, are cleared when a *different* repo is opened, and are left untouched by `walkthrough_clear`. Served to the browser via `GET /api/current_artifact` / `GET /api/list_artifacts` behind the existing bearer token, and to the Tauri shell via `current_artifact` / `list_artifacts` commands.
+
 ## [0.8.1] — 2026-05-17
 
 ### Changed

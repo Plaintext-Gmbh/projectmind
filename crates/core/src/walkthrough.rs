@@ -82,6 +82,13 @@ pub enum WalkthroughTarget {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         focus: Option<DiffFocus>,
     },
+    /// An AI-generated artifact (HTML or Markdown), rendered by the same
+    /// viewer as the standalone `present_artifact` push. The body lives in
+    /// [`crate::artifact::artifact_path`].
+    Artifact {
+        /// Artifact handle. Matches `Artifact::id` in the body file.
+        id: String,
+    },
     /// Pure narration; nothing rendered in the target pane.
     Note,
 }
@@ -433,6 +440,16 @@ mod tests {
         clear().unwrap();
         assert!(read_body().unwrap().is_none());
         assert!(read_feedback().unwrap().events.is_empty());
+    }
+
+    #[test]
+    fn artifact_target_deserializes_from_kebab_tag() {
+        let json = r#"{"kind":"artifact","id":"my-report"}"#;
+        let target: WalkthroughTarget = serde_json::from_str(json).unwrap();
+        match target {
+            WalkthroughTarget::Artifact { id } => assert_eq!(id, "my-report"),
+            other => panic!("wrong target: {other:?}"),
+        }
     }
 
     #[test]

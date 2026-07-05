@@ -25,6 +25,7 @@ export type ViewMode =
   | 'diff'
   | 'compare'
   | 'walkthrough'
+  | 'artifact'
   | 'html'
   | 'pdf'
   | 'image'
@@ -38,6 +39,15 @@ export interface WalkthroughCursor {
   nonce: number;
 }
 export const walkthroughCursor = writable<WalkthroughCursor | null>(null);
+
+export interface ArtifactCursor {
+  id: string;
+  /// Bumped on every applied artifact intent so the view re-fetches even when
+  /// the id is unchanged (e.g. the LLM replaced the body under the same id).
+  nonce: number;
+}
+export const artifactCursor = writable<ArtifactCursor | null>(null);
+
 export const viewMode = writable<ViewMode>('classes');
 
 export interface FileView {
