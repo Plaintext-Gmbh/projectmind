@@ -8,8 +8,9 @@
 //! process, write JSON-RPC requests to its stdin and parse responses from its stdout.
 
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn binary_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_projectmind-mcp"))
@@ -23,13 +24,26 @@ struct Server {
 
 impl Server {
     fn spawn() -> Self {
-        let mut child = Command::new(binary_path())
-            .stdin(Stdio::piped())
+        Self::spawn_env(None)
+    }
+
+    /// Spawn the server with an isolated `$PROJECTMIND_STATE` so a test that
+    /// exercises a state-publishing tool (artifacts, walk-throughs) doesn't
+    /// touch the developer's real cache directory.
+    fn spawn_with_state(state: &Path) -> Self {
+        Self::spawn_env(Some(state))
+    }
+
+    fn spawn_env(state: Option<&Path>) -> Self {
+        let mut cmd = Command::new(binary_path());
+        cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
-            .env("PROJECTMIND_LOG", "error")
-            .spawn()
-            .expect("spawn binary");
+            .env("PROJECTMIND_LOG", "error");
+        if let Some(state) = state {
+            cmd.env("PROJECTMIND_STATE", state);
+        }
+        let mut child = cmd.spawn().expect("spawn binary");
         let stdin = child.stdin.take().expect("stdin");
         let stdout = BufReader::new(child.stdout.take().expect("stdout"));
         Self {
@@ -326,7 +340,102 @@ fn risk_atlas_returns_envelope_with_window_and_weights() {
     }
 }
 
+#[test]
+fn present_artifact_stores_html_and_pushes_intent() {
+    let (mut s, dir) = spawn_isolated();
+    s.call(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#);
+    // HTML artifact carrying a script tag — must be stored verbatim (inert),
+    // never executed or stripped.
+    let resp = s.call(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"present_artifact","arguments":{"title":"XSS Probe","format":"html","content":"<h1>Report</h1><script>alert(1)</script>"}}}"#,
+    );
+    assert!(resp["error"].is_null(), "unexpected error: {resp}");
+    let payload: serde_json::Value =
+        serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(payload["ok"], true);
+    assert_eq!(payload["format"], "html");
+    let id = payload["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        id, "xss-probe",
+        "id derived as a stable slug from the title"
+    );
+
+    // The statefile now carries the artifact view intent (kebab-case tag).
+    let state: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("current.json")).unwrap()).unwrap();
+    assert_eq!(state["view"]["kind"], "artifact");
+    assert_eq!(state["view"]["id"], id);
+
+    // Body persisted next to the statefile, script intact but inert.
+    let body: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.join("artifacts").join(format!("{id}.json"))).unwrap(),
+    )
+    .unwrap();
+    assert!(body["content"]
+        .as_str()
+        .unwrap()
+        .contains("<script>alert(1)</script>"));
+
+    // Re-presenting the same id replaces in place (markdown this time).
+    s.call(
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"present_artifact","arguments":{"id":"xss-probe","title":"XSS Probe v2","format":"markdown","content":"**hi**"}}}"#,
+    );
+
+    // list_artifacts surfaces exactly one entry with the updated metadata.
+    let resp2 = s.call(
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_artifacts"}}"#,
+    );
+    let arr: serde_json::Value =
+        serde_json::from_str(resp2["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let arr = arr.as_array().unwrap();
+    assert_eq!(arr.len(), 1, "same id replaces, not appends");
+    assert_eq!(arr[0]["id"], id);
+    assert_eq!(arr[0]["title"], "XSS Probe v2");
+    assert_eq!(arr[0]["format"], "markdown");
+    assert!(arr[0]["size"].is_number());
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn present_artifact_rejects_unknown_format() {
+    let (mut s, dir) = spawn_isolated();
+    s.call(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#);
+    let resp = s.call(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"present_artifact","arguments":{"title":"X","format":"pdf","content":"x"}}}"#,
+    );
+    assert_eq!(resp["error"]["code"], -32602);
+    assert!(resp["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("unknown format"));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 // ----- helpers -----
+
+/// Spawn a server against an isolated statefile directory, pre-seeding a fresh
+/// heartbeat so the server treats the GUI as already running (no desktop-app
+/// auto-launch during the test). Returns the server plus its state dir.
+fn spawn_isolated() -> (Server, PathBuf) {
+    let dir = std::env::temp_dir().join(format!(
+        "projectmind-art-it-{}-{}",
+        std::process::id(),
+        uniq()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    std::fs::write(
+        dir.join("ui-heartbeat.json"),
+        format!(r#"{{"pid":1,"ts":{ts}}}"#),
+    )
+    .unwrap();
+    let server = Server::spawn_with_state(&dir.join("current.json"));
+    (server, dir)
+}
 
 struct TempRepo {
     root: PathBuf,
