@@ -13,7 +13,12 @@ code that pairs bidirectionally with LLM-driven coding agents — Claude Code,
 ChatGPT / OpenAI Codex, Gemini CLI, Cursor, and any other frontier model
 that speaks the **Model Context Protocol (MCP)**.
 
-> **Status:** Phase 1 MVP — the **MCP server** and the **Tauri UI** both work. Java + Rust language plugins, Spring + Lombok framework recognisers, Mermaid bean graph + package tree + folder map, Markdown browser, HTML browser (renders `.html` / `.xhtml` / `.jsp` files and embedded HTML snippets in a sandboxed iframe), walkthrough mode and bidirectional MCP sync between LLM and GUI.
+<p align="center">
+  <img src="docs/assets/demo-walkthrough.gif" alt="An AI agent authors a guided tour of a Spring codebase over MCP; ProjectMind renders every step live" width="820"/>
+</p>
+<p align="center"><sub>An AI agent authors this tour <strong>live over MCP</strong> — steps, line highlights and narration are pushed into the viewer. No human clicked anything.</sub></p>
+
+> **Status:** v0.8 — MCP server + desktop app for **macOS, Linux and Windows**, with signed auto-updates. Java + Rust language plugins, Spring + Lombok framework recognisers, eight diagram types (bean graph, C4 container, folder heatmap, package tree, inheritance tree, doc graph, architecture layers, language stats), Markdown + HTML browsers (sandboxed), guided AI walkthroughs with quiz support, and bidirectional MCP sync between LLM, desktop app and browser.
 
 ## Quickstart
 
@@ -65,6 +70,16 @@ The Tauri shell has four tabs (each disabled until a repository is open):
 - **Diagrams** — Mermaid bean graph or package tree; click a node to drill in.
 - **MD** — every Markdown file in the repo, grouped by top-level directory, with rendered preview, mermaid blocks, and embedded images.
 - **HTML** — every `.html` / `.xhtml` / `.htm` / `.jsp` / `.vm` / `.ftl` file plus HTML snippets extracted from `.java` / `.kt` / `.groovy` / `.scala` string literals (Java text blocks supported). Toggle Rendered ↔ Source; Rendered uses a strict sandbox iframe (no JS, no network) so untrusted repo content stays inert.
+
+## What it looks like
+
+A 21-module Spring Boot monorepo (543 classes), straight after `open_repo`:
+
+| Folder heatmap | C4 container view | Guided AI walkthrough |
+|---|---|---|
+| ![Folder heatmap — file size and recency at a glance](docs/assets/screenshot-folder-map.png) | ![C4 container view — modules as containers](docs/assets/screenshot-c4.png) | ![A guided tour step with AI narration and line highlights](docs/assets/screenshot-walkthrough.png) |
+
+Dark and light themes, five UI languages, resizable panes throughout.
 
 ## What works today
 
