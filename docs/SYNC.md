@@ -88,6 +88,8 @@ case in the frontend dispatcher.
 | `diagram { diagram_kind }`           | Bean graph or package tree          |
 | `diff { reference, to? }`            | Unified diff (line-coloured)        |
 | `file { path }`                      | Markdown render or plain source     |
+| `walkthrough { id, step }`           | Guided tour, current step pointer   |
+| `artifact { id }`                    | AI-generated HTML / Markdown artifact |
 
 ## MCP tools that drive the GUI
 
@@ -98,6 +100,8 @@ case in the frontend dispatcher.
 | `view_diagram`   | `view = diagram(bean-graph | package-tree)`.                          |
 | `view_diff`      | `view = diff(ref, to?)`. The GUI renders via `show_diff`.             |
 | `view_file`      | `view = file(absolute path)`. Markdown is rendered, anything else as plain text. |
+| `present_artifact` | Persists an inline artifact body to `artifacts/<id>.json` and publishes `view = artifact(id)`. Re-using `id` replaces the body in place. |
+| `list_artifacts` | Returns artifact metadata; does **not** publish state.               |
 
 Existing read-only tools (`list_classes`, `class_outline`, `show_class`,
 `show_diff`, `show_diagram`, `relations`, …) do **not** publish state — they
@@ -125,6 +129,28 @@ just return data. This keeps "read" and "navigate" cleanly separated.
 (`crates/core/src/git.rs::unified_diff`) and colours each line by its prefix
 (`@@`, `+`, `-`, file headers). No external diff library — the format is
 already a parseable line stream.
+
+## Artifact rendering
+
+`present_artifact` stores its body **beside** the statefile — one file per
+artifact under `artifacts/<id>.json`, written atomically (`.tmp` + rename) — and
+publishes only a `{"kind":"artifact","id":…}` pointer into `current.json`. This is
+the same body/pointer split the walk-through uses, so a re-render under the same
+`id` never rewrites the high-traffic statefile with the (up to ~2 MB) body.
+
+The `ArtifactView` component fetches the body (`current_artifact` Tauri command /
+`GET /api/current_artifact?id=…`) and renders by format:
+
+* **`markdown`** — through the same `marked` + mermaid pipeline as `FileView`.
+* **`html`** — **only** inside an `<iframe sandbox="">` pointed at a
+  `data:text/html` URL whose `<head>` carries a strict CSP (`default-src 'none'; …;
+  form-action 'none'; base-uri 'none'`). The wrapping lives in the shared
+  `app/src/lib/htmlSandbox.ts` (also used by the HTML browser). AI-authored
+  `<script>` is therefore inert and never touches the app DOM — this is a hard
+  security boundary, not a nicety.
+
+Lifecycle: artifacts survive viewer restarts (they are files), are cleared when a
+**different** repo is opened, and are left untouched by `walkthrough_clear`.
 
 ## Precedence rules
 

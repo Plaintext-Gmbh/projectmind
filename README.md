@@ -18,7 +18,7 @@ that speaks the **Model Context Protocol (MCP)**.
 </p>
 <p align="center"><sub>An AI agent authors this tour <strong>live over MCP</strong> — steps, line highlights and narration are pushed into the viewer. No human clicked anything.</sub></p>
 
-> **Status:** v0.8 — MCP server + desktop app for **macOS, Linux and Windows**, with signed auto-updates. Java + Rust language plugins, Spring + Lombok framework recognisers, eight diagram types (bean graph, C4 container, folder heatmap, package tree, inheritance tree, doc graph, architecture layers, language stats), Markdown + HTML browsers (sandboxed), guided AI walkthroughs with quiz support, and bidirectional MCP sync between LLM, desktop app and browser.
+> **Status:** v0.8 — MCP server + desktop app for **macOS, Linux and Windows**, with signed auto-updates. Java + Rust language plugins, Spring + Lombok framework recognisers, eight diagram types (bean graph, C4 container, folder heatmap, package tree, inheritance tree, doc graph, architecture layers, language stats), Markdown + HTML browsers (sandboxed), guided AI walkthroughs with quiz support, live AI-generated HTML/Markdown artifacts, and bidirectional MCP sync between LLM, desktop app and browser.
 
 ## Quickstart
 
@@ -106,6 +106,8 @@ custom agent — can connect to. It implements:
 | `open_browser_repo` | Start the in-process browser host that serves the ProjectMind webapp at a tokenized URL — same UI as the Tauri shell, but reachable from any browser. Default binds on `127.0.0.1`; pass `lan: true` to bind on `0.0.0.0` so the URL works from another device on the same WLAN (iPad / phone / second laptop). The bearer token in the URL fragment gates every API call. |
 | `browser_status` | Return the running browser host's bind address, tokenized URLs and open repo, or null if no host is started. Side-effect free — handy to re-surface the URL/token without restarting the host. |
 | `stop_browser` | Forget the cached browser host status so the next `open_browser_repo` starts fresh. |
+| `present_artifact` | Render an AI-generated HTML or Markdown artifact live in every open viewer. Content is passed inline (not read from the repo), so the LLM can show generated dashboards, notes or diagrams without writing them to disk. HTML renders inside a sandboxed, CSP-locked iframe (no scripts, no network); Markdown renders like a `.md` file (mermaid + images). Re-use the `id` to iterate/stream. Max ~2 MB. |
+| `list_artifacts` | List the pushed artifacts (id, title, format, size, created/updated) — bodies excluded. |
 
 The browser host is the natural answer to *"open this repo on my iPad
 while I keep working on the laptop"*: ask the LLM to call

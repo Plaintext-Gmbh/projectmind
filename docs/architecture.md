@@ -123,8 +123,27 @@ For Phase 1, all plugins are **statically registered** in `core::registry` via a
 | `get_user_selection` | `{}` | `{ "file", "from", "to", "text" }` or empty | Last code region selected in the UI |
 | `annotate` | `{ "file", "from", "to", "label", "link"? }` | `{ "id" }` | Sets a marker the UI surfaces above the code |
 | `list_changes_summary` | `{ "ref": "HEAD~5" }` | `{ "by_module": [...], "stats": {...} }` | High-level summary for "show me the change" |
+| `present_artifact` | `{ "title", "format": "html"\|"markdown", "content", "id"? }` | `{ "ok", "id", "format", "size" }` | Pushes an inline AI-generated artifact and shows it live. HTML renders in a sandboxed CSP-locked iframe; Markdown via the file-viewer pipeline. Re-using `id` replaces the body. ~2 MB cap. |
+| `list_artifacts` | `{}` | `[{ "id", "title", "format", "size", "created_at", "updated_at" }]` | Metadata for stored artifacts (no bodies). |
 
 The MCP server is the bus between the LLM and the IDE: every operation in the UI is, ultimately, one of these tools (so anything the user does is reproducible by the LLM, and vice versa).
+
+### Artifact storage & rendering
+
+`present_artifact` follows the walk-through body/pointer split: the (up to ~2 MB)
+body is persisted to `artifacts/<id>.json` next to the statefile (atomic `.tmp` +
+rename), while only a lightweight `{"kind":"artifact","id":…}` pointer rides in the
+high-traffic `current.json`. Bodies survive viewer restarts and are cleared when a
+**different** repo is opened (`walkthrough_clear` leaves them untouched). Both
+viewers fetch the body over their normal channels — the Tauri `current_artifact`
+command and the browser host's `GET /api/current_artifact?id=…`. HTML artifacts are
+**only** rendered inside an `<iframe sandbox="">` whose injected CSP is
+`default-src 'none'; img-src data:; style-src 'unsafe-inline' data:; …; form-action
+'none'; base-uri 'none'` (shared `app/src/lib/htmlSandbox.ts`, reused by the HTML
+browser) — AI-authored `<script>` never executes and never reaches the app DOM.
+Markdown artifacts render through the same `marked` + mermaid pipeline as `.md`
+files. A step target `{"kind":"artifact","id":…}` lets walk-throughs embed artifacts
+as tour steps.
 
 ## Build Targets
 
