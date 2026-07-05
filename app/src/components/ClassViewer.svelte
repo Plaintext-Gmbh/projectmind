@@ -376,7 +376,10 @@
             <div class="outline-section">
               <h3>{$t('outline.methods')} <span class="count">{outline.methods.length}</span></h3>
               <ul>
-                {#each outline.methods as m (m.name + ':' + m.line_start)}
+                <!-- Key includes the index: same-line overloads (`void f(){} void f(int x){}`)
+                     would otherwise produce duplicate name:line keys, which Svelte
+                     hard-errors on (each_key_duplicate, aborts the whole flush). -->
+                {#each outline.methods as m, i (m.name + ':' + m.line_start + ':' + i)}
                   <li>
                     <button
                       type="button"

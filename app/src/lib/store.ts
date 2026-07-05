@@ -103,13 +103,34 @@ export const stereotypeCounts = derived(
   },
 );
 
+/// Flatten per-module file lists into one list, dropping duplicate absolute
+/// paths (first occurrence wins). An aggregator module — e.g. a Maven parent
+/// whose directory physically contains the child-module directories — reports
+/// the same file its children already report. Rendering both entries breaks
+/// the keyed `{#each}` over the Code-tab list (its key is `file::<abs>`, and
+/// Svelte hard-errors on duplicate keys, aborting the whole flush — #171) and
+/// double-counts the file-kind filter pills.
+export function dedupeModuleFiles(byModule: Record<string, ModuleFile[]>): ModuleFile[] {
+  const seen = new Set<string>();
+  const out: ModuleFile[] = [];
+  for (const files of Object.values(byModule)) {
+    for (const f of files) {
+      if (seen.has(f.abs)) continue;
+      seen.add(f.abs);
+      out.push(f);
+    }
+  }
+  return out;
+}
+
 /// Files visible under the current moduleFilter — used by the right-pane
-/// mixed list. When no module is filtered we fan out across every module.
+/// mixed list. When no module is filtered we fan out across every module,
+/// deduplicated by absolute path (see [`dedupeModuleFiles`]).
 export const filteredModuleFiles = derived(
   [moduleFilesByModule, moduleFilter],
   ([$byMod, $mod]) => {
     if ($mod !== null) return $byMod[$mod] ?? [];
-    return Object.values($byMod).flat();
+    return dedupeModuleFiles($byMod);
   },
 );
 
