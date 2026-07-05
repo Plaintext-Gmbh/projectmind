@@ -86,6 +86,12 @@ pub enum ViewIntent {
         /// by user clicks on the step sidebar.
         step: u32,
     },
+    /// An AI-generated artifact (HTML or Markdown). The body lives in
+    /// [`crate::artifact::artifact_path`]; only the id rides in the state.
+    Artifact {
+        /// Artifact handle. Matches `Artifact::id` in the body file.
+        id: String,
+    },
 }
 
 fn default_diagram_kind() -> String {
@@ -234,6 +240,29 @@ mod tests {
     }
 
     #[test]
+    fn round_trip_artifact_intent() {
+        let path = tmp_state("artifact");
+        let s = UiState {
+            version: SCHEMA_VERSION,
+            repo_root: None,
+            view: ViewIntent::Artifact {
+                id: "my-report".into(),
+            },
+            seq: 0,
+        };
+        write_at(&path, &s).unwrap();
+        let read = read_at(&path).unwrap().unwrap();
+        match read.view {
+            ViewIntent::Artifact { id } => assert_eq!(id, "my-report"),
+            other => panic!("wrong intent: {other:?}"),
+        }
+        // Serialised tag must be the kebab-case `artifact`.
+        let json = std::fs::read_to_string(&path).unwrap();
+        assert!(json.contains("\"artifact\""), "got: {json}");
+        std::fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    #[test]
     fn read_returns_none_on_missing_file() {
         let path = tmp_state("missing").parent().unwrap().join("nope.json");
         assert!(read_at(&path).unwrap().is_none());
@@ -259,6 +288,10 @@ mod tests {
 
     #[test]
     fn statefile_path_honours_env_override() {
+        // Shares the process-wide PROJECTMIND_STATE env var with the
+        // heartbeat / walkthrough / artifact tests — take the same lock so
+        // we don't yank the path out from under a concurrent test.
+        let _g = crate::test_lock();
         std::env::set_var("PROJECTMIND_STATE", "/tmp/projectmind-explicit.json");
         assert_eq!(
             statefile_path(),
