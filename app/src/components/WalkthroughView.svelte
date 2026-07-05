@@ -30,6 +30,7 @@
   import ClassViewer from './ClassViewer.svelte';
   import FileView from './FileView.svelte';
   import DiffView from './DiffView.svelte';
+  import { t } from '../lib/i18n';
   import { readZoom, writeZoom, clampZoom, wheelDelta } from '../lib/shiftWheelZoom';
   import { openUrl } from '../lib/openUrl';
   import { expandStepRefs, matchLineAnchor } from '../lib/walkthroughText';
@@ -375,8 +376,8 @@
   // typed a specific question, ship it inline so the LLM has full context
   // without having to poll walkthrough_feedback first.
   $: cliHint = lastQuestion
-    ? `projectmind nochmal: „${lastQuestion}" — bitte als fokussierte Folge-Tour beantworten (walkthrough_start mit nur den relevanten Steps)`
-    : 'projectmind walkthrough_feedback prüfen und Folge-Tour starten';
+    ? $t('walkthrough.cli.withQuestion', { question: lastQuestion })
+    : $t('walkthrough.cli.generic');
   let cliCopied = false;
   async function copyCli() {
     try {
@@ -598,51 +599,53 @@
   <section class="state-card">
     <div class="card">
       <div class="spinner"></div>
-      <h2>Lade Tour…</h2>
-      <p>Hole die Schritte vom MCP-Server.</p>
+      <h2>{$t('walkthrough.loading.title')}</h2>
+      <p>{$t('walkthrough.loading.hint')}</p>
     </div>
   </section>
 {:else if !body}
   <section class="state-card">
     <div class="card">
-      <h2>Keine aktive Tour</h2>
-      <p>Bitte deine KI, eine Tour zu starten via <code>walkthrough_start</code>.</p>
+      <h2>{$t('walkthrough.none.title')}</h2>
+      <p>{$t('walkthrough.none.hint')} <code>walkthrough_start</code>.</p>
     </div>
   </section>
 {:else if waitingForFollowup}
   <section class="state-card">
     <div class="card waiting">
       <div class="spinner"></div>
-      <h2>Die KI bereitet eine Antwort vor</h2>
+      <h2>{$t('walkthrough.waiting.title')}</h2>
       {#if lastQuestion}
         <blockquote class="user-question">
-          <span class="quote-label">Deine Frage</span>
+          <span class="quote-label">{$t('walkthrough.waiting.questionLabel')}</span>
           <span class="quote-text">{lastQuestion}</span>
         </blockquote>
       {/if}
-      <p>Tippe in deiner KI-CLI:</p>
+      <p>{$t('walkthrough.waiting.cliPrompt')}</p>
       <div class="cli-hint">
         <code>{cliHint}</code>
         <button class="btn btn-ghost copy-btn" on:click={copyCli}>
-          {cliCopied ? '✓ kopiert' : 'kopieren'}
+          {cliCopied ? $t('walkthrough.waiting.copied') : $t('walkthrough.waiting.copy')}
         </button>
       </div>
       <p class="meta">
-        Sobald die KI <code>walkthrough_start</code> erneut ruft, springt diese Ansicht
-        automatisch in die Folge-Tour.
+        {$t('walkthrough.waiting.metaBefore')} <code>walkthrough_start</code>
+        {$t('walkthrough.waiting.metaAfter')}
       </p>
       <div class="state-actions">
         <button class="btn btn-secondary" on:click={dismissWaiting}>
-          Doch alleine weitermachen
+          {$t('walkthrough.waiting.continueAlone')}
         </button>
-        <button class="btn btn-ghost" on:click={closeTour}>Tour beenden</button>
+        <button class="btn btn-ghost" on:click={closeTour}>{$t('walkthrough.endTour')}</button>
       </div>
     </div>
   </section>
 {:else if tourFinished && quizActive && !quizFinished && currentQuizQuestion}
   <section class="state-card">
     <div class="card quiz">
-      <div class="quiz-pos">Frage {quizIdx + 1} von {quizQuestions.length}</div>
+      <div class="quiz-pos">
+        {$t('walkthrough.quiz.position', { current: quizIdx + 1, total: quizQuestions.length })}
+      </div>
       <h2 class="quiz-prompt">{currentQuizQuestion.prompt}</h2>
       <ol class="quiz-choices">
         {#each currentQuizQuestion.choices as choice, i (i)}
@@ -665,9 +668,10 @@
       {#if quizRevealed}
         <div class="quiz-feedback" class:quiz-feedback-correct={isCorrect(currentQuizQuestion, quizPicked)}>
           {#if isCorrect(currentQuizQuestion, quizPicked)}
-            ✓ Richtig.
+            {$t('walkthrough.quiz.correct')}
           {:else}
-            ✗ Richtig wäre: <strong>{currentQuizQuestion.choices[currentQuizQuestion.answer]}</strong>.
+            {$t('walkthrough.quiz.wrongPrefix')}
+            <strong>{currentQuizQuestion.choices[currentQuizQuestion.answer]}</strong>.
           {/if}
           {#if currentQuizQuestion.explanation}
             <span class="quiz-explanation">{currentQuizQuestion.explanation}</span>
@@ -677,14 +681,16 @@
       <div class="state-actions">
         {#if !quizRevealed}
           <button class="btn btn-primary big" on:click={revealAnswer} disabled={quizPicked === null}>
-            Antwort prüfen
+            {$t('walkthrough.quiz.check')}
           </button>
           <button class="btn btn-secondary" on:click={() => (quizActive = false)}>
-            Zurück
+            {$t('walkthrough.quiz.back')}
           </button>
         {:else}
           <button class="btn btn-primary big" on:click={advanceQuiz}>
-            {quizIdx + 1 >= quizQuestions.length ? 'Ergebnis ansehen' : 'Nächste Frage'}
+            {quizIdx + 1 >= quizQuestions.length
+              ? $t('walkthrough.quiz.showResult')
+              : $t('walkthrough.quiz.next')}
           </button>
         {/if}
       </div>
@@ -694,14 +700,16 @@
   <section class="state-card">
     <div class="card finished">
       <div class="check">{quizResult.correct === quizResult.total ? '★' : '✓'}</div>
-      <h2>Quiz-Ergebnis</h2>
+      <h2>{$t('walkthrough.quiz.resultTitle')}</h2>
       <p>
-        <strong>{quizResult.correct} von {quizResult.total}</strong>
-        {quizResult.correct === quizResult.total ? '— alles richtig.' : 'richtig.'}
+        <strong>{$t('walkthrough.quiz.score', { correct: quizResult.correct, total: quizResult.total })}</strong>
+        {quizResult.correct === quizResult.total
+          ? $t('walkthrough.quiz.allCorrect')
+          : $t('walkthrough.quiz.someCorrect')}
       </p>
       {#if quizResult.replay.length > 0}
         <div class="quiz-replay">
-          <p class="quiz-replay-label">Schritte zum Wiederholen:</p>
+          <p class="quiz-replay-label">{$t('walkthrough.quiz.replayLabel')}</p>
           <ul class="quiz-replay-list">
             {#each quizResult.replay as stepIdx (stepIdx)}
               {#if body && body.steps[stepIdx]}
@@ -711,7 +719,10 @@
                     class="quiz-replay-link"
                     on:click={() => void replayStep(stepIdx)}
                   >
-                    Schritt {stepIdx + 1}: {body.steps[stepIdx].title}
+                    {$t('walkthrough.quiz.replayStep', {
+                      step: stepIdx + 1,
+                      title: body.steps[stepIdx].title,
+                    })}
                   </button>
                 </li>
               {/if}
@@ -720,7 +731,7 @@
         </div>
       {/if}
       <div class="state-actions">
-        <button class="btn btn-primary big" on:click={closeTour}>Schliessen</button>
+        <button class="btn btn-primary big" on:click={closeTour}>{$t('walkthrough.close')}</button>
         <button
           class="btn btn-secondary"
           on:click={() => {
@@ -729,7 +740,7 @@
             void goTo(0);
           }}
         >
-          Tour erneut durchgehen
+          {$t('walkthrough.finished.replayTour')}
         </button>
       </div>
     </div>
@@ -738,16 +749,26 @@
   <section class="state-card">
     <div class="card finished">
       <div class="check">✓</div>
-      <h2>Tour abgeschlossen</h2>
-      <p><strong>{body.title}</strong> — {body.steps.length} Schritte durchgegangen.</p>
+      <h2>{$t('walkthrough.finished.title')}</h2>
+      <p>
+        <strong>{body.title}</strong>
+        {$t('walkthrough.finished.steps', { count: body.steps.length })}
+      </p>
       <div class="state-actions">
         {#if hasQuiz}
           <button class="btn btn-primary big" on:click={startQuiz}>
-            Wissen prüfen ({quizQuestions.length} Frage{quizQuestions.length === 1 ? '' : 'n'})
+            {$t('walkthrough.quiz.start', {
+              count: quizQuestions.length,
+              unit: $t(
+                quizQuestions.length === 1
+                  ? 'walkthrough.quiz.question.one'
+                  : 'walkthrough.quiz.question.other',
+              ),
+            })}
           </button>
-          <button class="btn btn-secondary" on:click={closeTour}>Schliessen</button>
+          <button class="btn btn-secondary" on:click={closeTour}>{$t('walkthrough.close')}</button>
         {:else}
-          <button class="btn btn-primary big" on:click={closeTour}>Schliessen</button>
+          <button class="btn btn-primary big" on:click={closeTour}>{$t('walkthrough.close')}</button>
         {/if}
         <button
           class="btn btn-secondary"
@@ -756,7 +777,7 @@
             void goTo(0);
           }}
         >
-          Erneut durchgehen
+          {$t('walkthrough.finished.replay')}
         </button>
       </div>
     </div>
@@ -766,7 +787,7 @@
     <aside class="sidebar">
       <header class="side-head">
         <div class="tour-title" title={body.title}>{body.title}</div>
-        <div class="progress" title="Step {cursorStep + 1} of {total}">
+        <div class="progress" title={$t('walkthrough.stepPos', { current: cursorStep + 1, total })}>
           <span class="progress-fill" style="width: {progressPct}%"></span>
         </div>
         <div class="progress-text">{cursorStep + 1} / {total}</div>
@@ -796,29 +817,38 @@
         {/each}
       </ol>
       <footer class="side-foot">
-        <button class="nav-btn" on:click={prev} disabled={cursorStep === 0}>← Prev</button>
-        <button class="nav-btn" on:click={next} disabled={cursorStep >= total - 1}>Next →</button>
+        <button class="nav-btn" on:click={prev} disabled={cursorStep === 0}>
+          ← {$t('walkthrough.prev')}
+        </button>
+        <button class="nav-btn" on:click={next} disabled={cursorStep >= total - 1}>
+          {$t('walkthrough.next')} →
+        </button>
       </footer>
     </aside>
 
     <main class="main">
       {#if step}
         <header class="step-head">
-          <div class="step-pos">Step {cursorStep + 1} of {total}{isLastStep ? ' (letzter)' : ''}</div>
+          <div class="step-pos">
+            {$t('walkthrough.stepPos', { current: cursorStep + 1, total })}{isLastStep
+              ? ` ${$t('walkthrough.stepPos.last')}`
+              : ''}
+          </div>
           <h1 class="step-h">{step.title}</h1>
           {#if step.target.kind !== 'note'}
             <div class="step-target-hint">
               {#if step.target.kind === 'class'}
-                Class: <code>{step.target.fqn}</code>
+                {$t('walkthrough.target.class')} <code>{step.target.fqn}</code>
               {:else if step.target.kind === 'file'}
-                File: <code>{basename(step.target.path)}</code>
+                {$t('walkthrough.target.file')} <code>{basename(step.target.path)}</code>
               {:else if step.target.kind === 'diff'}
-                Diff: <code>{step.target.reference}{step.target.to ? `..${step.target.to}` : ' → working tree'}</code>
+                {$t('walkthrough.target.diff')}
+                <code>{step.target.reference}{step.target.to ? `..${step.target.to}` : ' → working tree'}</code>
               {/if}
             </div>
           {/if}
           {#if compassFor(step.target).length > 0}
-            <nav class="compass" aria-label="Tour compass — where this step sits in the codebase">
+            <nav class="compass" aria-label={$t('walkthrough.compass.aria')}>
               <span class="compass-icon" aria-hidden="true">{compassIconFor(step.target)}</span>
               <ol class="compass-trail">
                 {#each compassFor(step.target) as crumb, i (crumb + i)}
@@ -831,7 +861,7 @@
 
         <div class="target" bind:this={targetEl}>
           {#if targetLoading}
-            <div class="loading">Lade Inhalt…</div>
+            <div class="loading">{$t('walkthrough.target.loading')}</div>
           {:else if targetError}
             <div class="error">⚠ {targetError}</div>
           {:else if step.target.kind === 'class' && classEntry && classMeta}
@@ -863,7 +893,7 @@
           <article class="narration" bind:this={narrationEl} on:click={onNarrationClick} role="presentation">
             <header class="narration-head">
               <span class="narration-icon">📖</span>
-              <span class="narration-label">Erklärung der KI</span>
+              <span class="narration-label">{$t('walkthrough.narration.label')}</span>
             </header>
             <div class="narration-body" style="font-size: {detailZoom}em;">{@html narrationHtml}</div>
           </article>
@@ -873,20 +903,20 @@
           {#if feedbackPrompt}
             <div class="feedback-form">
               <label for="wt-feedback-input" class="feedback-label">
-                Was soll die KI genauer beschreiben? (optional)
+                {$t('walkthrough.feedback.label')}
               </label>
               <textarea
                 id="wt-feedback-input"
                 bind:value={feedbackText}
-                placeholder={'z.B. „Die Highlight-Zeilen 12–18 sind mir noch unklar."'}
+                placeholder={$t('walkthrough.feedback.placeholder')}
                 rows="3"
               ></textarea>
               <div class="feedback-actions">
                 <button class="btn btn-secondary" on:click={cancelMore} disabled={feedbackSubmitting}>
-                  Abbrechen
+                  {$t('walkthrough.feedback.cancel')}
                 </button>
                 <button class="btn btn-primary" on:click={submitMore} disabled={feedbackSubmitting}>
-                  {feedbackSubmitting ? '…' : 'Senden'}
+                  {feedbackSubmitting ? '…' : $t('walkthrough.feedback.send')}
                 </button>
               </div>
             </div>
@@ -896,14 +926,18 @@
               on:click={understood}
               disabled={feedbackSubmitting || bodyLoading}
             >
-              {feedbackSubmitting ? '…' : isLastStep ? '✓ Verstanden — Tour beenden' : '✓ Verstanden'}
+              {feedbackSubmitting
+                ? '…'
+                : isLastStep
+                  ? $t('walkthrough.understoodEnd')
+                  : $t('walkthrough.understood')}
             </button>
             <button
               class="btn btn-secondary big"
               on:click={askMore}
               disabled={feedbackSubmitting || bodyLoading}
             >
-              ? Bitte genauer beschreiben
+              {$t('walkthrough.askMore')}
             </button>
           {/if}
         </footer>
