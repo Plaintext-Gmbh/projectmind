@@ -334,7 +334,10 @@
           <section class="group">
             <h3 class="group-title">{rel}</h3>
             <ul class="list">
-              {#each entries as s (`${s.abs}:${s.line}`)}
+              <!-- Key includes the index: two HTML string literals starting on the
+                   same source line share abs:line, and duplicate keys make Svelte
+                   hard-error (each_key_duplicate), aborting the whole flush. -->
+              {#each entries as s, i (`${s.abs}:${s.line}:${i}`)}
                 <li>
                   <button
                     type="button"
