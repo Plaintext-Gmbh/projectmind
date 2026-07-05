@@ -144,10 +144,16 @@
         bodyLoading = false;
       }
     }
-    await loadTargetForCurrentStep();
+    // Pass the step explicitly instead of reading the reactive `step`
+    // inside the loader: `$: step = …` recomputes *after* `$: void load(…)`
+    // in the same flush (declaration order), and after the `await` above
+    // the fresh `body` hasn't been flushed into `step` at all — so the
+    // loader would see a stale (or, on a fresh mount, null) step, skip the
+    // fetch, and leave the target pane empty (#171).
+    await loadTargetForStep(body?.steps[_step] ?? null);
   }
 
-  async function loadTargetForCurrentStep() {
+  async function loadTargetForStep(s: WalkthroughStep | null) {
     classEntry = null;
     classSource = '';
     classMeta = null;
@@ -156,7 +162,7 @@
     diffText = '';
     targetError = null;
 
-    const t = step?.target;
+    const t = s?.target;
     if (!t) return;
     targetLoading = true;
     try {
