@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
+use projectmind_core::artifact::{self, Artifact, ArtifactMeta};
 use projectmind_core::files::{self, MarkdownFile, MarkdownHit, ModuleFile};
 use projectmind_core::git::{self, ChangedFile};
 use projectmind_core::heartbeat;
@@ -256,6 +257,12 @@ fn open_repository(
     // to clobber the intent that triggered it.
     let prev = state::read().ok().flatten().unwrap_or_default();
     let same_repo = prev.repo_root.as_ref() == Some(&root);
+    // A different repo drops the previous repo's AI-generated artifacts.
+    if !same_repo {
+        if let Err(err) = artifact::clear_all() {
+            tracing::warn!(error = %err, "failed to clear artifacts on repo change");
+        }
+    }
     publish_state(UiState {
         repo_root: Some(root),
         view: if same_repo { prev.view } else { new_view },
@@ -595,6 +602,18 @@ fn current_state() -> Option<UiState> {
 #[tauri::command]
 fn current_walkthrough() -> Option<Walkthrough> {
     wt::read_body().ok().flatten()
+}
+
+/// Read one AI-generated artifact by id, or `None` when it doesn't exist.
+#[tauri::command]
+fn current_artifact(id: String) -> Option<Artifact> {
+    artifact::read(&id).ok().flatten()
+}
+
+/// List metadata for every stored artifact (id, title, format, size, times).
+#[tauri::command]
+fn list_artifacts() -> Vec<ArtifactMeta> {
+    artifact::list().unwrap_or_default()
 }
 
 /// Read the feedback log for the active tour. Empty if none.
@@ -1115,6 +1134,8 @@ pub fn run() {
             find_html_snippets,
             list_module_files,
             current_walkthrough,
+            current_artifact,
+            list_artifacts,
             current_walkthrough_feedback,
             walkthrough_ack,
             walkthrough_request_more,

@@ -464,6 +464,7 @@ export type WalkthroughTarget =
   | { kind: 'class'; fqn: string; highlight?: LineRange[] }
   | { kind: 'file'; path: string; anchor?: string | null; highlight?: LineRange[] }
   | { kind: 'diff'; reference: string; to?: string | null; focus?: DiffFocus }
+  | { kind: 'artifact'; id: string }
   | { kind: 'note' };
 
 export interface WalkthroughStep {
@@ -553,6 +554,45 @@ export async function endWalkthrough(): Promise<void> {
   return invoke<void>('end_walkthrough');
 }
 
+// ----- Artifacts -----------------------------------------------------------
+
+export type ArtifactFormat = 'html' | 'markdown';
+
+/// A full AI-generated artifact body pushed via `present_artifact`.
+export interface Artifact {
+  id: string;
+  title: string;
+  format: ArtifactFormat;
+  /// HTML source (rendered in a sandboxed iframe) or Markdown.
+  content: string;
+  /// Content byte length.
+  size: number;
+  created_at: number;
+  updated_at: number;
+}
+
+/// Lightweight artifact metadata for `list_artifacts` — no body.
+export interface ArtifactMeta {
+  id: string;
+  title: string;
+  format: ArtifactFormat;
+  size: number;
+  created_at: number;
+  updated_at: number;
+}
+
+/// Fetch a single artifact body by id, or null when it no longer exists.
+export async function currentArtifact(id: string): Promise<Artifact | null> {
+  if (!isTauriRuntime()) return api<Artifact | null>(`/api/current_artifact${query({ id })}`);
+  return invoke<Artifact | null>('current_artifact', { id });
+}
+
+/// List metadata for every stored artifact.
+export async function listArtifacts(): Promise<ArtifactMeta[]> {
+  if (!isTauriRuntime()) return api<ArtifactMeta[]>('/api/list_artifacts');
+  return invoke<ArtifactMeta[]>('list_artifacts');
+}
+
 export interface UiState {
   version: number;
   repo_root: string | null;
@@ -565,7 +605,8 @@ export type ViewIntent =
   | { kind: 'diagram'; diagram_kind: string }
   | { kind: 'diff'; reference: string; to?: string | null }
   | { kind: 'file'; path: string; anchor?: string | null }
-  | { kind: 'walkthrough'; id: string; step: number };
+  | { kind: 'walkthrough'; id: string; step: number }
+  | { kind: 'artifact'; id: string };
 
 export async function currentState(): Promise<UiState | null> {
   if (!isTauriRuntime()) return api<UiState | null>('/api/current_state');

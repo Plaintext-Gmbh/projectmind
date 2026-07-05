@@ -21,6 +21,7 @@
     viewMode,
     fileView,
     walkthroughCursor,
+    artifactCursor,
     diffViewRef,
     followingMcp,
     moduleSidebarVisible,
@@ -80,6 +81,8 @@
     loadComponent('MarkdownIndex', () => import('./components/MarkdownIndex.svelte'));
   const lazyWalkthroughView = () =>
     loadComponent('WalkthroughView', () => import('./components/WalkthroughView.svelte'));
+  const lazyArtifactView = () =>
+    loadComponent('ArtifactView', () => import('./components/ArtifactView.svelte'));
 
   type Theme = 'dark' | 'light';
   const BROWSER_STATE_POLL_MS = 500;
@@ -711,6 +714,13 @@
           }));
           viewMode.set('walkthrough');
           break;
+        case 'artifact':
+          artifactCursor.update((cur) => ({
+            id: v.id,
+            nonce: (cur?.nonce ?? 0) + 1,
+          }));
+          viewMode.set('artifact');
+          break;
       }
     } catch (err) {
       errorMessage.set(String(err));
@@ -1073,6 +1083,16 @@
           title={$t('nav.walkthrough')}
         >
           ▶ {$t('nav.walkthrough')}
+        </button>
+      {/if}
+      {#if $artifactCursor}
+        <button
+          class:active={$viewMode === 'artifact'}
+          class="walkthrough-btn"
+          on:click={() => viewMode.set('artifact')}
+          title={$t('nav.artifactTitle')}
+        >
+          ◆ {$t('nav.artifact')}
         </button>
       {/if}
       {#if $repo}
@@ -1448,6 +1468,14 @@
         cursorId={$walkthroughCursor.id}
         cursorStep={$walkthroughCursor.step}
         nonce={$walkthroughCursor.nonce}
+      />
+    {/await}
+  {:else if $viewMode === 'artifact' && $artifactCursor}
+    {#await lazyArtifactView() then mod}
+      <svelte:component
+        this={mod.default}
+        artifactId={$artifactCursor.id}
+        nonce={$artifactCursor.nonce}
       />
     {/await}
   {:else if $viewMode === 'diff' && $diffViewRef}

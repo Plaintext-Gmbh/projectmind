@@ -30,6 +30,7 @@
   import ClassViewer from './ClassViewer.svelte';
   import FileView from './FileView.svelte';
   import DiffView from './DiffView.svelte';
+  import ArtifactView from './ArtifactView.svelte';
   import { t } from '../lib/i18n';
   import { readZoom, writeZoom, clampZoom, wheelDelta } from '../lib/shiftWheelZoom';
   import { openUrl } from '../lib/openUrl';
@@ -180,6 +181,9 @@
           break;
         case 'diff':
           diffText = await showDiff(t.reference, t.to ?? undefined);
+          break;
+        case 'artifact':
+          // ArtifactView fetches its own body by id — nothing to preload.
           break;
         case 'note':
           break;
@@ -844,6 +848,8 @@
               {:else if step.target.kind === 'diff'}
                 {$t('walkthrough.target.diff')}
                 <code>{step.target.reference}{step.target.to ? `..${step.target.to}` : ' → working tree'}</code>
+              {:else if step.target.kind === 'artifact'}
+                {$t('walkthrough.target.artifact')} <code>{step.target.id}</code>
               {/if}
             </div>
           {/if}
@@ -886,6 +892,8 @@
               to={step.target.to ?? null}
               focus={step.target.focus ?? null}
             />
+          {:else if step.target.kind === 'artifact'}
+            <ArtifactView artifactId={step.target.id} {nonce} />
           {/if}
         </div>
 

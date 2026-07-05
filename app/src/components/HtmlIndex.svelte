@@ -9,6 +9,7 @@
   import { t } from '../lib/i18n';
   import { resizable } from '../lib/resizable';
   import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
+  import { sandboxedHtmlDataUrl } from '../lib/htmlSandbox';
 
   // Shift + wheel zoom for the rendered iframe / source pre. Scoped to the
   // viewer column via `use:zoomAction` so shift-scrolling the sidebar doesn't
@@ -148,40 +149,11 @@
   }
 
   // The iframe must render with no script execution and no network access.
-  // We wrap the snippet/file source in a strict CSP to enforce that even if
-  // the source itself contains <script> tags or remote <img src>.
-  function safeWrap(source: string): string {
-    const csp =
-      "default-src 'none'; img-src data:; style-src 'unsafe-inline' data:;" +
-      " font-src data:; media-src data:; child-src 'none'; frame-src 'none';" +
-      " form-action 'none'; base-uri 'none';";
-    // If the source already has a full <html> document, inject our CSP into
-    // its <head>. Otherwise wrap as a fragment.
-    const hasHtmlTag = /<html[\s>]/i.test(source);
-    if (hasHtmlTag) {
-      // Simplistic injection: insert a <meta> right after <head> open. If
-      // there's no <head>, the strict iframe sandbox still blocks scripts.
-      return source.replace(
-        /<head([^>]*)>/i,
-        `<head$1><meta http-equiv="Content-Security-Policy" content="${csp}">`,
-      );
-    }
-    return `<!doctype html>
-<html>
-<head>
-<meta http-equiv="Content-Security-Policy" content="${csp}">
-<style>
-  body { font-family: system-ui, sans-serif; color: #222; background: #fff; padding: 16px; }
-</style>
-</head>
-<body>${source}</body>
-</html>`;
-  }
-
+  // The shared `htmlSandbox` helper wraps the snippet/file source in a strict
+  // CSP so even inline <script> tags or remote <img src> stay inert — the
+  // same policy used for AI-generated HTML artifacts.
   $: iframeSrc =
-    selectedSource && renderMode === 'rendered'
-      ? `data:text/html;charset=utf-8,${encodeURIComponent(safeWrap(selectedSource))}`
-      : '';
+    selectedSource && renderMode === 'rendered' ? sandboxedHtmlDataUrl(selectedSource) : '';
 
   function isRenderable(): boolean {
     if (selectedFile) {
