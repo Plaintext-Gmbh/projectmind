@@ -30,10 +30,41 @@
   }
 
   // Shift + wheel zoom, persisted under the per-component key.
+  // Keyboard zoom (Cmd/Ctrl + + / − / 0) goes through the same store —
+  // `set()`/`update()` clamp + persist automatically.
+  const ZOOM_STEP = 0.1;
   const { zoom, action: zoomAction } = createShiftWheelZoom('projectmind.classviewer.zoom');
 
+  function zoomIn() {
+    zoom.update((z) => z + ZOOM_STEP);
+  }
+  function zoomOut() {
+    zoom.update((z) => z - ZOOM_STEP);
+  }
   function zoomReset() {
     zoom.set(1.0);
+  }
+
+  function onKey(ev: KeyboardEvent) {
+    // Only intercept while this view is on screen (mirrors FileView).
+    if (!rootEl || !rootEl.isConnected) return;
+
+    // Don't hijack the shortcuts while the user is typing in a field.
+    const tag = (ev.target as HTMLElement | null)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+    if (!(ev.metaKey || ev.ctrlKey)) return;
+    // `=` and `+` share a key on most keyboards. `-` is Minus, `0` is Digit0.
+    if (ev.key === '+' || ev.key === '=' || ev.code === 'Equal') {
+      ev.preventDefault();
+      zoomIn();
+    } else if (ev.key === '-' || ev.code === 'Minus') {
+      ev.preventDefault();
+      zoomOut();
+    } else if (ev.key === '0' || ev.code === 'Digit0') {
+      ev.preventDefault();
+      zoomReset();
+    }
   }
 
   // ----- Outline panel -----------------------------------------------------
@@ -53,6 +84,7 @@
   // gets in the way.
   let gutterOpen = readBoolPref(GUTTER_KEY, true);
   let sourceEl: HTMLPreElement | null = null;
+  let rootEl: HTMLDivElement | null = null;
   let lastFlash: number | null = null;
 
   function readBoolPref(key: string, defaultValue: boolean): boolean {
@@ -274,13 +306,15 @@
 
 
   onMount(() => {
+    window.addEventListener('keydown', onKey);
     return () => {
+      window.removeEventListener('keydown', onKey);
       if (lastFlash !== null) clearTimeout(lastFlash);
     };
   });
 </script>
 
-<div class="root" use:zoomAction style="font-size: {$zoom}em;">
+<div class="root" bind:this={rootEl} use:zoomAction style="font-size: {$zoom}em;">
   <div class="header">
     <div class="title-block">
       {#if outline && outline.super_types.length > 0}
