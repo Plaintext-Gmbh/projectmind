@@ -150,6 +150,7 @@ fn build_fields(node: Node<'_>, bytes: &[u8]) -> Vec<Field> {
                     visibility: visibility_from(&modifiers),
                     annotations: annotations.clone(),
                     is_static: modifiers.iter().any(|m| m == "static"),
+                    is_final: modifiers.iter().any(|m| m == "final"),
                 });
             }
         }
@@ -345,6 +346,28 @@ mod tests {
         assert_eq!(class.methods.len(), 1);
         assert_eq!(class.methods[0].name, "greet");
         assert_eq!(class.methods[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn field_final_modifier_sets_is_final() {
+        let src = r"
+            package com.example;
+            public class Svc {
+                private static final Logger LOG = null;
+                private static int counter;
+            }
+        ";
+        let m = parse_one(src);
+        let c = m.classes.get("com.example.Svc").unwrap();
+        let log = c.fields.iter().find(|f| f.name == "LOG").unwrap();
+        assert!(log.is_static);
+        assert!(log.is_final);
+        // tree-sitter yields the bare type node — modifiers never leak into
+        // type_text, so `is_final` is the only reliable signal.
+        assert_eq!(log.type_text, "Logger");
+        let counter = c.fields.iter().find(|f| f.name == "counter").unwrap();
+        assert!(counter.is_static);
+        assert!(!counter.is_final);
     }
 
     #[test]

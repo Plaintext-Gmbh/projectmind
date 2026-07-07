@@ -163,6 +163,11 @@ pub struct Field {
     pub annotations: Vec<Annotation>,
     /// Whether the field is static.
     pub is_static: bool,
+    /// Whether the field is final (Java `final` modifier). Languages without
+    /// the concept leave this `false`; `#[serde(default)]` keeps previously
+    /// serialized modules loadable.
+    #[serde(default)]
+    pub is_final: bool,
 }
 
 /// An annotation as written in source (`@Service`, `@Bean(name = "x")`, …).

@@ -173,7 +173,7 @@ fn check_no_static_state(repo: &Repository, scope: &Scope) -> PatternResult {
         pattern: Pattern::NoStaticState,
         holds: holds_to_vec(holds),
         violations,
-        confidence: 0.9,
+        confidence: 0.85,
     }
 }
 
@@ -324,10 +324,14 @@ fn is_spring_controller(class: &Class) -> bool {
 }
 
 fn is_final_field(field: &projectmind_plugin_api::Field) -> bool {
-    field
-        .annotations
-        .iter()
-        .any(|a| a.is("Final") || a.is("Value") || a.is("ConfigurationProperty"))
+    // Primary signal: the parser extracted the `final` modifier. The
+    // type_text checks stay as a fallback for parsers that fold modifiers
+    // into the type text; `final` itself is a keyword, never an annotation.
+    field.is_final
+        || field
+            .annotations
+            .iter()
+            .any(|a| a.is("Value") || a.is("ConfigurationProperty"))
         || field.type_text.starts_with("final ")
         || field.type_text.contains(" final ")
 }
@@ -424,6 +428,28 @@ mod tests {
             type_text: "final int".into(),
             line: 11,
             is_static: true,
+            ..Default::default()
+        });
+        let repo = mk_repo(vec![make_module("m", vec![c])]);
+        let res = check(&repo, Pattern::NoStaticState, &Scope::default());
+        assert!(res.violations.is_empty());
+        assert_eq!(res.holds.len(), 1);
+        assert_eq!(res.holds[0].count, 1);
+    }
+
+    #[test]
+    fn no_static_state_ignores_static_final_via_is_final_flag() {
+        // Real Java-parser shape: `private static final Logger LOG = ...`
+        // yields type_text "Logger" (modifiers never land in type_text) and
+        // is_final: true. Must not be flagged.
+        let mut c = cls("a.b.Svc");
+        c.annotations.push(annot("Service"));
+        c.fields.push(Field {
+            name: "LOG".into(),
+            type_text: "Logger".into(),
+            line: 7,
+            is_static: true,
+            is_final: true,
             ..Default::default()
         });
         let repo = mk_repo(vec![make_module("m", vec![c])]);

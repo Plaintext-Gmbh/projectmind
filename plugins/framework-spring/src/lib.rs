@@ -176,6 +176,7 @@ mod tests {
                 raw_args: None,
             }],
             is_static: false,
+            is_final: false,
         });
         module.classes.insert(consumer.fqn.clone(), consumer);
         SpringPlugin.enrich(&mut module).unwrap();
