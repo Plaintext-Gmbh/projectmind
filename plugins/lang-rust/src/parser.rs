@@ -147,6 +147,8 @@ fn collect_fields(node: Node<'_>, bytes: &[u8]) -> Vec<Field> {
             visibility: item_visibility(member, bytes),
             annotations: collect_outer_attributes(member, bytes),
             is_static: false,
+            // Rust has no `final` — struct fields are never final.
+            is_final: false,
         });
     }
     out
