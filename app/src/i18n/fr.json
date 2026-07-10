@@ -44,6 +44,8 @@
   "diagram.beanGraphLive.applyDiff": "Diff",
   "diagram.beanGraphLive.clearDiff": "Effacer la superposition de diff",
   "diagram.beanGraphLive.changedCount": "{count} modifiés",
+  "diagram.beanGraphLive.flow": "▶ Flux",
+  "diagram.beanGraphLive.flowTitle": "Jouer une vague de requêtes simulée : depuis les contrôleurs, un parcours en largeur suit les arêtes dirigées vers les dépôts, avec des arêtes en pointillés animés et des nœuds qui pulsent, en boucle jusqu'à la désactivation. Flux simulé — ordre topologique, pas le trafic d'exécution.",
   "diagram.packageTree": "Arbre des paquets",
   "diagram.folderMap": "Carte des dossiers",
   "diagram.inheritanceTree": "Arbre d'héritage",
