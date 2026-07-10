@@ -460,6 +460,33 @@ fn risk_atlas(
     })
 }
 
+/// Pattern Lens (Cockpit 2.3): Architektur-Drift-Detektoren als Compliance-Heatmap.
+/// Ohne `pattern` liefert der Command die komplette Heatmap (alle aktiven Detektoren);
+/// mit `pattern` nur einen. `module` schränkt auf ein Modul ein. Spiegelt die Logik des
+/// `pattern_check`-MCP-Tools bzw. der Browser-Host-Route. Honoriert
+/// `.projectmind/patterns.toml` (Layer-Regeln, deaktivierte Detektoren).
+#[tauri::command]
+fn pattern_check(
+    pattern: Option<String>,
+    module: Option<String>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<projectmind_core::patterns::PatternResult>, String> {
+    use projectmind_core::patterns::{self, Pattern, Scope};
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    let config = patterns::PatternConfig::load(&repo.root);
+    let scope = Scope { module };
+    match pattern {
+        Some(name) => {
+            let p = Pattern::parse(&name).ok_or_else(|| format!("unknown pattern `{name}`"))?;
+            Ok(vec![patterns::check_with_config(repo, p, &scope, &config)])
+        }
+        None => Ok(patterns::check_all(repo, &scope, &config)),
+    }
+}
+
 #[tauri::command]
 fn show_class(fqn: String, state: State<'_, Arc<AppState>>) -> Result<ClassDetails, String> {
     let guard = state.repo.read();
@@ -1197,6 +1224,7 @@ pub fn run() {
             list_classes,
             list_modules,
             risk_atlas,
+            pattern_check,
             show_class,
             class_outline,
             list_changes_since,
