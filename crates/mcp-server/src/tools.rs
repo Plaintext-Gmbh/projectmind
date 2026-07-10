@@ -321,6 +321,30 @@ fn pattern_check_schema() -> Value {
     })
 }
 
+fn walkthrough_query_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "question": {
+                "type": "string",
+                "description": "Natural-language question about the code, e.g. \"how does login work\". Semantically matched against curated tour steps."
+            },
+            "prefer_tours": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Optional tour ids to bias the match toward (a small nudge, not an override)."
+            },
+            "top_k": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 8,
+                "description": "Maximum number of steps to return for the best-matching tour, in tour order."
+            }
+        },
+        "required": ["question"]
+    })
+}
+
 fn open_browser_repo_schema() -> Value {
     json!({
         "type": "object",
@@ -506,6 +530,11 @@ pub(crate) fn list() -> Value {
                 "inputSchema": pattern_check_schema()
             },
             {
+                "name": "walkthrough_query",
+                "description": "Semantic lookup over curated walk-through tours — the PREFERRED way to answer \"how does X work / where is X\" before grepping. An architect builds tours once; this matches your question against every tour step (title + narration + target) and returns the best tour's steps with `title`, `fqn`/`file`/`lines` and `narration`, plus a `confidence` (0..1). A ten-step tour of ten lines each answers a question in ~500 lines vs 5000-20000 lines of reading source, so try this FIRST. When `fallback` is `\"grep\"` (no tour indexed, weak match < 0.45, or the semantic index is unavailable because the server was built without the `embed` feature) there is no good tour answer — fall back to the normal search/read tools. Optional `prefer_tours` biases toward named tour ids; `top_k` caps returned steps.",
+                "inputSchema": walkthrough_query_schema()
+            },
+            {
                 "name": "open_browser_repo",
                 "description": "Start the in-process browser host that serves the ProjectMind webapp at a tokenized URL, then surface that URL to the user verbatim — they will open it themselves; you cannot. Use after `open in browser` / `im Browser zeigen` / `show me on my iPad / phone / laptop`. Pass `lan: true` whenever the user mentions a remote device (iPad, phone, second machine on the same WLAN) — otherwise the URL is `http://127.0.0.1:...` and unreachable from anything but this machine. The bearer token in the URL fragment gates every API call regardless of bind address. Idempotent: calling again with a different `path` reopens the host on the existing port; call `browser_status` first to avoid restarting the host. Once the user has opened the URL, every subsequent `view_*` / `walkthrough_*` push will mirror to that browser tab in addition to the Desktop GUI.",
                 "inputSchema": open_browser_repo_schema()
@@ -562,6 +591,7 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "walkthrough_set_step" => walkthrough_set_step(parsed.arguments),
         "walkthrough_clear" => walkthrough_clear_handler(),
         "walkthrough_feedback" => walkthrough_feedback(parsed.arguments),
+        "walkthrough_query" => walkthrough_query(state, parsed.arguments).await,
         "risk_atlas" => risk_atlas(state, parsed.arguments).await,
         "pattern_check" => pattern_check(state, parsed.arguments).await,
         "open_browser_repo" => open_browser_repo(state, parsed.arguments).await,
@@ -616,6 +646,14 @@ async fn open_repo(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
     // state write below, which overwrites the previous repo root.
     if let Err(err) = artifact::clear_on_repo_change(&root) {
         tracing::warn!(error = %err, "open_repo: failed to clear artifacts on repo change");
+    }
+
+    // Build the semantic tour index (Cockpit 2.5, #161) for
+    // `walkthrough_query`. Best-effort and no-op without the `embed`
+    // feature; a failure (no model, unwritable cache) must never block
+    // opening the repo — the query path rebuilds lazily anyway.
+    if let Err(err) = projectmind_core::tour_index::build_index_on_open(&root) {
+        tracing::warn!(error = %err, "open_repo: failed to build tour index");
     }
 
     // Tell the GUI to follow. Best-effort — if the statefile cannot be written
@@ -1476,6 +1514,60 @@ struct RiskWeightArgs {
     cov: Option<f64>,
     #[serde(default)]
     deps: Option<f64>,
+}
+
+#[derive(Deserialize)]
+struct WalkthroughQueryArgs {
+    question: String,
+    #[serde(default)]
+    prefer_tours: Vec<String>,
+    #[serde(default)]
+    top_k: Option<u32>,
+}
+
+/// Semantic tour lookup (Cockpit 2.5, #161). Ranks the question against
+/// the indexed tour steps and returns the best tour's steps. Without the
+/// `embed` feature (or when the model/network is unavailable) the core
+/// answers `fallback: "grep"` — this handler never errors on "no answer".
+///
+/// A `class`-target step carries only its `fqn` in the index; here, with
+/// the open repository in hand, we enrich each such step with its
+/// `file` + `lines` so the caller gets a jump target without a second
+/// round-trip. Enrichment is best-effort: an unresolved fqn just keeps
+/// whatever the index had.
+async fn walkthrough_query(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
+    let args: WalkthroughQueryArgs = serde_json::from_value(args)
+        .map_err(|e| DispatchError::invalid_params(format!("walkthrough_query: {e}")))?;
+    let top_k = args.top_k.map_or(8, |v| v as usize).max(1);
+
+    let state = state.lock().await;
+    with_repo(&state, |repo| {
+        let mut result = projectmind_core::tour_index::query_repo(
+            &repo.root,
+            &args.question,
+            &args.prefer_tours,
+            top_k,
+        )
+        .map_err(|e| DispatchError::internal(format!("walkthrough_query: {e}")))?;
+
+        // Enrich class-target steps (fqn but no file/lines) from the repo.
+        for step in &mut result.steps {
+            if step.file.is_some() {
+                continue;
+            }
+            if let Some(fqn) = &step.fqn {
+                if let Some((module, class)) = repo.find_class(fqn) {
+                    step.file = Some(module.root.join(&class.file).to_string_lossy().into_owned());
+                    if step.lines.is_none() {
+                        step.lines = Some([class.line_start, class.line_end]);
+                    }
+                }
+            }
+        }
+
+        let body = serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".into());
+        Ok(text_result(body))
+    })
 }
 
 async fn risk_atlas(state: &Mutex<ServerState>, args: Value) -> DispatchResult {

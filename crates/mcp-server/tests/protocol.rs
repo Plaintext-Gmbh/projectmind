@@ -505,6 +505,77 @@ fn walkthrough_append_rejects_unknown_kind() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+#[test]
+fn tools_list_includes_walkthrough_query() {
+    let mut s = Server::spawn();
+    let resp = s.call(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#);
+    let tools = resp["result"]["tools"].as_array().unwrap();
+    let wq = tools
+        .iter()
+        .find(|t| t["name"] == "walkthrough_query")
+        .expect("walkthrough_query tool registered");
+    let schema = &wq["inputSchema"];
+    assert!(schema["properties"].get("question").is_some());
+    assert!(schema["properties"].get("prefer_tours").is_some());
+    assert!(schema["properties"].get("top_k").is_some());
+    let required: Vec<&str> = schema["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(required.contains(&"question"));
+}
+
+#[test]
+fn walkthrough_query_requires_open_repo() {
+    // Without an open repository the tool is a params error, like every
+    // other repo-scoped tool.
+    let (mut s, dir) = spawn_isolated();
+    s.call(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#);
+    let resp = s.call(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"walkthrough_query","arguments":{"question":"how does login work"}}}"#,
+    );
+    assert_eq!(
+        resp["error"]["code"], -32602,
+        "expected invalid params without an open repo: {resp}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn walkthrough_query_returns_grep_fallback_without_embed_feature() {
+    // The default build has no local embedding model, so the semantic
+    // lookup must degrade gracefully: a well-formed envelope with
+    // `fallback: "grep"`, never a crash. (With the `embed` feature this
+    // same call would return matched tour steps instead — verified in CI.)
+    let tmp = TempRepo::create_with_java_class();
+    let (mut s, dir) = spawn_isolated();
+    s.call(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#);
+    let path = tmp.root.to_string_lossy().into_owned();
+    s.call(&format!(
+        r#"{{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{{"name":"open_repo","arguments":{{"path":"{path}"}}}}}}"#
+    ));
+    // Author a tour so there is something that *could* be matched — the
+    // point is that without a model we still answer with the grep hint.
+    s.call(
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"walkthrough_start","arguments":{"title":"Auth flow","steps":[{"title":"Login","narration":"login controller","target":{"kind":"note"}}]}}}"#,
+    );
+    let resp = s.call(
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"walkthrough_query","arguments":{"question":"how does login work"}}}"#,
+    );
+    assert!(resp["error"].is_null(), "unexpected error: {resp}");
+    let body: serde_json::Value =
+        serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        body["fallback"], "grep",
+        "no embed feature → grep fallback: {body}"
+    );
+    assert!(body["steps"].as_array().unwrap().is_empty());
+    assert_eq!(body["confidence"], 0.0);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 // ----- helpers -----
 
 /// Spawn a server against an isolated statefile directory, pre-seeding a fresh

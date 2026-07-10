@@ -28,3 +28,15 @@ nucleo-matcher = { workspace = true }
 dirs        = { workspace = true }
 rusqlite    = { workspace = true }
 toml        = { workspace = true }
+
+# Optional: real local embedder for `walkthrough_query`. Behind the `embed`
+# feature so the default build never pulls the ONNX runtime.
+fastembed   = { workspace = true, optional = true }
+
+[features]
+# `embed` swaps the tour index onto a real local embedding model
+# (`fastembed`, `all-MiniLM-L6-v2`). Off by default: the MCP server stays
+# slim and `walkthrough_query` degrades to `fallback: "grep"`. The default
+# build/test/clippy must stay green without this feature — CI verifies the
+# `embed` path separately because `fastembed`/`ort` fetch a model + runtime.
+embed = ["dep:fastembed"]
