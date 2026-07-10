@@ -37,28 +37,40 @@ import type { BeanGraphDiff } from './beanGraphDiff';
 
 /// The overlay state the graph is in. Drives which toggle button reads active
 /// and, for `morph`, whether the component plays the entry animation.
-export type BeanGraphOverlayMode = 'off' | 'diff' | 'morph';
+/// `cinematics` (V4.3 / #66 concept 2) is the commit-timeline player — it
+/// paints the same `changed`/`faded` classes per step, so it is a fourth
+/// *mode* of the same overlay, not a separate layer.
+export type BeanGraphOverlayMode = 'off' | 'diff' | 'morph' | 'cinematics';
 
 export const BEAN_GRAPH_OVERLAY_MODES: readonly BeanGraphOverlayMode[] = [
   'off',
   'diff',
   'morph',
+  'cinematics',
 ];
 
-/// Resolve the active overlay state from the two pieces of UI state the
-/// component owns: whether a ref is currently applied, and whether the user
-/// picked the morph toggle.
+/// Resolve the active overlay state from the three pieces of UI state the
+/// component owns: whether a ref is currently applied, whether the user
+/// picked the morph toggle, and whether the cinematics player is running.
 ///
-/// - no ref → `off` regardless of the toggle (nothing to animate).
+/// - cinematics active → `cinematics`, unconditionally. The player owns the
+///   `changed`/`faded` classes while it runs, and the component enforces the
+///   exclusivity both ways (starting cinematics clears the since-ref overlay;
+///   applying a ref stops cinematics) — so by the time this is consulted a
+///   running player *is* the overlay, ref or not.
+/// - otherwise: no ref → `off` regardless of the toggle (nothing to animate).
 /// - ref + morph toggle → `morph`.
 /// - ref, no morph toggle → `diff` (the V3.2 static overlay).
 ///
 /// Pure so the component's reactive `$:` can derive the mode and the tests can
-/// pin every combination.
+/// pin every combination. `cinematicsActive` defaults to `false` so the
+/// pre-V4.3 call sites keep their exact behaviour.
 export function resolveOverlayMode(
   hasRef: boolean,
   morphRequested: boolean,
+  cinematicsActive = false,
 ): BeanGraphOverlayMode {
+  if (cinematicsActive) return 'cinematics';
   if (!hasRef) return 'off';
   return morphRequested ? 'morph' : 'diff';
 }
