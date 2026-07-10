@@ -48,6 +48,8 @@
         return $t('diagram.activityHeatmap');
       case 'timeline-river':
         return $t('diagram.timelineRiver');
+      case 'code-city':
+        return $t('diagram.codeCity');
       default:
         return kind;
     }
@@ -81,6 +83,8 @@
         return $t('diagram.description.activityHeatmap');
       case 'timeline-river':
         return $t('diagram.description.timelineRiver');
+      case 'code-city':
+        return $t('diagram.description.codeCity');
       default:
         return '';
     }

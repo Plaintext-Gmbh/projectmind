@@ -36,6 +36,7 @@ const allKinds: Record<DiagramKind, true> = {
   'activity-heatmap': true,
   'timeline-river': true,
   'language-stats': true,
+  'code-city': true,
 };
 
 /// Mirrors the kebab-case → camelCase key derivation DiagramIndex.svelte

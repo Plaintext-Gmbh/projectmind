@@ -360,6 +360,57 @@ export async function beanGraphData(): Promise<BeanGraphData> {
   return invoke<BeanGraphData>('bean_graph_data');
 }
 
+/// One walked filesystem node in the code-city payload. Mirrors
+/// `code_city::CityNode` — a future district (folder) or building (file).
+export interface CityNode {
+  /// Repo-relative forward-slashed path; '.' for the root.
+  id: string;
+  /// Parent id; null only for the root.
+  parent: string | null;
+  /// File or directory name.
+  label: string;
+  kind: 'root' | 'folder' | 'file';
+  /// Path depth below the root, 0..=5.
+  depth: number;
+  /// File: fs size. Folder/root: subtree sum (min 1).
+  bytes: number;
+  /// Σ sloc of the parsed classes in this file (risk join), or null.
+  sloc: number | null;
+  /// Max risk score 0..100 of the classes in this file, or null.
+  risk_score: number | null;
+  /// Max churn of the classes in this file, or null.
+  churn: number | null;
+  /// FQN of the highest-scored class in this file — the drill target.
+  fqn: string | null;
+  /// Module of that class (the ClassViewer drill needs both).
+  module: string | null;
+  /// Seconds since the last commit touching this file, or null — drives
+  /// the "freshly built" glow.
+  recency_secs_ago: number | null;
+}
+
+/// Payload for the 3D code city (`code-city`, #66). Mirrors
+/// `code_city::CodeCityData`.
+export interface CodeCityData {
+  /// Repository root, display only.
+  root: string;
+  /// Walk depth cap (= 5, mirrors the folder map).
+  max_depth: number;
+  /// True when the walk hit its node cap (2000) and stopped early.
+  truncated: boolean;
+  /// False when the risk join produced nothing (no git / no parsed
+  /// classes) — hide the risk legend then.
+  has_risk: boolean;
+  nodes: CityNode[];
+}
+
+/// Fetch the code-city payload. Own endpoint (like `beanGraphData()`) —
+/// the backend `show_diagram` does not know this kind.
+export async function codeCityData(): Promise<CodeCityData> {
+  if (!isTauriRuntime()) return api<CodeCityData>('/api/code_city_data');
+  return invoke<CodeCityData>('code_city_data');
+}
+
 /// One persisted user annotation. Mirrors `AnnotationRecord` on the Rust
 /// side; lines are 1-based and inclusive on both ends.
 export interface AnnotationRecord {
@@ -428,13 +479,14 @@ export type DiagramKind =
   | 'module-chord'
   | 'activity-heatmap'
   | 'timeline-river'
-  | 'language-stats';
+  | 'language-stats'
+  | 'code-city';
 
-/// Fetch the payload for a `show_diagram`-backed kind. NOTE: `timeline-river`
-/// and `bean-graph-live` are *not* served here — each has its own endpoint
-/// (`commitActivity()` / `beanGraphData()`); the backend `show_diagram`
-/// command does not know those kinds. DiagramView routes them to their
-/// dedicated endpoints before ever calling `showDiagram`.
+/// Fetch the payload for a `show_diagram`-backed kind. NOTE: `timeline-river`,
+/// `bean-graph-live` and `code-city` are *not* served here — each has its own
+/// endpoint (`commitActivity()` / `beanGraphData()` / `codeCityData()`); the
+/// backend `show_diagram` command does not know those kinds. DiagramView
+/// routes them to their dedicated endpoints before ever calling `showDiagram`.
 export async function showDiagram(kind: DiagramKind): Promise<string> {
   if (!isTauriRuntime()) return api<string>(`/api/show_diagram${query({ kind })}`);
   return invoke<string>('show_diagram', { kind });

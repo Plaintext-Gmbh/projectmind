@@ -54,6 +54,7 @@
   import { createViewportStore } from '../lib/diagrams/viewport';
   import MiniMap from './MiniMap.svelte';
   import BeanGraphLive from './BeanGraphLive.svelte';
+  import CodeCity from './CodeCity.svelte';
 
   export let kind: DiagramKind;
   export let folderLayout: 'hierarchy' | 'solar' | 'td' = 'solar';
@@ -395,9 +396,11 @@
     try {
       // bean-graph-live is rendered by the <BeanGraphLive> Cytoscape
       // component, which fetches its own payload (beanGraphData) and owns
-      // pan/zoom. Short-circuit here: clear every SVG-path state var and let
-      // the template branch mount the component instead of the SVG stage.
-      if (k === 'bean-graph-live') {
+      // pan/zoom. Same for code-city (V4.6a, #66): <CodeCity> fetches its
+      // own payload (codeCityData) and owns the Three.js orbit camera.
+      // Short-circuit here: clear every SVG-path state var and let the
+      // template branch mount the component instead of the SVG stage.
+      if (k === 'bean-graph-live' || k === 'code-city') {
         mermaidSource = '';
         svg = '';
         drawIoXml = '';
@@ -831,6 +834,10 @@
     <!-- Interactive Cytoscape bean graph. Owns its own toolbar / pan / zoom,
          so it replaces the shared SVG toolbar+stage entirely. -->
     <BeanGraphLive />
+  {:else if kind === 'code-city'}
+    <!-- 3D code city (Three.js). Owns its own toolbar / orbit camera, so it
+         replaces the shared SVG toolbar+stage entirely, like BeanGraphLive. -->
+    <CodeCity />
   {:else}
   <div class="toolbar">
     <button on:click={() => zoomBy(1.25)} title="Zoom in" disabled={!!drawIoXml}>＋</button>

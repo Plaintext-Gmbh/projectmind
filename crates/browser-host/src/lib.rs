@@ -468,6 +468,17 @@ fn route_api(
                 repo, &spring,
             ))?)
         }
+        ("GET", "/api/code_city_data") => {
+            // 3D code city (`code-city`, #66). Own endpoint like
+            // `bean_graph_data` — `show_diagram` does not serve it. The
+            // relations come from the engine (no re-scan), same contract
+            // as `risk_atlas_locked`.
+            let repo = repo(&guard)?;
+            let relations = guard.engine.relations(repo);
+            Ok(serde_json::to_value(projectmind_core::code_city::build(
+                repo, &relations,
+            ))?)
+        }
         ("GET", "/api/list_refs") => {
             let repo = repo(&guard)?;
             Ok(serde_json::to_value(git::list_refs(&repo.root)?)?)

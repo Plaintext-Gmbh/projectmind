@@ -25,7 +25,8 @@ export type DiagramKind =
   | 'module-chord'
   | 'activity-heatmap'
   | 'timeline-river'
-  | 'language-stats';
+  | 'language-stats'
+  | 'code-city';
 export type FolderMapLayout = 'hierarchy' | 'solar' | 'td';
 
 /// Frozen snapshot of every navigation-relevant piece of state.

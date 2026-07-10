@@ -714,7 +714,8 @@
             v.diagram_kind === 'module-chord' ||
             v.diagram_kind === 'activity-heatmap' ||
             v.diagram_kind === 'timeline-river' ||
-            v.diagram_kind === 'language-stats'
+            v.diagram_kind === 'language-stats' ||
+            v.diagram_kind === 'code-city'
           ) {
             diagramKind = v.diagram_kind;
           }
