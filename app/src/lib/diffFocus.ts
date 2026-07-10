@@ -121,3 +121,108 @@ export function parseHunkHeader(
   if (!m) return null;
   return { oldStart: Number(m[1]), newStart: Number(m[2]) };
 }
+
+/// One navigable hunk inside a `DiffFile`. `startLine` indexes the flat
+/// `lines[]` array so the rail can `scrollIntoView` the matching element;
+/// `adds`/`dels` drive the marker's magnitude glyph.
+export interface DiffHunk {
+  /// 0-based hunk index within its file (mirrors `DiffFocus.hunk`).
+  index: number;
+  /// The raw `@@ … @@` header text.
+  header: string;
+  /// Index into the flat `lines[]` array of the `hunk` line.
+  startLine: number;
+  /// New-side 1-based start line, or `null` for a malformed header.
+  newStart: number | null;
+  /// Count of `+` lines in the hunk body.
+  adds: number;
+  /// Count of `-` lines in the hunk body.
+  dels: number;
+}
+
+/// One file block in the diff, with its navigable hunks. `newPath` is the
+/// display path (basename shown in the rail); `startLine` points at the
+/// `diff --git` / first line of the block for file-level jumps.
+export interface DiffFile {
+  /// Display path — the `+++ b/<path>` target, falling back to the
+  /// `--- a/<path>` source for deletions, else the `diff --git` label.
+  newPath: string;
+  /// Index into the flat `lines[]` array of the file block's first line.
+  startLine: number;
+  hunks: DiffHunk[];
+}
+
+/// Strip a `--- a/` / `+++ b/` prefix (and the surrounding decorations)
+/// off a meta line, returning the bare path or `null` when the line has
+/// no usable path.
+function metaPath(text: string): string | null {
+  const m = /^(?:---|\+\+\+)\s+(?:[ab]\/)?(.+?)\s*$/.exec(text);
+  if (!m) return null;
+  const p = m[1].trim();
+  return p === '/dev/null' || p === '' ? null : p;
+}
+
+/// Build the structured per-file / per-hunk navigation index from the
+/// flat diff-line stream (#126). Purely derived from `lines`; the flat
+/// render stays authoritative for the visual diff, this is the parallel
+/// structure the `<DiffRail>` navigates.
+export function buildDiffIndex(lines: readonly DiffLine[]): DiffFile[] {
+  const files: DiffFile[] = [];
+  let file: DiffFile | null = null;
+  let hunk: DiffHunk | null = null;
+
+  const closeHunk = () => {
+    if (hunk && file) file.hunks.push(hunk);
+    hunk = null;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (l.kind === 'header') {
+      closeHunk();
+      // Derive an initial display path from the `diff --git a/x b/y` line;
+      // the `+++ b/…` meta line below refines it.
+      const gm = /^diff --git a\/(.+?) b\/(.+)$/.exec(l.text);
+      file = { newPath: gm ? gm[2] : l.text.replace(/^diff --git\s+/, ''), startLine: i, hunks: [] };
+      files.push(file);
+      continue;
+    }
+    if (l.kind === 'meta' && file) {
+      // Prefer the new-side path; fall back to the old-side for deletions.
+      if (l.text.startsWith('+++ ')) {
+        const p = metaPath(l.text);
+        if (p) file.newPath = p;
+      } else if (l.text.startsWith('--- ') && !file.hunks.length) {
+        const p = metaPath(l.text);
+        if (p && (file.newPath === '/dev/null' || file.newPath.startsWith('diff --git'))) {
+          file.newPath = p;
+        }
+      }
+      continue;
+    }
+    if (l.kind === 'hunk') {
+      closeHunk();
+      // A hunk with no preceding `diff --git` header (raw fragment) still
+      // needs a home so the rail can address it.
+      if (!file) {
+        file = { newPath: '(diff)', startLine: i, hunks: [] };
+        files.push(file);
+      }
+      hunk = {
+        index: file.hunks.length,
+        header: l.text,
+        startLine: i,
+        newStart: parseHunkHeader(l.text)?.newStart ?? null,
+        adds: 0,
+        dels: 0,
+      };
+      continue;
+    }
+    if (hunk) {
+      if (l.kind === 'add') hunk.adds += 1;
+      else if (l.kind === 'del') hunk.dels += 1;
+    }
+  }
+  closeHunk();
+  return files;
+}

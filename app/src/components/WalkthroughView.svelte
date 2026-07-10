@@ -12,12 +12,14 @@
     setWalkthroughStep,
     endWalkthrough,
     riskScoreFor,
+    listChangesSince,
   } from '../lib/api';
   import type {
     Walkthrough,
     WalkthroughStep,
     LineRange,
     ClassEntry,
+    ChangedFile,
     FeedbackEvent,
   } from '../lib/api';
   import RiskStep from './walkthrough/RiskStep.svelte';
@@ -41,7 +43,13 @@
   import { openUrl } from '../lib/openUrl';
   import { expandStepRefs, matchLineAnchor } from '../lib/walkthroughText';
   import { firstHighlightRange } from '../lib/walkthroughHighlight';
-  import { compassFor, compassIconFor } from '../lib/compass';
+  import {
+    compassFor,
+    compassIconFor,
+    changedBadgeFor,
+    changedStatusGlyph,
+    fileTrailFor,
+  } from '../lib/compass';
   import { isCorrect, scoreQuiz, type QuizAnswer } from '../lib/quiz';
 
   export let cursorId: string;
@@ -82,6 +90,18 @@
   let narrationEl: HTMLElement | null = null;
   /// DOM ref to the target pane — narration line links scroll into this.
   let targetEl: HTMLDivElement | null = null;
+
+  /// Change-compass (#127): the tour's changed-file set, fetched once per
+  /// tour from `list_changes_since` against the tour's diff ref (the first
+  /// `diff` step's reference). Empty when the tour has no diff step or git
+  /// data is unavailable — the compass then shows breadcrumb only, no badge
+  /// or dot-trail, and never errors.
+  let changedFiles: ChangedFile[] = [];
+  /// Ref the changed-file set was last fetched for, so we skip re-fetching
+  /// when only the step pointer moves inside the same tour.
+  let changedFilesRef: string | null = null;
+  /// Whether the compass hover-expansion (the changed-file list) is open.
+  let compassExpanded = false;
 
   // UI flow state.
   let feedbackPrompt = false;
@@ -126,6 +146,59 @@
   $: total = body?.steps.length ?? 0;
   $: progressPct = total === 0 ? 0 : Math.round(((cursorStep + 1) / total) * 100);
   $: isLastStep = body !== null && cursorStep === body.steps.length - 1;
+
+  /// The ref the whole tour's change context hangs off — the reference of
+  /// the tour's first `diff` step. `null` when the tour has no diff step;
+  /// the compass then falls back to breadcrumb-only.
+  $: tourDiffRef = firstDiffRef(body);
+  $: void loadChangedFiles(tourDiffRef);
+  // Collapse the hover-expansion whenever the step changes so a stale list
+  // doesn't hang open under a different step's badge.
+  $: if (step) compassExpanded = false;
+  // Compass signals for the active step — pure, recomputed on step/data change.
+  $: compassCrumbs = compassFor(step?.target);
+  $: compassBadge = changedBadgeFor(step?.target, changedFiles);
+  $: compassTrail = fileTrailFor(step?.target, changedFiles);
+
+  /// First `diff` step reference in the tour, or `null`. The compass uses
+  /// it as the change baseline; `list_changes_since(ref, to)` accepts the
+  /// optional `to` too, so a `refA..refB` tour maps cleanly.
+  function firstDiffRef(w: Walkthrough | null): { reference: string; to?: string } | null {
+    if (!w) return null;
+    for (const s of w.steps) {
+      if (s.target.kind === 'diff') {
+        return { reference: s.target.reference, to: s.target.to ?? undefined };
+      }
+    }
+    return null;
+  }
+
+  /// Fetch the tour's changed-file set once per ref. Failures (no git,
+  /// bad ref) degrade to an empty set — the compass just hides its badge
+  /// and dot-trail; never surfaces an error to the tour UI (#127).
+  async function loadChangedFiles(ref: { reference: string; to?: string } | null) {
+    const key = ref ? `${ref.reference}..${ref.to ?? ''}` : null;
+    if (key === changedFilesRef) return;
+    changedFilesRef = key;
+    if (!ref) {
+      changedFiles = [];
+      return;
+    }
+    try {
+      changedFiles = await listChangesSince(ref.reference, ref.to);
+    } catch {
+      changedFiles = [];
+    }
+  }
+
+  /// Open a changed file from the compass hover-list in the file viewer —
+  /// reuses the same `fileView`/`viewMode` drilldown the narration links
+  /// use (#127 acceptance: "clicking a file opens the existing file viewer").
+  function openChangedFile(path: string) {
+    compassExpanded = false;
+    fileView.set({ path, anchor: null, nonce: Date.now() });
+    viewMode.set('file');
+  }
 
   async function load(id: string, _step: number, n: number) {
     // Already applied this exact intent.
@@ -916,14 +989,82 @@
               {/if}
             </div>
           {/if}
-          {#if compassFor(step.target).length > 0}
+          {#if compassCrumbs.length > 0 || compassBadge.status !== 'unknown' || compassTrail.length > 0}
             <nav class="compass" aria-label={$t('walkthrough.compass.aria')}>
-              <span class="compass-icon" aria-hidden="true">{compassIconFor(step.target)}</span>
-              <ol class="compass-trail">
-                {#each compassFor(step.target) as crumb, i (crumb + i)}
-                  <li class="compass-crumb" class:compass-tail={i === compassFor(step.target).length - 1}>{crumb}</li>
-                {/each}
-              </ol>
+              {#if compassCrumbs.length > 0}
+                <span class="compass-icon" aria-hidden="true">{compassIconFor(step.target)}</span>
+                <ol class="compass-trail">
+                  {#each compassCrumbs as crumb, i (crumb + i)}
+                    <li class="compass-crumb" class:compass-tail={i === compassCrumbs.length - 1}>{crumb}</li>
+                  {/each}
+                </ol>
+              {/if}
+
+              <!-- Changed/unchanged badge relative to the tour's diff ref (#127). -->
+              {#if compassBadge.status === 'changed' && compassBadge.file}
+                <span
+                  class="compass-badge changed status-{compassBadge.file.status}"
+                  title={$t('walkthrough.compass.badge.changed')}
+                >
+                  <span class="compass-badge-glyph" aria-hidden="true"
+                    >{changedStatusGlyph(compassBadge.file.status)}</span
+                  >
+                  {$t('walkthrough.compass.badge.changed')}
+                </span>
+              {:else if compassBadge.status === 'unchanged'}
+                <span class="compass-badge unchanged" title={$t('walkthrough.compass.badge.unchanged')}>
+                  {$t('walkthrough.compass.badge.unchanged')}
+                </span>
+              {/if}
+
+              <!-- Dot-trail through the tour's affected files (#127). Hover /
+                   focus expands the changed-file list; click opens the file. -->
+              {#if compassTrail.length > 0}
+                <div
+                  class="compass-progress"
+                  role="group"
+                  aria-label={$t('walkthrough.compass.trail.aria')}
+                  on:mouseenter={() => (compassExpanded = true)}
+                  on:mouseleave={() => (compassExpanded = false)}
+                >
+                  <button
+                    type="button"
+                    class="compass-dots"
+                    aria-expanded={compassExpanded}
+                    on:focus={() => (compassExpanded = true)}
+                    on:blur={() => (compassExpanded = false)}
+                    on:click={() => (compassExpanded = !compassExpanded)}
+                  >
+                    {#each compassTrail as dot (dot.path)}
+                      <span
+                        class="compass-dot status-{dot.status}"
+                        class:active={dot.active}
+                        title={dot.path}
+                        aria-hidden="true"
+                      ></span>
+                    {/each}
+                  </button>
+                  {#if compassExpanded}
+                    <ul class="compass-files">
+                      {#each compassTrail as dot (dot.path)}
+                        <li>
+                          <button
+                            type="button"
+                            class="compass-file"
+                            class:active={dot.active}
+                            on:click={() => openChangedFile(dot.path)}
+                          >
+                            <span class="compass-file-glyph status-{dot.status}" aria-hidden="true"
+                              >{changedStatusGlyph(dot.status)}</span
+                            >
+                            <span class="compass-file-path">{dot.path}</span>
+                          </button>
+                        </li>
+                      {/each}
+                    </ul>
+                  {/if}
+                </div>
+              {/if}
             </nav>
           {/if}
         </header>
@@ -1476,6 +1617,142 @@
   .compass-tail {
     color: var(--fg-1);
     font-weight: 600;
+  }
+
+  /* Changed/unchanged badge relative to the tour diff ref (#127). */
+  .compass-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  .compass-badge.unchanged {
+    background: var(--bg-2);
+    color: var(--fg-2);
+  }
+  .compass-badge.changed {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: var(--fg-0);
+  }
+  .compass-badge-glyph {
+    font-family: var(--mono);
+    font-weight: 700;
+  }
+  /* Status tints shared by the badge glyph, the trail dots and the
+     hover-list rows. */
+  .status-added,
+  .compass-badge.changed.status-added .compass-badge-glyph {
+    color: #2ea043;
+  }
+  .status-modified,
+  .compass-badge.changed.status-modified .compass-badge-glyph {
+    color: var(--accent);
+  }
+  .status-deleted,
+  .compass-badge.changed.status-deleted .compass-badge-glyph {
+    color: #cf222e;
+  }
+  .status-renamed,
+  .compass-badge.changed.status-renamed .compass-badge-glyph {
+    color: var(--accent-2);
+  }
+
+  /* Dot-trail through the tour's affected files (#127). */
+  .compass-progress {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+  }
+  .compass-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 4px;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+  .compass-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--bg-3);
+    box-shadow: 0 0 0 1px var(--bg-2);
+  }
+  .compass-dot.status-added {
+    background: #2ea043;
+  }
+  .compass-dot.status-modified {
+    background: var(--accent);
+  }
+  .compass-dot.status-deleted {
+    background: #cf222e;
+  }
+  .compass-dot.status-renamed {
+    background: var(--accent-2);
+  }
+  .compass-dot.active {
+    width: 7px;
+    height: 7px;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-2) 60%, transparent);
+  }
+  /* Hover / focus expansion — the changed-file list. */
+  .compass-files {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 20;
+    margin: 4px 0 0;
+    padding: 4px;
+    list-style: none;
+    min-width: 220px;
+    max-width: 360px;
+    max-height: 260px;
+    overflow-y: auto;
+    background: var(--bg-1);
+    border: 1px solid var(--bg-3);
+    border-radius: 6px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+  }
+  .compass-file {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 3px 6px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--fg-1);
+    font-size: 11px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .compass-file:hover {
+    background: var(--bg-2);
+    color: var(--fg-0);
+  }
+  .compass-file.active {
+    background: color-mix(in srgb, var(--accent-2) 14%, transparent);
+    color: var(--fg-0);
+  }
+  .compass-file-glyph {
+    flex: 0 0 auto;
+    width: 1em;
+    text-align: center;
+    font-family: var(--mono);
+    font-weight: 700;
+  }
+  .compass-file-path {
+    font-family: var(--mono);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .target {

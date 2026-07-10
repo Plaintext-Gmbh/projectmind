@@ -115,6 +115,7 @@
   "diff.workingTree": "working tree",
   "diff.computing": "Calcolo diff...",
   "diff.noChanges": "Nessuna modifica.",
+  "diff.rail.aria": "Navigazione diff — vai a un file o blocco modificato",
   "keyboard.title": "Scorciatoie da tastiera",
   "keyboard.section.navigation": "Navigazione",
   "keyboard.section.zoom": "Zoom",

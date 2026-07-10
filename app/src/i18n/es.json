@@ -115,6 +115,7 @@
   "diff.workingTree": "arbol de trabajo",
   "diff.computing": "Calculando diff...",
   "diff.noChanges": "Sin cambios.",
+  "diff.rail.aria": "Navegación del diff — ir a un archivo o bloque modificado",
   "keyboard.title": "Atajos de teclado",
   "keyboard.section.navigation": "Navegación",
   "keyboard.section.zoom": "Zoom",
