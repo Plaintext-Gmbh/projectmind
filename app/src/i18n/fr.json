@@ -120,6 +120,8 @@
   "diff.computing": "Calcul du diff...",
   "diff.noChanges": "Aucun changement.",
   "diff.rail.aria": "Navigation du diff — aller à un fichier ou un bloc modifié",
+  "walkthrough.diagramDiff.modes.aria": "Mode d'instantané — avant, après ou seulement les modifications",
+  "walkthrough.diagramDiff.legend.aria": "Légende des modifications",
   "keyboard.title": "Raccourcis clavier",
   "keyboard.section.navigation": "Navigation",
   "keyboard.section.zoom": "Zoom",
