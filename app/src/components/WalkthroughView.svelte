@@ -11,6 +11,7 @@
     requestMoreWalkthrough,
     setWalkthroughStep,
     endWalkthrough,
+    riskScoreFor,
   } from '../lib/api';
   import type {
     Walkthrough,
@@ -19,6 +20,10 @@
     ClassEntry,
     FeedbackEvent,
   } from '../lib/api';
+  import RiskStep from './walkthrough/RiskStep.svelte';
+  import PatternStep from './walkthrough/PatternStep.svelte';
+  import AtlasStep from './walkthrough/AtlasStep.svelte';
+  import { riskBadges, type RiskBadge } from '../lib/riskBadges';
   import {
     errorMessage,
     viewMode,
@@ -58,6 +63,10 @@
   let diffText = '';
   let targetLoading = false;
   let targetError: string | null = null;
+  // Auto-annotation (Cockpit 2.4, #160): risk badges for the current `class`
+  // step, resolved from the cached Risk Atlas. Empty when no atlas row exists
+  // for the fqn — zero author effort, and the row simply doesn't render.
+  let classBadges: RiskBadge[] = [];
 
   // Zoom for walk-through-owned detail text. Embedded ClassViewer, FileView
   // and DiffView keep their own zoom handling. We can't use the standard
@@ -193,6 +202,7 @@
     plainSource = '';
     plainHighlight = [];
     diffText = '';
+    classBadges = [];
     targetError = null;
 
     const t = s?.target;
@@ -202,6 +212,9 @@
       switch (t.kind) {
         case 'class':
           await loadClass(t.fqn);
+          // Auto-annotation: best-effort risk badges. Never fails the step —
+          // `riskScoreFor` swallows atlas errors and returns null.
+          await loadClassBadges(t.fqn);
           break;
         case 'file':
           if (!isMarkdown(t.path)) {
@@ -216,6 +229,12 @@
         case 'artifact':
           // ArtifactView fetches its own body by id — nothing to preload.
           break;
+        case 'risk':
+        case 'pattern':
+        case 'atlas':
+          // Cockpit 2.4 kinds: the dedicated step component self-loads on
+          // mount (class source + atlas / pattern data). Nothing to preload.
+          break;
         case 'note':
           break;
       }
@@ -224,6 +243,11 @@
     } finally {
       targetLoading = false;
     }
+  }
+
+  async function loadClassBadges(fqn: string) {
+    const score = await riskScoreFor(fqn);
+    classBadges = score ? riskBadges(score) : [];
   }
 
   async function loadClass(fqn: string) {
@@ -881,6 +905,14 @@
                 <code>{step.target.reference}{step.target.to ? `..${step.target.to}` : ' → working tree'}</code>
               {:else if step.target.kind === 'artifact'}
                 {$t('walkthrough.target.artifact')} <code>{step.target.id}</code>
+              {:else if step.target.kind === 'risk'}
+                {$t('walkthrough.target.risk')} <code>{step.target.fqn}</code>
+              {:else if step.target.kind === 'pattern'}
+                {$t('walkthrough.target.pattern')}
+                <code>{step.target.pattern}{step.target.scope ? ` · ${step.target.scope}` : ''}</code>
+              {:else if step.target.kind === 'atlas'}
+                {$t('walkthrough.target.atlas')}
+                <code>{step.target.module ?? 'repo'}</code>
               {/if}
             </div>
           {/if}
@@ -902,11 +934,35 @@
           {:else if targetError}
             <div class="error">⚠ {targetError}</div>
           {:else if step.target.kind === 'class' && classEntry && classMeta}
+            {#if classBadges.length > 0}
+              <div class="risk-annotation" title="Risk Atlas signals for this class">
+                {#each classBadges as b (b.id)}
+                  <span class="risk-annotation-badge">{b.label}&nbsp;{b.value}</span>
+                {/each}
+              </div>
+            {/if}
             <ClassViewer
               klass={classEntry}
               source={classSource}
               meta={classMeta}
               highlightRanges={step.target.highlight ?? []}
+            />
+          {:else if step.target.kind === 'risk'}
+            <RiskStep
+              fqn={step.target.fqn}
+              focus={step.target.focus ?? null}
+              show={step.target.show ?? []}
+            />
+          {:else if step.target.kind === 'pattern'}
+            <PatternStep
+              pattern={step.target.pattern}
+              scope={step.target.scope ?? null}
+              view={step.target.view ?? null}
+            />
+          {:else if step.target.kind === 'atlas'}
+            <AtlasStep
+              module={step.target.module ?? null}
+              highlightFqns={step.target.highlight_fqns ?? []}
             />
           {:else if step.target.kind === 'file' && isMarkdown(step.target.path)}
             <FileView path={step.target.path} anchor={step.target.anchor ?? null} {nonce} />
@@ -1437,6 +1493,26 @@
   }
   .error {
     color: var(--error);
+  }
+
+  /* Auto-annotation badge row (Cockpit 2.4, #160): a thin, unobtrusive
+     strip above a class step's viewer showing churn/cov/cx from the atlas. */
+  .risk-annotation {
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 4px 12px;
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--bg-3);
+  }
+  .risk-annotation-badge {
+    font-size: 0.72rem;
+    color: var(--fg-2);
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--bg-2);
+    white-space: nowrap;
   }
 
   .target :global(.root) {

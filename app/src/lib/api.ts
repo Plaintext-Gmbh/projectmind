@@ -116,6 +116,8 @@ export interface ChangedFile {
 }
 
 export async function openRepo(path: string): Promise<RepoSummary> {
+  // A new repo invalidates the memoised Risk Atlas backing badge annotations.
+  invalidateRiskCache();
   if (!isTauriRuntime()) return post<RepoSummary>('/api/open_repo', { path });
   return invoke<RepoSummary>('open_repo', { path });
 }
@@ -479,11 +481,20 @@ export interface DiffFocus {
   line?: number;
 }
 
+/** Risk signals a `risk` step's header bar can surface (Cockpit 2.4, #160). */
+export type RiskSignal = 'churn' | 'cx' | 'cov' | 'fan_in' | 'fan_out';
+
 export type WalkthroughTarget =
   | { kind: 'class'; fqn: string; highlight?: LineRange[] }
   | { kind: 'file'; path: string; anchor?: string | null; highlight?: LineRange[] }
   | { kind: 'diff'; reference: string; to?: string | null; focus?: DiffFocus }
   | { kind: 'artifact'; id: string }
+  // Cockpit 2.4 (#160): risk-scored class with a header bar.
+  | { kind: 'risk'; fqn: string; focus?: string | null; show?: RiskSignal[] }
+  // Cockpit 2.4 (#160): one architecture-drift pattern's violation list.
+  | { kind: 'pattern'; pattern: string; scope?: string | null; view?: string | null }
+  // Cockpit 2.4 (#160): Risk Atlas treemap with named hotspots ringed.
+  | { kind: 'atlas'; module?: string | null; highlight_fqns?: string[] }
   | { kind: 'note' };
 
 export interface WalkthroughStep {
@@ -506,6 +517,10 @@ export interface QuizQuestion {
 }
 
 export interface Walkthrough {
+  /// On-disk schema version (Cockpit 2.4, #160). Missing on v1 tours
+  /// authored before the risk/pattern/atlas kinds existed; the loader
+  /// treats absence as v1 so old tours render unchanged.
+  schemaVersion?: number;
   id: string;
   title: string;
   summary?: string;
@@ -726,6 +741,54 @@ export async function riskAtlas(opts: RiskAtlasOptions = {}): Promise<RiskAtlasR
     windowDays,
     weights,
   });
+}
+
+// ---- Auto-annotation atlas cache (Cockpit 2.4, #160) --------------------
+//
+// Walkthrough class/risk steps need per-fqn risk signals to draw badges.
+// Fetching the atlas per step would be wasteful (git churn walk + coverage
+// scan), so the full atlas is fetched once and memoised as a fqn→score map.
+// The promise itself is cached so concurrent step opens share one request.
+// `invalidateRiskCache()` drops it when a new repo is opened.
+
+let riskScoreMapCache: Promise<Map<string, RiskScore>> | null = null;
+
+/**
+ * Fetch the whole Risk Atlas once and index it by fqn, memoising the result
+ * for the lifetime of the open repo. Cheap on repeat calls; a single git +
+ * coverage pass on first use. `top` is large so every class resolves.
+ */
+export async function riskScoreMap(): Promise<Map<string, RiskScore>> {
+  if (!riskScoreMapCache) {
+    riskScoreMapCache = riskAtlas({ top: 5000 })
+      .then((res) => {
+        const map = new Map<string, RiskScore>();
+        for (const s of res.scores) map.set(s.fqn, s);
+        return map;
+      })
+      .catch((err) => {
+        // Degrade gracefully: a missing/failed atlas means "no badges",
+        // never a broken tour. Drop the cache so a later retry can succeed.
+        riskScoreMapCache = null;
+        throw err;
+      });
+  }
+  return riskScoreMapCache;
+}
+
+/** Look up the risk score for one fqn, or `null` when the atlas has no row. */
+export async function riskScoreFor(fqn: string): Promise<RiskScore | null> {
+  try {
+    const map = await riskScoreMap();
+    return map.get(fqn) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Drop the memoised atlas — called when a different repo is opened. */
+export function invalidateRiskCache(): void {
+  riskScoreMapCache = null;
 }
 
 // ---- Pattern Lens (Cockpit 2.3, Issue #159) -----------------------------

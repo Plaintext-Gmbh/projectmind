@@ -139,18 +139,31 @@ fn walkthrough_step_schema() -> Value {
             "narration": { "type": "string", "description": "Markdown shown alongside the target. Optional but strongly recommended — this is what the user reads." },
             "target": {
                 "type": "object",
-                "description": "What to render in the main pane. `kind` selects the viewer: class | file | diff | artifact | note.",
+                "description": "What to render in the main pane. `kind` selects the viewer: class | file | diff | artifact | risk | pattern | atlas | note. The risk/pattern/atlas kinds (Cockpit 2.4) pull live signals from the Risk Atlas + Pattern Lens.",
                 "properties": {
-                    "kind": { "type": "string", "enum": ["class", "file", "diff", "artifact", "note"] },
-                    "fqn":  { "type": "string", "description": "Class FQN (kind=class)" },
+                    "kind": { "type": "string", "enum": ["class", "file", "diff", "artifact", "risk", "pattern", "atlas", "note"] },
+                    "fqn":  { "type": "string", "description": "Class FQN (kind=class or kind=risk)" },
                     "path": { "type": "string", "description": "Absolute file path (kind=file)" },
                     "anchor": { "type": "string", "description": "Heading slug (kind=file, markdown only)" },
                     "id":   { "type": "string", "description": "Artifact id from present_artifact (kind=artifact)" },
                     "ref":  { "type": "string", "description": "Base git ref (kind=diff)" },
                     "to":   { "type": "string", "description": "Target git ref or omit for working tree (kind=diff)" },
+                    "show": {
+                        "type": "array",
+                        "description": "Risk signals to surface in the header bar (kind=risk). Empty = every signal with data.",
+                        "items": { "type": "string", "enum": ["churn", "cx", "cov", "fan_in", "fan_out"] }
+                    },
+                    "pattern": { "type": "string", "enum": ["repository", "layered", "di_only", "tx_on_service", "no_static_state"], "description": "Architecture pattern to evaluate (kind=pattern). PascalCase labels accepted too." },
+                    "scope":   { "type": "string", "description": "Pattern scope (kind=pattern). `module:<id>` narrows to one module; `all` or omitted checks the whole repo." },
+                    "view":    { "type": "string", "enum": ["violations"], "description": "What the pattern step renders (kind=pattern). Only `violations` is defined today." },
+                    "module":  { "type": "string", "description": "Module id filter for the atlas treemap (kind=atlas). Omit for the whole repo." },
+                    "highlight_fqns": {
+                        "type": "array",
+                        "description": "Class FQNs to ring as named hotspots on the atlas treemap (kind=atlas).",
+                        "items": { "type": "string" }
+                    },
                     "focus": {
-                        "type": "object",
-                        "description": "Optional spotlight inside the diff (kind=diff). The GUI scrolls + pulses the matching hunk; tours without `focus` render exactly like before.",
+                        "description": "Spotlight. kind=diff → object {file,hunk,line}: the GUI scrolls + pulses the matching hunk (tours without it render exactly like before). kind=risk → string: a member (method/field) name to scroll to inside the class.",
                         "properties": {
                             "file": { "type": "string", "description": "Repo-relative path or basename — substring match on the `+++ b/<path>` header." },
                             "hunk": { "type": "integer", "minimum": 0, "description": "0-based hunk index inside `file` (or the whole diff when `file` is omitted)." },
@@ -1241,6 +1254,7 @@ fn walkthrough_start(args: Value) -> DispatchResult {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| wt::slugify_id(&args.title));
     let body = Walkthrough {
+        schema_version: wt::CURRENT_SCHEMA_VERSION,
         id: id.clone(),
         title: args.title,
         summary: args.summary,
@@ -1714,6 +1728,33 @@ mod tests {
             .map(|v| v.as_str().unwrap())
             .collect();
         assert!(kinds.contains(&"artifact"), "got kinds: {kinds:?}");
+    }
+
+    #[test]
+    fn walkthrough_step_schema_advertises_cockpit_2_4_kinds() {
+        // Cockpit 2.4 (#160): risk / pattern / atlas must be offered to the LLM
+        // so it can author them via walkthrough_start / _append.
+        let v = list();
+        let tools = v["tools"].as_array().unwrap();
+        let start = tools
+            .iter()
+            .find(|t| t["name"] == "walkthrough_start")
+            .expect("walkthrough_start tool registered");
+        let target = &start["inputSchema"]["properties"]["steps"]["items"]["properties"]["target"];
+        let kinds: Vec<&str> = target["properties"]["kind"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        for k in ["risk", "pattern", "atlas"] {
+            assert!(kinds.contains(&k), "kind `{k}` missing from {kinds:?}");
+        }
+        // The atlas hotspot list and the risk `show` list must be documented.
+        let props = &target["properties"];
+        assert!(props.get("highlight_fqns").is_some());
+        assert!(props.get("show").is_some());
+        assert!(props.get("pattern").is_some());
     }
 
     #[test]
