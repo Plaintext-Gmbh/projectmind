@@ -18,9 +18,11 @@
   // and keeps cytoscape lazy. Used to cast the fcose layout options, which
   // the base cytoscape typings don't know about.
   import type { LayoutOptions } from 'cytoscape';
-  import { beanGraphData } from '../lib/api';
+  import { beanGraphData, listChangesSince } from '../lib/api';
   import type { ClassEntry } from '../lib/api';
   import { beanGraphElements } from '../lib/diagrams/beanGraphElements';
+  import type { BeanGraphElements } from '../lib/diagrams/beanGraphElements';
+  import { classifyBeanGraphDiff } from '../lib/diagrams/beanGraphDiff';
   import { classes, selectedClass, viewMode } from '../lib/store';
   import { t } from '../lib/i18n';
 
@@ -34,6 +36,18 @@
   let nodeCount = 0;
   let edgeCount = 0;
   let empty = false;
+
+  // --- Animated diff overlay (#63 concept 3) ---------------------------------
+  // The elements are kept after mount so the overlay can be (re)classified
+  // without re-fetching the payload. `diffRef` empty = overlay off (plain
+  // graph). When set, nodes/edges whose source files changed since the ref
+  // pulse + thicken; everything else fades to ~50 %.
+  let els: BeanGraphElements | null = null;
+  let diffRef = '';
+  let diffInput = '';
+  let diffLoading = false;
+  let diffError: string | null = null;
+  let changedCount = 0;
 
   // Stereotype fill/stroke/text — byte-parity with the Rust STEREOTYPE_STYLES
   // so the interactive graph reads like the Mermaid one.
@@ -65,7 +79,7 @@
     error = null;
     try {
       const payload = await beanGraphData();
-      const els = beanGraphElements(payload);
+      els = beanGraphElements(payload);
       nodeCount = els.nodes.length;
       edgeCount = els.edges.length;
       empty = nodeCount === 0;
@@ -141,6 +155,30 @@
             selector: 'node:selected',
             style: { 'border-color': '#f0f6fc', 'border-width': 3 },
           },
+          // --- Diff overlay (#63 concept 3) ---------------------------------
+          // Animate opacity + stroke so toggling the classes eases rather than
+          // snaps. Applied to base node/edge so both directions transition.
+          {
+            selector: 'node',
+            style: { 'transition-property': 'opacity border-width border-color', 'transition-duration': 300 },
+          },
+          {
+            selector: 'edge',
+            style: { 'transition-property': 'opacity width line-color', 'transition-duration': 300 },
+          },
+          // Unchanged elements recede so the changed ones read as the signal.
+          { selector: '.faded', style: { opacity: 0.5 } },
+          // Changed nodes: full opacity + a heavier accent stroke.
+          {
+            selector: 'node.changed',
+            style: { opacity: 1, 'border-width': 4, 'border-color': '#f0b429' },
+          },
+          { selector: 'edge.changed', style: { opacity: 1, width: 3, 'line-color': '#f0b429', 'target-arrow-color': '#f0b429' } },
+          // One-shot pulse: a brighter, thicker ring toggled on for ~700 ms.
+          {
+            selector: 'node.pulse',
+            style: { 'border-width': 8, 'border-color': '#ffd666' },
+          },
         ],
         // fcose-specific options aren't in the base cytoscape LayoutOptions
         // union (the extension ships no types), so cast through unknown.
@@ -188,8 +226,83 @@
     cy.zoom({ level: cy.zoom() * factor, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
   }
 
+  // --- Diff overlay wiring ---------------------------------------------------
+
+  /// Load the change set for `diffInput` and paint the overlay. Empty input
+  /// clears the overlay (plain graph). Errors (not a git repo, unknown ref)
+  /// surface inline and leave the graph un-faded.
+  async function applyDiff() {
+    const ref = diffInput.trim();
+    diffError = null;
+    if (!ref) {
+      clearDiff();
+      return;
+    }
+    if (!cy || !els) return;
+    diffLoading = true;
+    try {
+      const changes = await listChangesSince(ref);
+      diffRef = ref;
+      const diff = classifyBeanGraphDiff(els, changes);
+      paintDiff(diff.changedNodeIds, diff.changedEdgeIds);
+      changedCount = diff.changedNodeIds.size;
+    } catch (err) {
+      diffError = String(err);
+      clearDiff();
+    } finally {
+      diffLoading = false;
+    }
+  }
+
+  /// Toggle the `changed` / `faded` classes and fire a one-shot pulse on the
+  /// changed nodes. Everything not changed fades; when nothing changed we leave
+  /// the graph plain rather than dim the whole thing.
+  function paintDiff(changedNodeIds: Set<string>, changedEdgeIds: Set<string>) {
+    if (!cy) return;
+    cy.batch(() => {
+      cy.elements().removeClass('changed faded pulse');
+      if (changedNodeIds.size === 0) return;
+      cy.nodes().forEach((n: { id: () => string; addClass: (c: string) => void }) => {
+        n.addClass(changedNodeIds.has(n.id()) ? 'changed' : 'faded');
+      });
+      cy.edges().forEach((e: { id: () => string; addClass: (c: string) => void }) => {
+        e.addClass(changedEdgeIds.has(e.id()) ? 'changed' : 'faded');
+      });
+    });
+    pulseChanged();
+  }
+
+  /// One-shot pulse: add the `pulse` class to changed nodes, then strip it after
+  /// the transition settles so it plays once and never flickers.
+  let pulseTimer: ReturnType<typeof setTimeout> | null = null;
+  function pulseChanged() {
+    if (!cy) return;
+    if (pulseTimer) clearTimeout(pulseTimer);
+    cy.nodes('.changed').addClass('pulse');
+    pulseTimer = setTimeout(() => {
+      cy?.nodes('.pulse').removeClass('pulse');
+      pulseTimer = null;
+    }, 700);
+  }
+
+  /// Remove the overlay: strip all diff classes, reset state.
+  function clearDiff() {
+    diffRef = '';
+    changedCount = 0;
+    if (pulseTimer) {
+      clearTimeout(pulseTimer);
+      pulseTimer = null;
+    }
+    cy?.elements().removeClass('changed faded pulse');
+  }
+
+  function onDiffKey(evt: KeyboardEvent) {
+    if (evt.key === 'Enter') void applyDiff();
+  }
+
   onMount(mountGraph);
   onDestroy(() => {
+    if (pulseTimer) clearTimeout(pulseTimer);
     cy?.destroy();
     cy = null;
   });
@@ -201,6 +314,39 @@
     <button type="button" on:click={() => zoomBy(0.8)} title={$t('diagram.zoomOut')}>－</button>
     <button type="button" on:click={fit} title={$t('diagram.resetView')}>⌂</button>
     <span class="summary">{nodeCount} · {edgeCount}</span>
+    {#if !empty}
+      <span class="divider"></span>
+      <label class="since-label" for="bean-diff-ref">{$t('diagram.beanGraphLive.since')}</label>
+      <input
+        id="bean-diff-ref"
+        class="since-input"
+        type="text"
+        bind:value={diffInput}
+        on:keydown={onDiffKey}
+        placeholder="HEAD~10"
+        title={$t('diagram.beanGraphLive.sinceTitle')}
+        aria-label={$t('diagram.beanGraphLive.sinceTitle')}
+      />
+      <button
+        type="button"
+        class="since-apply"
+        on:click={applyDiff}
+        disabled={diffLoading}
+        title={$t('diagram.beanGraphLive.applyDiff')}
+      >{diffLoading ? '…' : $t('diagram.beanGraphLive.applyDiff')}</button>
+      {#if diffRef}
+        <button
+          type="button"
+          class="since-clear"
+          on:click={() => { diffInput = ''; clearDiff(); }}
+          title={$t('diagram.beanGraphLive.clearDiff')}
+        >✕</button>
+        <span class="diff-summary">{$t('diagram.beanGraphLive.changedCount', { count: changedCount })}</span>
+      {/if}
+      {#if diffError}
+        <span class="diff-error" title={diffError}>⚠</span>
+      {/if}
+    {/if}
     <span class="hint">{$t('diagram.drillHint')}</span>
   </div>
   {#if loading}
@@ -252,6 +398,48 @@
     font-family: var(--mono);
     font-size: 11px;
     color: var(--fg-2);
+  }
+  .divider {
+    width: 1px;
+    align-self: stretch;
+    background: var(--bg-3);
+    margin: 2px 2px;
+  }
+  .since-label {
+    font-size: 11px;
+    color: var(--fg-2);
+  }
+  .since-input {
+    width: 88px;
+    height: 22px;
+    padding: 0 6px;
+    background: var(--bg-0);
+    border: 1px solid var(--bg-3);
+    border-radius: 4px;
+    color: var(--fg-0);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+  .since-input:focus {
+    outline: none;
+    border-color: var(--accent-2);
+  }
+  /* Text buttons opt out of the fixed icon-button width. */
+  .toolbar button.since-apply {
+    width: auto;
+    padding: 0 8px;
+  }
+  .since-apply:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .diff-summary {
+    font-size: 11px;
+    color: #f0b429;
+  }
+  .diff-error {
+    color: var(--error);
+    cursor: help;
   }
   .hint {
     margin-left: auto;

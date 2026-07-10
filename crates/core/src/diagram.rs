@@ -158,6 +158,13 @@ pub struct BeanNode {
     /// Primary stereotype (`service`, `rest-controller`, …) or `null` when the
     /// class has none. Matches the priority order the Mermaid `classDef` uses.
     pub stereotype: Option<String>,
+    /// Repository-relative source path of the class, forward-slashed, or `null`
+    /// when the class cannot be resolved back to a file (e.g. an inferred super
+    /// type with no parsed declaration). This is the join key the animated diff
+    /// overlay (`bean-graph-live`, #63 concept 3) uses to line each node up with
+    /// the file-level change set from `list_changes_since`, which reports the
+    /// same repo-relative, forward-slashed paths.
+    pub path: Option<String>,
 }
 
 /// One directed edge in the live bean graph, mirroring [`Relation`].
@@ -221,12 +228,15 @@ pub fn render_bean_graph_data(repo: &Repository, framework: &dyn FrameworkPlugin
     let stereotype_for = stereotype_lookup(repo);
 
     // 3. One node per touched class. `node_modules` is a BTreeMap, so iteration
-    //    is already sorted by FQN — stable output for tests and diffs.
+    //    is already sorted by FQN — stable output for tests and diffs. Each node
+    //    also carries its repo-relative source path so the frontend diff overlay
+    //    can match it against `list_changes_since`.
     let nodes = node_modules
         .into_iter()
         .map(|(fqn, module)| BeanNode {
             label: simple_name(&fqn).to_string(),
             stereotype: stereotype_for.get(&fqn).cloned(),
+            path: repo_relative_source(repo, &fqn),
             module,
             id: fqn,
         })
@@ -1200,6 +1210,27 @@ fn short_module(mod_id: &str) -> &str {
     mod_id.rsplit_once(':').map_or(mod_id, |(_, s)| s)
 }
 
+/// Resolve a class FQN to its repository-relative, forward-slashed source path.
+///
+/// [`Class::file`] is stored relative to the owning module's root, so we join it
+/// onto the module root (absolute) and then strip the repo root back off. The
+/// result matches the shape `git::list_changes_since` emits, which lets the
+/// frontend diff overlay use a plain string-set intersection. Returns `None`
+/// when the FQN has no parsed class (e.g. an inferred super type), so the node
+/// simply never counts as "changed".
+fn repo_relative_source(repo: &Repository, fqn: &str) -> Option<String> {
+    let (module, class) = repo.find_class(fqn)?;
+    let abs = module.root.join(&class.file);
+    let rel = abs.strip_prefix(&repo.root).unwrap_or(&abs);
+    // Forward-slash so Windows paths line up with git's POSIX diff paths.
+    Some(
+        rel.components()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/"),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1372,6 +1403,39 @@ mod tests {
         let data = render_bean_graph_data(&repo, &DummyFw);
         assert!(data.nodes.is_empty());
         assert!(data.edges.is_empty());
+    }
+
+    #[test]
+    fn bean_graph_data_nodes_carry_repo_relative_source_path() {
+        let mut repo = Repository {
+            root: PathBuf::from("/repo"),
+            ..Default::default()
+        };
+        let mut m1 = Module {
+            id: "g:m1".into(),
+            root: PathBuf::from("/repo/mod1"),
+            ..Default::default()
+        };
+        // `Class::file` is stored relative to the module root.
+        let mut a = class("a.A", "service");
+        a.file = PathBuf::from("src/main/java/a/A.java");
+        let mut b = class("a.B", "controller");
+        b.file = PathBuf::from("src/main/java/a/B.java");
+        m1.classes.insert("a.A".into(), a);
+        m1.classes.insert("a.B".into(), b);
+        repo.insert_module(m1);
+
+        let data = render_bean_graph_data(&repo, &DummyFw);
+        let node_a = data.nodes.iter().find(|n| n.id == "a.A").unwrap();
+        // Module root joined onto the class file, stripped back to the repo root,
+        // forward-slashed — exactly what `list_changes_since` reports.
+        assert_eq!(node_a.path.as_deref(), Some("mod1/src/main/java/a/A.java"));
+
+        let json = serde_json::to_string(&data).unwrap();
+        assert!(
+            json.contains("\"path\":\"mod1/src/main/java/a/A.java\""),
+            "json:\n{json}"
+        );
     }
 
     fn class_with_supers(

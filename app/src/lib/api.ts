@@ -330,6 +330,10 @@ export interface BeanNode {
   module: string;
   /// Primary stereotype ('service', 'rest-controller', …) or null.
   stereotype: string | null;
+  /// Repository-relative, forward-slashed source path, or null when the class
+  /// can't be resolved to a file. Join key for the animated diff overlay (#63
+  /// concept 3): matched against `list_changes_since` to find changed nodes.
+  path: string | null;
 }
 
 /// One directed edge in the interactive bean graph. Mirrors

@@ -26,6 +26,10 @@ export interface BeanNodeElement {
     stereoClass: string;
     /// Raw stereotype from the backend (null when the class has none).
     stereotype: string | null;
+    /// Repository-relative, forward-slashed source path (null when unresolved).
+    /// Stashed on the element so the diff overlay can classify the node against
+    /// `list_changes_since` without re-fetching the payload.
+    path: string | null;
   };
 }
 
@@ -105,6 +109,7 @@ export function beanGraphElements(payload: BeanGraphData): BeanGraphElements {
       module: n.module,
       stereoClass: stereotypeClass(n.stereotype),
       stereotype: n.stereotype,
+      path: n.path ?? null,
     },
   }));
 
