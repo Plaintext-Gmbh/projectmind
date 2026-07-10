@@ -39,6 +39,17 @@ export default defineConfig(async () => ({
         manualChunks(id: string) {
           if (id.includes('node_modules/mermaid')) return 'mermaid';
           if (id.includes('node_modules/marked')) return 'marked';
+          // Cytoscape + its fcose layout (and the cose-base / layout-base it
+          // pulls in) power the interactive bean-graph-live diagram only.
+          // Split into their own chunk + dynamic-import in BeanGraphLive so
+          // the start bundle pays 0 KB until that diagram is opened.
+          if (
+            id.includes('node_modules/cytoscape') ||
+            id.includes('node_modules/cose-base') ||
+            id.includes('node_modules/layout-base')
+          ) {
+            return 'cytoscape';
+          }
           return undefined;
         },
       },

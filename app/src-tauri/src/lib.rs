@@ -607,6 +607,19 @@ fn commit_activity(state: State<'_, Arc<AppState>>) -> Result<git::CommitActivit
     Ok(git::commit_activity(&repo.root))
 }
 
+/// JSON payload for the interactive Cytoscape bean graph (`bean-graph-live`).
+/// Own command like `commit_activity` — the Mermaid `bean-graph` still flows
+/// through `show_diagram`.
+#[tauri::command]
+fn bean_graph_data(state: State<'_, Arc<AppState>>) -> Result<diagram::BeanGraphData, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    let spring = SpringPlugin::new();
+    Ok(diagram::render_bean_graph_data(repo, &spring))
+}
+
 #[tauri::command]
 fn list_refs(state: State<'_, Arc<AppState>>) -> Result<Vec<git::GitRef>, String> {
     let guard = state.repo.read();
@@ -1306,6 +1319,7 @@ pub fn run() {
             list_changes_since,
             file_recency,
             commit_activity,
+            bean_graph_data,
             list_refs,
             list_annotations,
             add_annotation,

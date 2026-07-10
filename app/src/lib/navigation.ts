@@ -14,6 +14,7 @@ import { derived, get, writable, type Writable } from 'svelte/store';
 
 export type DiagramKind =
   | 'bean-graph'
+  | 'bean-graph-live'
   | 'package-tree'
   | 'folder-map'
   | 'inheritance-tree'

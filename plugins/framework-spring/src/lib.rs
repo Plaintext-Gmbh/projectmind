@@ -85,7 +85,10 @@ impl FrameworkPlugin for SpringPlugin {
     }
 
     fn provided_diagrams(&self) -> &[&'static str] {
-        &["bean-graph"]
+        // `bean-graph` is the Mermaid contract; `bean-graph-live` is the
+        // interactive Cytoscape sibling driven by the same relations. Both
+        // are offered wherever Spring beans are detected.
+        &["bean-graph", "bean-graph-live"]
     }
 }
 

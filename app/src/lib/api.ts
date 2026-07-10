@@ -319,6 +319,43 @@ export async function commitActivity(): Promise<CommitActivity> {
   return invoke<CommitActivity>('commit_activity');
 }
 
+/// One node in the interactive bean graph (`bean-graph-live`). Mirrors
+/// `diagram::BeanNode`. One per class that participates in a relation.
+export interface BeanNode {
+  /// Fully-qualified class name (stable id, matches edge `from`/`to`).
+  id: string;
+  /// Simple class name shown on the node.
+  label: string;
+  /// Module id the class belongs to.
+  module: string;
+  /// Primary stereotype ('service', 'rest-controller', …) or null.
+  stereotype: string | null;
+}
+
+/// One directed edge in the interactive bean graph. Mirrors
+/// `diagram::BeanEdge`; `kind` is the snake-case RelationKind name.
+export interface BeanEdge {
+  from: string;
+  to: string;
+  /// 'extends' | 'implements' | 'uses' | 'injects' | 'calls' | 'annotated' | 'other'.
+  kind: string;
+}
+
+/// JSON payload for the interactive Cytoscape bean graph (`bean-graph-live`).
+/// Mirrors `diagram::BeanGraphData`. Additive sibling of the Mermaid
+/// `bean-graph`: same relations, shipped as data for a stateful renderer.
+export interface BeanGraphData {
+  nodes: BeanNode[];
+  edges: BeanEdge[];
+}
+
+/// Fetch the interactive bean-graph payload. Own endpoint (like
+/// `commitActivity()`) — the Mermaid `bean-graph` is served by `showDiagram`.
+export async function beanGraphData(): Promise<BeanGraphData> {
+  if (!isTauriRuntime()) return api<BeanGraphData>('/api/bean_graph_data');
+  return invoke<BeanGraphData>('bean_graph_data');
+}
+
 /// One persisted user annotation. Mirrors `AnnotationRecord` on the Rust
 /// side; lines are 1-based and inclusive on both ends.
 export interface AnnotationRecord {
@@ -376,6 +413,7 @@ export async function removeAnnotation(id: number): Promise<void> {
 
 export type DiagramKind =
   | 'bean-graph'
+  | 'bean-graph-live'
   | 'package-tree'
   | 'folder-map'
   | 'inheritance-tree'
@@ -389,9 +427,10 @@ export type DiagramKind =
   | 'language-stats';
 
 /// Fetch the payload for a `show_diagram`-backed kind. NOTE: `timeline-river`
-/// is *not* served here — it has its own endpoint (`commitActivity()`); the
-/// backend `show_diagram` command does not know that kind. DiagramView routes
-/// it to `commitActivity()` before ever calling `showDiagram`.
+/// and `bean-graph-live` are *not* served here — each has its own endpoint
+/// (`commitActivity()` / `beanGraphData()`); the backend `show_diagram`
+/// command does not know those kinds. DiagramView routes them to their
+/// dedicated endpoints before ever calling `showDiagram`.
 export async function showDiagram(kind: DiagramKind): Promise<string> {
   if (!isTauriRuntime()) return api<string>(`/api/show_diagram${query({ kind })}`);
   return invoke<string>('show_diagram', { kind });

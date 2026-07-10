@@ -90,6 +90,7 @@ fn diagram_schema() -> Value {
                 "type": "string",
                 "enum": [
                     "bean-graph",
+                    "bean-graph-live",
                     "package-tree",
                     "folder-map",
                     "inheritance-tree",
@@ -1222,6 +1223,7 @@ fn view_diagram(args: Value) -> DispatchResult {
     let args: DiagramKindArgs = serde_json::from_value(args)
         .map_err(|e| DispatchError::invalid_params(format!("view_diagram: {e}")))?;
     if args.kind != "bean-graph"
+        && args.kind != "bean-graph-live"
         && args.kind != "package-tree"
         && args.kind != "folder-map"
         && args.kind != "inheritance-tree"

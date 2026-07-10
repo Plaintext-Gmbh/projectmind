@@ -24,6 +24,7 @@ const dictionaries: Record<string, Record<string, string>> = {
 /// covered by this test).
 const allKinds: Record<DiagramKind, true> = {
   'bean-graph': true,
+  'bean-graph-live': true,
   'package-tree': true,
   'folder-map': true,
   'inheritance-tree': true,
