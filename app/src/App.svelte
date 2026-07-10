@@ -713,6 +713,7 @@
             v.diagram_kind === 'architecture-flow' ||
             v.diagram_kind === 'module-chord' ||
             v.diagram_kind === 'activity-heatmap' ||
+            v.diagram_kind === 'timeline-river' ||
             v.diagram_kind === 'language-stats'
           ) {
             diagramKind = v.diagram_kind;

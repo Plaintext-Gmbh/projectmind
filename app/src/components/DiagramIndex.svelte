@@ -44,6 +44,8 @@
         return $t('diagram.moduleChord');
       case 'activity-heatmap':
         return $t('diagram.activityHeatmap');
+      case 'timeline-river':
+        return $t('diagram.timelineRiver');
       default:
         return kind;
     }
@@ -73,6 +75,8 @@
         return $t('diagram.description.moduleChord');
       case 'activity-heatmap':
         return $t('diagram.description.activityHeatmap');
+      case 'timeline-river':
+        return $t('diagram.description.timelineRiver');
       default:
         return '';
     }

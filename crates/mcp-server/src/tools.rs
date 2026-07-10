@@ -99,6 +99,7 @@ fn diagram_schema() -> Value {
                     "architecture-flow",
                     "module-chord",
                     "activity-heatmap",
+                    "timeline-river",
                     "language-stats"
                 ]
             }
@@ -423,6 +424,11 @@ pub(crate) fn list() -> Value {
                 "inputSchema": no_args_schema()
             },
             {
+                "name": "commit_activity",
+                "description": "Per-module commit activity over the last 24 months (timeline river, #63 concept 4). Groups commits by module (Maven artifactId / Cargo crate name, or top-level directory as fallback); each module lists its commit drops (age in seconds, sha, summary), newest-first. Modules sorted freshest-first. Capped at 5,000 commits walked. Answers 'when did module X go active/quiet'.",
+                "inputSchema": no_args_schema()
+            },
+            {
                 "name": "list_refs",
                 "description": "List local branches and tags from the open repository. Each entry has name, kind (branch|tag) and target_sha (7-char). Branches first (master/main floated to the top), then tags sorted descending.",
                 "inputSchema": no_args_schema()
@@ -587,6 +593,7 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "show_class" => show_class(state, parsed.arguments).await,
         "list_changes_since" => list_changes_since(state, parsed.arguments).await,
         "file_recency" => file_recency(state).await,
+        "commit_activity" => commit_activity(state).await,
         "list_refs" => list_refs(state).await,
         "show_diff" => show_diff(state, parsed.arguments).await,
         "show_diagram" => show_diagram(state, parsed.arguments).await,
@@ -806,6 +813,15 @@ async fn file_recency(state: &Mutex<ServerState>) -> DispatchResult {
         let recency = git::file_recency(&repo.root)
             .map_err(|e| DispatchError::internal(format!("git: {e}")))?;
         let body = serde_json::to_string_pretty(&recency).unwrap_or_else(|_| "[]".into());
+        Ok(text_result(body))
+    })
+}
+
+async fn commit_activity(state: &Mutex<ServerState>) -> DispatchResult {
+    let state = state.lock().await;
+    with_repo(&state, |repo| {
+        let activity = git::commit_activity(&repo.root);
+        let body = serde_json::to_string_pretty(&activity).unwrap_or_else(|_| "{}".into());
         Ok(text_result(body))
     })
 }
@@ -1215,6 +1231,7 @@ fn view_diagram(args: Value) -> DispatchResult {
         && args.kind != "architecture-flow"
         && args.kind != "module-chord"
         && args.kind != "activity-heatmap"
+        && args.kind != "timeline-river"
         && args.kind != "language-stats"
     {
         return Err(DispatchError::invalid_params(format!(

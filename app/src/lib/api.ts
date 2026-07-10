@@ -272,6 +272,53 @@ export async function fileRecency(): Promise<FileRecency[]> {
   return invoke<FileRecency[]>('file_recency');
 }
 
+/// One commit that touched a module, reduced to what the timeline-river
+/// renderer places on a module's band. Mirrors `git::CommitDrop`.
+export interface CommitDrop {
+  /// Seconds elapsed between the commit and the walk; larger = older.
+  secs_ago: number;
+  /// Short (7-char) commit hash, for tooltips.
+  sha: string;
+  /// First line of the commit message, for tooltips.
+  summary: string;
+}
+
+/// Commit activity for one module. Mirrors `git::ModuleActivity`.
+export interface ModuleActivity {
+  /// Module id (Maven artifactId / Cargo crate name, or top-level dir).
+  module: string;
+  /// Commits that touched this module, newest-first.
+  commits: CommitDrop[];
+}
+
+/// Per-module commit-activity river (#63 concept 4). Mirrors
+/// `git::CommitActivity`. Carries a `no_git` empty state so the renderer
+/// never needs an error path for "not a git repo".
+export interface CommitActivity {
+  /// Repository root, for display.
+  root: string;
+  /// Wall-clock seconds when the walk ran (x-axis anchor).
+  now_secs: number;
+  /// Width of the time window in seconds (bounds the axis).
+  window_secs: number;
+  /// Modules with activity in the window, freshest-first.
+  modules: ModuleActivity[];
+  /// Total commits counted (a commit touching N modules counts N times).
+  total_commits: number;
+  /// `true` when the walker hit its commit cap and stopped early.
+  truncated: boolean;
+  /// `true` when no git repository was found at `root`.
+  no_git: boolean;
+}
+
+/// Per-module commit activity over the last 24 months, grouped by module
+/// with each commit as a "drop" on the module's band. Drives the
+/// timeline-river diagram (#63 concept 4).
+export async function commitActivity(): Promise<CommitActivity> {
+  if (!isTauriRuntime()) return api<CommitActivity>('/api/commit_activity');
+  return invoke<CommitActivity>('commit_activity');
+}
+
 /// One persisted user annotation. Mirrors `AnnotationRecord` on the Rust
 /// side; lines are 1-based and inclusive on both ends.
 export interface AnnotationRecord {
@@ -338,8 +385,13 @@ export type DiagramKind =
   | 'architecture-flow'
   | 'module-chord'
   | 'activity-heatmap'
+  | 'timeline-river'
   | 'language-stats';
 
+/// Fetch the payload for a `show_diagram`-backed kind. NOTE: `timeline-river`
+/// is *not* served here — it has its own endpoint (`commitActivity()`); the
+/// backend `show_diagram` command does not know that kind. DiagramView routes
+/// it to `commitActivity()` before ever calling `showDiagram`.
 export async function showDiagram(kind: DiagramKind): Promise<string> {
   if (!isTauriRuntime()) return api<string>(`/api/show_diagram${query({ kind })}`);
   return invoke<string>('show_diagram', { kind });

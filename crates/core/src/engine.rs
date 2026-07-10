@@ -205,6 +205,10 @@ impl Engine {
         // payload renderer has a "no git" empty state so we don't need
         // to gate this on `.git/` presence in the engine.
         out.insert("activity-heatmap".to_string());
+        // timeline-river (#63 concept 4) groups the same commit history by
+        // module over a time axis. Unconditional for the same reason: its
+        // payload carries a `no_git` empty state.
+        out.insert("timeline-river".to_string());
         // doc-graph is always meaningful when the repo has at least one
         // markdown file. Unconditional on plugins because it's purely a
         // filesystem scan, not language-specific parsing.
