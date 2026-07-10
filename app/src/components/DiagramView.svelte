@@ -40,6 +40,7 @@
     type ActivityHeatmap,
   } from '../lib/diagrams/activityHeatmap';
   import { createViewportStore } from '../lib/diagrams/viewport';
+  import MiniMap from './MiniMap.svelte';
 
   export let kind: DiagramKind;
   export let folderLayout: 'hierarchy' | 'solar' | 'td' = 'solar';
@@ -892,6 +893,12 @@
       >
         {@html svg}
       </div>
+      {#if svg}
+        <!-- Mini-map overlay (#66): mirrors the rendered stage SVG at a fit
+             scale and marks the visible region. Self-hides when the viewport
+             has no measured world box (e.g. draw.io frame renders no `svg`). -->
+        <MiniMap {svg} {viewport} {stage} />
+      {/if}
       {#if kind === 'doc-graph' && docGraph}
         <aside class="doc-panel">
           {#if selectedDoc}
