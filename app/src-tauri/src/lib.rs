@@ -46,8 +46,16 @@ pub struct AppState {
     /// Per-repo annotation store. Lazily created when `open_repo` lands;
     /// reset to `None` when a different repo is opened. Read-mostly so
     /// list / all queries never block adds, but mutations briefly take
-    /// a write lock.
-    pub annotations: RwLock<Option<projectmind_core::annotations::JsonAnnotationStore>>,
+    /// a write lock. Constructed via the persistence resolver
+    /// (`.projectmind/config.toml`), so the concrete backend is a
+    /// config decision, not a compile-time one.
+    pub annotations: RwLock<Option<Box<dyn projectmind_plugin_api::AnnotationStore>>>,
+    /// Per-repo code-graph cache, when `.projectmind/config.toml`
+    /// selects one (default: none). No consumer yet — the engine grows
+    /// cache-aware parsing in a follow-up to #114; constructing it at
+    /// open time already surfaces config errors and creates the backing
+    /// file eagerly.
+    pub code_graph: RwLock<Option<Box<dyn projectmind_plugin_api::CodeGraphStore>>>,
     pub pending_markdown_file: RwLock<Option<PathBuf>>,
 }
 
@@ -62,6 +70,7 @@ impl AppState {
             engine,
             repo: RwLock::new(None),
             annotations: RwLock::new(None),
+            code_graph: RwLock::new(None),
             pending_markdown_file: RwLock::new(None),
         }
     }
@@ -88,6 +97,10 @@ pub struct RepoSummary {
     pub available_diagrams: Vec<String>,
     /// Top-level UI tabs the active plugin set contributes for this repo.
     pub tabs: Vec<projectmind_core::TabDescriptor>,
+    /// Code-graph cache backend in effect for this repo (`"memory"`,
+    /// `"sqlite"`), `None` when no cache is configured — diagnostics for
+    /// the persistence selection in `.projectmind/config.toml`.
+    pub code_graph_backend: Option<String>,
 }
 
 /// One class entry exposed to the UI.
@@ -220,6 +233,30 @@ fn open_repository(
         html::list_html_files(&repo.root).len() + html::find_html_snippets(&repo.root).len();
     let available_diagrams = state.engine.available_diagrams(&repo);
     let tabs = state.engine.available_tabs(&repo);
+    let root = repo.root.clone();
+    // (Re-)open the persistence stores per `.projectmind/config.toml`
+    // (defaults: JSON annotations, no code-graph cache). Any failure is
+    // surfaced to logs but doesn't fail the open — the GUI just won't
+    // have annotation features for this repo.
+    let persistence_root = if root.is_file() {
+        root.parent().unwrap_or(&root)
+    } else {
+        &root
+    };
+    let code_graph_backend = match projectmind_core::persistence::resolve_stores(persistence_root) {
+        Ok(resolved) => {
+            let backend = resolved.code_graph_backend;
+            *state.annotations.write() = resolved.annotations;
+            *state.code_graph.write() = resolved.code_graph;
+            backend
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "persistence config rejected; continuing without stores");
+            *state.annotations.write() = None;
+            *state.code_graph.write() = None;
+            None
+        }
+    };
     let summary = RepoSummary {
         root: repo.root.clone(),
         modules: repo.modules.len(),
@@ -230,26 +267,9 @@ fn open_repository(
         html_count,
         available_diagrams,
         tabs,
+        code_graph_backend,
     };
-    let root = repo.root.clone();
     *state.repo.write() = Some(repo);
-    // (Re-)open the per-repo annotation store. A failure to load is
-    // surfaced to logs but doesn't fail the open — the GUI just won't
-    // have annotation features for this repo.
-    let annotation_root = if root.is_file() {
-        root.parent().unwrap_or(&root)
-    } else {
-        &root
-    };
-    match projectmind_core::annotations::JsonAnnotationStore::open(annotation_root) {
-        Ok(store) => {
-            *state.annotations.write() = Some(store);
-        }
-        Err(err) => {
-            tracing::warn!(error = %err, "failed to open annotations store; continuing without one");
-            *state.annotations.write() = None;
-        }
-    }
     // Publish so the MCP server (and any other consumer) sees what we just opened.
     // Preserve the existing view intent when the repo path is unchanged — this
     // happens when applyState() loads the repo in response to an MCP-driven
@@ -514,7 +534,6 @@ fn list_annotations(
     file: Option<String>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<Vec<projectmind_plugin_api::storage::AnnotationRecord>, String> {
-    use projectmind_plugin_api::storage::AnnotationStore;
     let guard = state.annotations.read();
     let store = guard
         .as_ref()
@@ -530,7 +549,7 @@ fn add_annotation(
     annotation: AnnotationInput,
     state: State<'_, Arc<AppState>>,
 ) -> Result<u64, String> {
-    use projectmind_plugin_api::storage::{AnnotationRecord, AnnotationStore};
+    use projectmind_plugin_api::storage::AnnotationRecord;
     let mut guard = state.annotations.write();
     let store = guard
         .as_mut()
@@ -549,7 +568,6 @@ fn add_annotation(
 
 #[tauri::command]
 fn remove_annotation(id: u64, state: State<'_, Arc<AppState>>) -> Result<(), String> {
-    use projectmind_plugin_api::storage::AnnotationStore;
     let mut guard = state.annotations.write();
     let store = guard
         .as_mut()

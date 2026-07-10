@@ -7,10 +7,10 @@ ProjectMind persists three classes of data, each with very different value:
 | Class | Backend | Location | Lifetime | User data? |
 |---|---|---|---|---|
 | **Annotations** | JSON file | `<repo>/.projectmind/annotations.json` | per repo, kept across sessions | **yes** — never reset without a clear user action |
-| **Code-graph cache** | (none today) future: SQLite | `~/.cache/projectmind/<repo-hash>.db` | rebuildable from sources | no — disposable |
+| **Code-graph cache** | off by default; opt-in SQLite or in-memory via config | `~/.cache/projectmind/<name>-<hash>.db` (path override possible) | rebuildable from sources | no — disposable |
 | **Session state** | JSON file | platform cache dir, see `crates/core/src/state.rs` | per user | low value — ok to reset |
 
-The trait surface for the first two lives in `crates/plugin-api/src/storage.rs` (`AnnotationStore`, `CodeGraphStore`). New backends (SurrealDB, Mempalace, …) plug in behind these traits without touching consumers.
+The trait surface for the first two lives in `crates/plugin-api/src/storage.rs` (`AnnotationStore`, `CodeGraphStore`). New backends (SurrealDB, Mempalace, …) plug in behind these traits without touching consumers. Which backend a repo uses is a config decision (see [Backend selection](#backend-selection--projectmindconfigtoml)), resolved by `projectmind_core::persistence::resolve_stores` when a repo is opened — both the Tauri shell and the browser host construct their stores through that resolver, never through concrete types.
 
 ## Annotations — the only user data
 
@@ -30,9 +30,43 @@ Explicit export/import is **not** offered yet — the file *is* the export. Once
 
 ## Code-graph cache — disposable
 
-Today the engine parses the repo on every `open_repo`. That's fine for the current footprint (a few thousand classes per repo, sub-second walks) and means there is no cache to invalidate, no migration to ship, no recovery to write.
+The engine still parses the repo on every `open_repo` — that's fine for the current footprint (a few thousand classes per repo, sub-second walks) and stays the zero-config default. Since [#114](https://github.com/Plaintext-Gmbh/projectmind/issues/114) two `CodeGraphStore` backends exist for repos that opt in:
 
-When the parse cost grows (large monorepos, async indexing), the SQLite-backed `CodeGraphStore` lands at `~/.cache/projectmind/<repo-hash>.db`. By definition the file is rebuildable — no backup/restore UI is ever needed, and `rm -rf ~/.cache/projectmind/` is a supported recovery action.
+- **`sqlite`** ([`projectmind_core::code_graph_sqlite::SqliteCodeGraphStore`](../crates/core/src/code_graph_sqlite.rs)): a durable cache at `~/.cache/projectmind/<name>-<hash>.db` (or a `path` override from the config). WAL journal + `synchronous = NORMAL` — atomic commits, but the last few commits may be lost on power failure, which is the right trade-off for a cache that can always be re-parsed from sources. Schema version rides in `PRAGMA user_version`; migrations apply on open, each atomically (DDL + version bump in one transaction). A database written by a *newer* client is rejected loudly instead of guessed at.
+- **`memory`** ([`projectmind_core::code_graph::MemoryCodeGraphStore`](../crates/core/src/code_graph.rs)): same trait, no I/O, gone at process exit. Doubles as the reference implementation — both backends run the same conformance test suite so their behavior can't drift.
+
+Nodes are tied to source files through the `"file"` property (repo-relative path); `invalidate(files)` drops every node and edge that came from a changed file.
+
+By definition the cache file is rebuildable — no backup/restore UI is ever needed, and `rm -rf ~/.cache/projectmind/` is a supported recovery action.
+
+Note: nothing *feeds* the cache yet. The engine grows cache-aware parsing (write-on-parse, warm-start reads, async indexing) in a follow-up; #114/#115/#116 deliver the storage, the config surface, and the wiring so that step is purely an engine change.
+
+## Backend selection — `.projectmind/config.toml`
+
+A repo can pin its persistence backends in `<repo>/.projectmind/config.toml` ([#115](https://github.com/Plaintext-Gmbh/projectmind/issues/115)):
+
+```toml
+[persistence.annotations]
+backend = "json"       # default — the only annotation backend today
+
+[persistence.code_graph]
+backend = "sqlite"     # "none" (default) | "memory" | "sqlite"
+path = "cache/graph.db"  # optional, sqlite only; relative = repo-relative
+```
+
+Discovery order: `<repo>/.projectmind/config.toml`, then `$XDG_CONFIG_HOME/projectmind/defaults.toml` (machine-wide default for repos without their own file), then built-in defaults. Files are not merged — the first one found wins whole.
+
+Error policy ([#116](https://github.com/Plaintext-Gmbh/projectmind/issues/116)):
+
+| Situation | Behavior |
+|---|---|
+| No config file | Built-in defaults — JSON annotations, no code-graph cache. Zero-config behavior is unchanged. |
+| Malformed TOML | Loud warning in the log, then defaults. A typo never bricks opening a repo. |
+| Unknown keys | Warned and ignored (a newer client may have written them). |
+| Unknown backend name | Actionable error naming the offender and the supported values — an explicit ask we can't honor is not silently ignored. |
+| Cache file can't be created | Warning, repo opens without a cache — the cache is disposable, never load-bearing. |
+
+Implementation: [`projectmind_core::persistence`](../crates/core/src/persistence.rs).
 
 ## Session state — low value
 
@@ -42,11 +76,11 @@ The session state file (current repo, view intent, monotonic seq) is shared betw
 
 | Action | Effect |
 |---|---|
-| Delete `~/.cache/projectmind/` | session state and (future) code-graph cache regenerate. Safe. |
-| Delete `<repo>/.projectmind/` | annotations are lost. **Treat as user-destructive.** Recovery: restore from VCS or backup. |
+| Delete `~/.cache/projectmind/` | session state and code-graph cache regenerate. Safe. |
+| Delete `<repo>/.projectmind/` | annotations (and the repo's `config.toml`) are lost. **Treat as user-destructive.** Recovery: restore from VCS or backup. |
 | Edit `annotations.json` by hand | supported. Atomic write next save → previous edit rotates into `.bak`. |
+| Edit `config.toml` by hand | supported — it's the intended interface. Re-read on the next repo open. |
 
 ## What's *not* in this doc
 
-- SurrealDB / Mempalace integrations — when concrete need surfaces, follow-up issues will ratify config schema and wiring.
-- `.projectmind/config.toml` for backend selection — only useful once there is more than one backend implementation. Tracked separately.
+- SurrealDB / Mempalace integrations — when concrete need surfaces, follow-up issues will ratify additional `backend` values and wiring; the config schema above is where they slot in.

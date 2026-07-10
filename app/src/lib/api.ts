@@ -104,6 +104,10 @@ export interface RepoSummary {
   /// "files" + "diagrams"; plugins can append more (e.g. a future
   /// "framework-junit" "Tests" tab). Rendered in declaration order.
   tabs: TabDescriptor[];
+  /// Code-graph cache backend in effect for this repo ("memory" |
+  /// "sqlite"); null when no cache is configured. Diagnostics for the
+  /// persistence selection in .projectmind/config.toml.
+  code_graph_backend: string | null;
 }
 
 export interface ChangedFile {

@@ -178,8 +178,16 @@ struct HostState {
     repo_root: Option<PathBuf>,
     /// Per-repo annotation store. (Re-)opened by `open_repo_locked` when
     /// the active repo changes; `None` otherwise. Same shape as the
-    /// Tauri side.
-    annotations: Option<projectmind_core::annotations::JsonAnnotationStore>,
+    /// Tauri side. Constructed via the persistence resolver
+    /// (`.projectmind/config.toml`), so the concrete backend is a
+    /// config decision, not a compile-time one.
+    annotations: Option<Box<dyn projectmind_plugin_api::AnnotationStore>>,
+    /// Per-repo code-graph cache, when `.projectmind/config.toml`
+    /// selects one (default: none). No consumer yet — the engine grows
+    /// cache-aware parsing in a follow-up to #114; constructing it at
+    /// open time already surfaces config errors and creates the backing
+    /// file eagerly.
+    code_graph: Option<Box<dyn projectmind_plugin_api::CodeGraphStore>>,
 }
 
 impl HostState {
@@ -194,6 +202,7 @@ impl HostState {
             repo: None,
             repo_root: None,
             annotations: None,
+            code_graph: None,
         }
     }
 }
@@ -444,7 +453,6 @@ fn route_api(
             Ok(serde_json::to_value(git::list_refs(&repo.root)?)?)
         }
         ("GET", "/api/list_annotations") => {
-            use projectmind_plugin_api::storage::AnnotationStore;
             let store = guard
                 .annotations
                 .as_ref()
@@ -457,7 +465,7 @@ fn route_api(
             Ok(serde_json::to_value(recs)?)
         }
         ("POST", "/api/add_annotation") => {
-            use projectmind_plugin_api::storage::{AnnotationRecord, AnnotationStore};
+            use projectmind_plugin_api::storage::AnnotationRecord;
             let input: AnnotationInput = serde_json::from_slice(body)?;
             let store = guard
                 .annotations
@@ -478,7 +486,6 @@ fn route_api(
             Ok(json!({ "id": id }))
         }
         ("POST", "/api/remove_annotation") => {
-            use projectmind_plugin_api::storage::AnnotationStore;
             let input: RemoveAnnotationInput = serde_json::from_slice(body)?;
             let store = guard
                 .annotations
@@ -707,6 +714,10 @@ pub struct RepoSummary {
     /// `framework-junit` "Tests" tab, for example). The frontend renders
     /// one nav button per entry.
     pub tabs: Vec<projectmind_core::TabDescriptor>,
+    /// Code-graph cache backend in effect for this repo (`"memory"`,
+    /// `"sqlite"`), `None` when no cache is configured — diagnostics for
+    /// the persistence selection in `.projectmind/config.toml`.
+    pub code_graph_backend: Option<String>,
 }
 
 /// One class entry exposed to the browser UI.
@@ -875,6 +886,34 @@ fn open_repository_locked(
         html::list_html_files(&repo.root).len() + html::find_html_snippets(&repo.root).len();
     let available_diagrams = state.engine.available_diagrams(&repo);
     let tabs = state.engine.available_tabs(&repo);
+    // Switching to a different repo drops artifacts from the old one; must run
+    // before the state::write below overwrites the previous repo root.
+    if let Err(err) = artifact::clear_on_repo_change(&repo.root) {
+        tracing::warn!(error = %err, "failed to clear artifacts on repo change");
+    }
+    state.repo_root = Some(repo.root.clone());
+    // (Re-)open the persistence stores per `.projectmind/config.toml`
+    // (defaults: JSON annotations, no code-graph cache). Failures are
+    // logged, never fatal — same policy as the Tauri side.
+    let code_graph_backend = match projectmind_core::persistence::resolve_stores(&repo.root) {
+        Ok(resolved) => {
+            state.annotations = resolved.annotations;
+            state.code_graph = resolved.code_graph;
+            // Read the label off the held store so the summary can
+            // never claim a backend the host didn't actually keep.
+            if state.code_graph.is_some() {
+                resolved.code_graph_backend
+            } else {
+                None
+            }
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "persistence config rejected; continuing without stores");
+            state.annotations = None;
+            state.code_graph = None;
+            None
+        }
+    };
     let summary = RepoSummary {
         root: repo.root.clone(),
         modules: repo.modules.len(),
@@ -885,19 +924,7 @@ fn open_repository_locked(
         html_count,
         available_diagrams,
         tabs,
-    };
-    // Switching to a different repo drops artifacts from the old one; must run
-    // before the state::write below overwrites the previous repo root.
-    if let Err(err) = artifact::clear_on_repo_change(&repo.root) {
-        tracing::warn!(error = %err, "failed to clear artifacts on repo change");
-    }
-    state.repo_root = Some(repo.root.clone());
-    state.annotations = match projectmind_core::annotations::JsonAnnotationStore::open(&repo.root) {
-        Ok(store) => Some(store),
-        Err(err) => {
-            tracing::warn!(error = %err, "failed to open annotations store");
-            None
-        }
+        code_graph_backend,
     };
     state::write(UiState {
         repo_root: Some(repo.root.clone()),
