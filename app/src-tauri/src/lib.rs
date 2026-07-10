@@ -162,6 +162,25 @@ pub struct ClassOutline {
     /// Declared parent types: `extends` targets first, then `implements` /
     /// trait-impl targets. Drives the inheritance crumb in the GUI header.
     pub super_types: Vec<SuperTypeOutline>,
+    /// Line coverage for this class from a `JaCoCo`/LCOV/Cobertura report, when
+    /// one exists and resolves to this class. `None` = no coverage data
+    /// (Cockpit 2.2, #158). Populated by the `class_outline` command, not by
+    /// [`build_class_outline`] (which is pure and repo-agnostic).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<ClassCoverage>,
+}
+
+/// Per-class coverage surfaced on the class detail pane.
+#[derive(Debug, Serialize)]
+pub struct ClassCoverage {
+    /// Line coverage fraction, 0.0..=1.0.
+    pub line: f64,
+    /// Report format id (`jacoco`, `lcov`, `cobertura`).
+    pub format: String,
+    /// True when the report is older than 24h (`JaCoCo` mtime > 24h etc.).
+    pub stale: bool,
+    /// Report age in seconds, when the mtime is known.
+    pub age_secs: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -367,11 +386,23 @@ pub struct RiskWeightsArg {
     pub deps: Option<f64>,
 }
 
+/// Coverage-Report-Metadaten für die GUI (Format, Alter, Stale-Flag).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CoverageMeta {
+    pub format: String,
+    pub path: PathBuf,
+    pub age_secs: Option<u64>,
+    pub stale: bool,
+}
+
 /// Ergebnis von [`risk_atlas`] – Fenster, effektive Gewichte und die Scores für die Treemap.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct RiskAtlasResult {
     pub window_days: u32,
     pub weights: risk::Weights,
+    /// Metadaten des erkannten Coverage-Reports, `None` wenn keiner existiert.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<CoverageMeta>,
     pub scores: Vec<risk::RiskScore>,
 }
 
@@ -411,10 +442,20 @@ fn risk_atlas(
         window_days: window_days.unwrap_or(risk::DEFAULT_CHURN_WINDOW_DAYS),
         weights: w,
     };
-    let scores = risk::compute(repo, &opts).map_err(|e| e.to_string())?;
+    // Fan-in/out from the parsed relations graph; coverage from a report scan.
+    let relations = state.engine.relations(repo);
+    let coverage = projectmind_core::coverage::load(&repo.root);
+    let scores =
+        risk::compute(repo, &relations, coverage.as_ref(), &opts).map_err(|e| e.to_string())?;
     Ok(RiskAtlasResult {
         window_days: opts.window_days,
         weights: opts.weights,
+        coverage: coverage.as_ref().map(|c| CoverageMeta {
+            format: c.format.as_str().to_string(),
+            path: c.path.clone(),
+            age_secs: c.age_secs(),
+            stale: c.is_stale(),
+        }),
         scores,
     })
 }
@@ -449,7 +490,11 @@ fn class_outline(fqn: String, state: State<'_, Arc<AppState>>) -> Result<ClassOu
     let (_module, class) = repo
         .find_class(&fqn)
         .ok_or_else(|| format!("class not found: {fqn}"))?;
-    Ok(build_class_outline(class))
+    let mut outline = build_class_outline(class);
+    // Coverage is repo-level; attach it here (build_class_outline stays pure).
+    let report = projectmind_core::coverage::load(&repo.root);
+    outline.coverage = class_coverage(report.as_ref(), class);
+    Ok(outline)
 }
 
 #[tauri::command]
@@ -992,7 +1037,25 @@ fn build_class_outline(class: &Class) -> ClassOutline {
                 },
             })
             .collect(),
+        coverage: None,
     }
+}
+
+/// Resolve per-class coverage from a repo's coverage report, if any covers
+/// the class. Shared by the Tauri command and the browser-host endpoint so
+/// both detail panes show identical data.
+fn class_coverage(
+    report: Option<&projectmind_core::coverage::CoverageReport>,
+    class: &Class,
+) -> Option<ClassCoverage> {
+    let report = report?;
+    let line = report.coverage_for(&class.fqn, &class.file)?;
+    Some(ClassCoverage {
+        line,
+        format: report.format.as_str().to_string(),
+        stale: report.is_stale(),
+        age_secs: report.age_secs(),
+    })
 }
 
 /// Best-effort publish: GUI tells the MCP/cooperating processes about its state.
@@ -1222,5 +1285,31 @@ mod tests {
         let spring = SpringPlugin::new();
         let out = diagram::render_bean_graph(&repo, &spring);
         assert!(out.contains("no beans detected"));
+    }
+
+    #[test]
+    fn class_coverage_resolves_from_report_or_none() {
+        use projectmind_core::coverage::{CoverageFormat, CoverageReport};
+        use std::collections::HashMap;
+
+        let class = Class {
+            fqn: "com.acme.Foo".into(),
+            name: "Foo".into(),
+            file: std::path::PathBuf::from("Foo.java"),
+            ..Default::default()
+        };
+        // No report → None.
+        assert!(class_coverage(None, &class).is_none());
+
+        let report = CoverageReport {
+            format: CoverageFormat::Jacoco,
+            path: std::path::PathBuf::from("jacoco.xml"),
+            mtime_secs: None,
+            by_fqn: HashMap::from([("com.acme.Foo".to_string(), 0.42)]),
+            by_file: HashMap::new(),
+        };
+        let cov = class_coverage(Some(&report), &class).expect("coverage resolved");
+        assert!((cov.line - 0.42).abs() < 1e-9);
+        assert_eq!(cov.format, "jacoco");
     }
 }

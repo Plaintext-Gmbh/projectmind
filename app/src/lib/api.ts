@@ -182,6 +182,19 @@ export interface SuperTypeOutline {
   kind: 'extends' | 'implements';
 }
 
+/// Per-class coverage resolved from an ingested report (Cockpit 2.2, Issue #158).
+/// Omitted entirely when no coverage data maps onto the class.
+export interface ClassCoverage {
+  /// Line coverage fraction, 0.0..=1.0.
+  line: number;
+  /// Source report format ("jacoco" | "lcov" | "cobertura").
+  format: string;
+  /// True when the report's mtime is older than 24h.
+  stale: boolean;
+  /// Report age in seconds, or null when unknown.
+  age_secs: number | null;
+}
+
 export interface ClassOutline {
   fqn: string;
   name: string;
@@ -196,6 +209,8 @@ export interface ClassOutline {
   /// Declared parent types in source order — drives the inheritance crumb
   /// rendered above the class name.
   super_types: SuperTypeOutline[];
+  /// Coverage for this class, when a report resolves to it. Absent otherwise.
+  coverage?: ClassCoverage;
 }
 
 export async function classOutline(fqn: string): Promise<ClassOutline> {
@@ -646,6 +661,12 @@ export interface RiskScore {
   churn: number;
   cx: number;
   sloc: number;
+  /** Line coverage fraction 0..=1, or null when no report resolves. */
+  cov: number | null;
+  /** Number of classes that depend on this class (incoming edges). */
+  fan_in: number;
+  /** Number of classes this class depends on (outgoing edges). */
+  fan_out: number;
   why: string;
 }
 
@@ -656,10 +677,21 @@ export interface RiskWeights {
   deps: number;
 }
 
+/// Metadata for the coverage report backing a Risk Atlas run
+/// (Cockpit 2.2, Issue #158). Absent when no report was ingested.
+export interface CoverageMeta {
+  format: string;
+  path: string;
+  age_secs: number | null;
+  stale: boolean;
+}
+
 export interface RiskAtlasResult {
   window_days: number;
   weights: RiskWeights;
   scores: RiskScore[];
+  /// The coverage report used for the `cov` scores, when one was resolved.
+  coverage?: CoverageMeta;
 }
 
 export interface RiskAtlasOptions {

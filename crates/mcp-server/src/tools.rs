@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use projectmind_browser_host::{self as browser_host, BrowserHostConfig};
 use projectmind_core::artifact::{self, ArtifactError, ArtifactFormat};
+use projectmind_core::coverage;
 use projectmind_core::file_access;
 use projectmind_core::files;
 use projectmind_core::patterns::{self as core_patterns, Pattern, Scope as PatternScope};
@@ -483,7 +484,7 @@ pub(crate) fn list() -> Value {
             },
             {
                 "name": "risk_atlas",
-                "description": "Composite per-class risk scores for the open repository. Combines git churn (commits touching the file in the last `window_days` days) and cyclomatic complexity (decision-point heuristic over the class's source lines). Returns the top-N classes sorted by score descending with raw signals and a `why` hint. Use to find the hotspots before reading any source — much cheaper than grepping the repo.",
+                "description": "Composite per-class risk scores for the open repository. Combines four signals: git churn (commits touching the file in the last `window_days` days), cyclomatic complexity (decision-point heuristic over the class's source lines), test coverage (`1 - line%` from a JaCoCo/LCOV/Cobertura report, `cov` field, null when no report), and fan-in (`fan_in`/`fan_out`, how many classes reference this one, from the relations graph). Missing coverage degrades gracefully — its weight is rebalanced. Returns the top-N classes sorted by score descending with raw signals and a `why` hint (e.g. `hot+uncovered+central`). Use to find the hotspots before reading any source — much cheaper than grepping the repo.",
                 "inputSchema": risk_atlas_schema()
             },
             {
@@ -1472,6 +1473,7 @@ async fn risk_atlas(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
     };
 
     let state = state.lock().await;
+    let engine = &state.engine;
     with_repo(&state, |repo| {
         let mut weights = RiskWeights::default();
         if let Some(w) = args.weights {
@@ -1494,8 +1496,20 @@ async fn risk_atlas(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
             window_days: args.window_days.unwrap_or(risk::DEFAULT_CHURN_WINDOW_DAYS),
             weights,
         };
-        let scores = risk::compute(repo, &opts)
+        // Fan-in/out reads the already-parsed relations graph; coverage is a
+        // one-shot report scan. Both degrade to empty/None without crashing.
+        let relations = engine.relations(repo);
+        let coverage = coverage::load(&repo.root);
+        let scores = risk::compute(repo, &relations, coverage.as_ref(), &opts)
             .map_err(|e| DispatchError::internal(format!("risk_atlas: {e}")))?;
+        let cov_meta = coverage.as_ref().map_or(Value::Null, |c| {
+            json!({
+                "format": c.format.as_str(),
+                "path": c.path,
+                "age_secs": c.age_secs(),
+                "stale": c.is_stale(),
+            })
+        });
         let body = serde_json::to_string_pretty(&json!({
             "window_days": opts.window_days,
             "weights": {
@@ -1504,6 +1518,7 @@ async fn risk_atlas(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
                 "cov": opts.weights.cov,
                 "deps": opts.weights.deps,
             },
+            "coverage": cov_meta,
             "scores": scores,
         }))
         .unwrap_or_else(|_| "{}".into());

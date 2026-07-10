@@ -4,36 +4,44 @@
 
 //! Risk Atlas — composite per-class risk scores.
 //!
-//! Combines two signals in v1:
+//! Combines four signals (Phase 2.2, issue #158):
 //! - **Churn**: number of commits touching the class's file inside the
 //!   configured window (default 90 days).
 //! - **Complexity**: a heuristic cyclomatic count derived from the source
 //!   text (decision points: `if`, `else if`, `for`, `while`, `case`,
 //!   `catch`, `&&`, `||`, `?`).
+//! - **Coverage**: `1 - line_coverage` from a JaCoCo / LCOV / Cobertura
+//!   report (see [`crate::coverage`]). Absent reports degrade gracefully —
+//!   the coverage weight is redistributed onto the remaining signals.
+//! - **Fan-in**: how many other classes reference this one, derived from the
+//!   framework relations graph (bean injection + uses edges), *not* a
+//!   re-scan. `log(fan_in + 1)` tames the long tail.
 //!
 //! Each signal is z-score normalised across the repo, then weighted into a
-//! final 0..100 score. Coverage and fan-in/out are placeholders for Phase 2.2.
+//! final 0..100 score.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use git2::Repository as GitRepo;
+use projectmind_plugin_api::Relation;
 use serde::{Deserialize, Serialize};
 
+use crate::coverage::CoverageReport;
 use crate::repository::Repository;
 
 /// Default churn lookback window in days when the caller omits it.
 pub const DEFAULT_CHURN_WINDOW_DAYS: u32 = 90;
 
 /// Default weight applied to the churn signal.
-pub const DEFAULT_WEIGHT_CHURN: f64 = 0.4;
+pub const DEFAULT_WEIGHT_CHURN: f64 = 0.3;
 /// Default weight applied to the complexity signal.
-pub const DEFAULT_WEIGHT_CX: f64 = 0.4;
-/// Default weight reserved for coverage (Phase 2.2).
-pub const DEFAULT_WEIGHT_COV: f64 = 0.0;
-/// Default weight reserved for fan-in/out (Phase 2.2).
-pub const DEFAULT_WEIGHT_DEPS: f64 = 0.0;
+pub const DEFAULT_WEIGHT_CX: f64 = 0.3;
+/// Default weight applied to the coverage signal (`1 - coverage`).
+pub const DEFAULT_WEIGHT_COV: f64 = 0.2;
+/// Default weight applied to the fan-in signal (`log(fan_in + 1)`).
+pub const DEFAULT_WEIGHT_DEPS: f64 = 0.2;
 
 /// Weights controlling how the four risk signals combine into a score.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -55,6 +63,34 @@ impl Default for Weights {
             cx: DEFAULT_WEIGHT_CX,
             cov: DEFAULT_WEIGHT_COV,
             deps: DEFAULT_WEIGHT_DEPS,
+        }
+    }
+}
+
+impl Weights {
+    /// Weights actually applied for one `compute` run.
+    ///
+    /// When no coverage data is available (`have_coverage == false`) the
+    /// coverage weight would silently do nothing, skewing the effective mix.
+    /// We zero it and redistribute its mass proportionally across the three
+    /// remaining signals so the score still spans a sensible range. When
+    /// every non-coverage weight is zero we fall back to leaving the weights
+    /// untouched (nothing sensible to redistribute onto).
+    #[must_use]
+    pub fn effective(self, have_coverage: bool) -> Self {
+        if have_coverage || self.cov == 0.0 {
+            return self;
+        }
+        let rest = self.churn + self.cx + self.deps;
+        if rest <= 0.0 {
+            return self;
+        }
+        let scale = (rest + self.cov) / rest;
+        Self {
+            churn: self.churn * scale,
+            cx: self.cx * scale,
+            cov: 0.0,
+            deps: self.deps * scale,
         }
     }
 }
@@ -98,6 +134,13 @@ pub struct RiskScore {
     pub churn: u32,
     /// Raw cyclomatic complexity estimate.
     pub cx: u32,
+    /// Line coverage in 0.0..=1.0, or `None` when no coverage report covers
+    /// this class (or none exists at all).
+    pub cov: Option<f64>,
+    /// Number of other classes that reference this one (fan-in).
+    pub fan_in: u32,
+    /// Number of other classes this one references (fan-out).
+    pub fan_out: u32,
     /// Source lines of code in the class (line_end - line_start + 1).
     pub sloc: u32,
     /// Short human-readable hint explaining why the score is high.
@@ -118,9 +161,21 @@ pub enum RiskError {
 
 /// Compute risk scores for every class in `repo`, sorted highest first.
 ///
+/// `relations` is the framework relations graph (bean/uses edges) the caller
+/// already has — fan-in/out is derived from it rather than re-scanning, so
+/// the cost stays flat on huge repos. `coverage` is an optional parsed
+/// report; when `None`, the coverage weight is redistributed onto the other
+/// signals so the atlas keeps working without a test run.
+///
 /// Returns the top `opts.top` entries. Filters by `opts.module` when set.
-pub fn compute(repo: &Repository, opts: &Options) -> Result<Vec<RiskScore>, RiskError> {
+pub fn compute(
+    repo: &Repository,
+    relations: &[Relation],
+    coverage: Option<&CoverageReport>,
+    opts: &Options,
+) -> Result<Vec<RiskScore>, RiskError> {
     let churn_by_file = churn_per_file(&repo.root, opts.window_days)?;
+    let fan = FanCounts::from_relations(relations);
 
     let mut raw: Vec<RawRisk> = Vec::new();
     for module in repo.modules.values() {
@@ -146,6 +201,8 @@ pub fn compute(repo: &Repository, opts: &Options) -> Result<Vec<RiskScore>, Risk
                 Ok(source) => cyclomatic_in_lines(&source, class.line_start, class.line_end),
                 Err(_) => 0,
             };
+            let cov = coverage.and_then(|c| c.coverage_for(&class.fqn, &class.file));
+            let (fan_in, fan_out) = fan.for_class(&class.fqn);
 
             raw.push(RawRisk {
                 fqn: class.fqn.clone(),
@@ -153,6 +210,9 @@ pub fn compute(repo: &Repository, opts: &Options) -> Result<Vec<RiskScore>, Risk
                 file: rel,
                 churn,
                 cx,
+                cov,
+                fan_in,
+                fan_out,
                 sloc,
             });
         }
@@ -162,18 +222,33 @@ pub fn compute(repo: &Repository, opts: &Options) -> Result<Vec<RiskScore>, Risk
         return Ok(Vec::new());
     }
 
+    // Coverage only participates when at least one class resolved to a
+    // percentage — otherwise its weight is dead and we rebalance.
+    let have_coverage = raw.iter().any(|r| r.cov.is_some());
+    let weights = opts.weights.effective(have_coverage);
+
     let churn_stats = ZStats::from_iter(raw.iter().map(|r| f64::from(r.churn)));
     let cx_stats = ZStats::from_iter(raw.iter().map(|r| f64::from(r.cx)));
+    // Uncovered-ness: `1 - coverage`, defaulting missing entries to the mean
+    // (0 in z-space) so an unmeasured class isn't punished or rewarded.
+    let uncovered_vals: Vec<f64> = raw.iter().filter_map(|r| r.cov.map(|c| 1.0 - c)).collect();
+    let cov_stats = ZStats::from_iter(uncovered_vals.iter().copied());
+    let deps_stats = ZStats::from_iter(raw.iter().map(|r| (f64::from(r.fan_in) + 1.0).ln()));
 
     let mut scored: Vec<RiskScore> = raw
         .into_iter()
         .map(|r| {
             let z_churn = churn_stats.z(f64::from(r.churn));
             let z_cx = cx_stats.z(f64::from(r.cx));
+            let z_cov = r.cov.map_or(0.0, |c| cov_stats.z(1.0 - c));
+            let z_deps = deps_stats.z((f64::from(r.fan_in) + 1.0).ln());
             // Weighted z-score, then map to 0..=100 via a sigmoid-ish squash.
-            let combined = opts.weights.churn * z_churn + opts.weights.cx * z_cx;
+            let combined = weights.churn * z_churn
+                + weights.cx * z_cx
+                + weights.cov * z_cov
+                + weights.deps * z_deps;
             let score = score_from_z(combined);
-            let why = why_label(z_churn, z_cx);
+            let why = why_label(z_churn, z_cx, r.cov.map(|_| z_cov), z_deps);
             RiskScore {
                 fqn: r.fqn,
                 module: r.module,
@@ -181,6 +256,9 @@ pub fn compute(repo: &Repository, opts: &Options) -> Result<Vec<RiskScore>, Risk
                 score,
                 churn: r.churn,
                 cx: r.cx,
+                cov: r.cov,
+                fan_in: r.fan_in,
+                fan_out: r.fan_out,
                 sloc: r.sloc,
                 why,
             }
@@ -202,7 +280,47 @@ struct RawRisk {
     file: PathBuf,
     churn: u32,
     cx: u32,
+    cov: Option<f64>,
+    fan_in: u32,
+    fan_out: u32,
     sloc: u32,
+}
+
+/// Per-class fan-in / fan-out counts derived from the relations graph.
+///
+/// Edges are deduplicated per `(from, to)` pair so a class that both injects
+/// *and* calls another counts once — fan-in/out is about how many *distinct*
+/// classes touch a given one, not how many edges. Self-edges are ignored.
+struct FanCounts {
+    fan_in: HashMap<String, u32>,
+    fan_out: HashMap<String, u32>,
+}
+
+impl FanCounts {
+    fn from_relations(relations: &[Relation]) -> Self {
+        use std::collections::BTreeSet;
+        let mut seen: BTreeSet<(&str, &str)> = BTreeSet::new();
+        let mut fan_in: HashMap<String, u32> = HashMap::new();
+        let mut fan_out: HashMap<String, u32> = HashMap::new();
+        for rel in relations {
+            if rel.from == rel.to {
+                continue;
+            }
+            if !seen.insert((rel.from.as_str(), rel.to.as_str())) {
+                continue;
+            }
+            *fan_out.entry(rel.from.clone()).or_default() += 1;
+            *fan_in.entry(rel.to.clone()).or_default() += 1;
+        }
+        Self { fan_in, fan_out }
+    }
+
+    fn for_class(&self, fqn: &str) -> (u32, u32) {
+        (
+            self.fan_in.get(fqn).copied().unwrap_or(0),
+            self.fan_out.get(fqn).copied().unwrap_or(0),
+        )
+    }
 }
 
 /// Build a `file -> commit count` map by walking commits authored in the
@@ -376,12 +494,28 @@ fn score_from_z(z: f64) -> f64 {
     (s * 10.0).round() / 10.0
 }
 
-fn why_label(z_churn: f64, z_cx: f64) -> String {
-    match (z_churn > 0.5, z_cx > 0.5) {
-        (true, true) => "hot and complex".into(),
-        (true, false) => "churns frequently".into(),
-        (false, true) => "complex".into(),
-        (false, false) => "baseline".into(),
+/// Build the short "why" hint from the standout signals. Coverage and
+/// fan-in join churn/complexity so the most dangerous combo — hot, uncovered
+/// and highly-depended-on — reads clearly. `z_cov` is `None` when the class
+/// has no coverage data, so an unmeasured class never claims to be uncovered.
+fn why_label(z_churn: f64, z_cx: f64, z_cov: Option<f64>, z_deps: f64) -> String {
+    let mut tags: Vec<&str> = Vec::new();
+    if z_churn > 0.5 {
+        tags.push("hot");
+    }
+    if z_cx > 0.5 {
+        tags.push("complex");
+    }
+    if z_cov.is_some_and(|z| z > 0.5) {
+        tags.push("uncovered");
+    }
+    if z_deps > 0.5 {
+        tags.push("central");
+    }
+    if tags.is_empty() {
+        "baseline".into()
+    } else {
+        tags.join("+")
     }
 }
 
@@ -479,7 +613,162 @@ mod tests {
         // No actual git repo at /tmp/risk → churn_per_file errors;
         // compute() bubbles. The test below uses pure helpers.
         // Here we just verify the public API surface.
-        let result = compute(&repo, &opts);
+        let result = compute(&repo, &[], None, &opts);
         assert!(result.is_err() || result.is_ok());
+    }
+
+    fn rel(from: &str, to: &str) -> Relation {
+        Relation {
+            from: from.into(),
+            to: to.into(),
+            kind: projectmind_plugin_api::RelationKind::Uses,
+        }
+    }
+
+    #[test]
+    fn fan_counts_dedupe_and_ignore_self_edges() {
+        let rels = vec![
+            rel("A", "B"),
+            rel("A", "B"), // duplicate pair → counted once
+            rel("C", "B"),
+            rel("B", "B"), // self-edge → ignored
+            rel("A", "C"),
+        ];
+        let fan = FanCounts::from_relations(&rels);
+        // B is referenced by A and C → fan_in 2, references nobody → fan_out 0.
+        assert_eq!(fan.for_class("B"), (2, 0));
+        // A references B and C → fan_out 2, referenced by nobody → fan_in 0.
+        assert_eq!(fan.for_class("A"), (0, 2));
+        // C referenced by A, references B.
+        assert_eq!(fan.for_class("C"), (1, 1));
+        // Unknown class is all-zero.
+        assert_eq!(fan.for_class("Z"), (0, 0));
+    }
+
+    #[test]
+    fn effective_weights_rebalance_when_no_coverage() {
+        let w = Weights::default(); // 0.3 / 0.3 / 0.2 / 0.2
+        let eff = w.effective(false);
+        assert!(eff.cov.abs() < 1e-9);
+        // The 0.2 coverage mass is spread over churn+cx+deps (sum 0.8) so the
+        // remaining weights sum back to the original total (1.0).
+        let total = eff.churn + eff.cx + eff.cov + eff.deps;
+        assert!((total - 1.0).abs() < 1e-9, "total was {total}");
+        // Relative proportions among the survivors are preserved.
+        assert!((eff.churn - eff.cx).abs() < 1e-9);
+    }
+
+    #[test]
+    fn effective_weights_untouched_when_coverage_present() {
+        let w = Weights::default();
+        let eff = w.effective(true);
+        assert!((eff.cov - DEFAULT_WEIGHT_COV).abs() < 1e-9);
+        assert!((eff.churn - DEFAULT_WEIGHT_CHURN).abs() < 1e-9);
+    }
+
+    #[test]
+    fn why_label_combines_signals() {
+        assert_eq!(
+            why_label(1.0, 1.0, Some(1.0), 1.0),
+            "hot+complex+uncovered+central"
+        );
+        assert_eq!(why_label(1.0, 0.0, None, 0.0), "hot");
+        assert_eq!(why_label(0.0, 0.0, Some(0.0), 0.0), "baseline");
+        // No coverage data → never labelled "uncovered" even at high z.
+        assert_eq!(why_label(0.0, 0.0, None, 0.0), "baseline");
+    }
+
+    /// End-to-end `compute` over a throwaway git repo: exercises churn,
+    /// complexity, fan-in and coverage together and asserts graceful
+    /// degradation stays crash-free.
+    #[test]
+    fn compute_uses_all_four_signals_and_degrades_gracefully() {
+        use crate::coverage::{CoverageFormat, CoverageReport};
+        use std::collections::HashMap;
+
+        let dir = std::env::temp_dir().join(format!(
+            "projectmind-risk-e2e-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        struct Guard(PathBuf);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _guard = Guard(dir.clone());
+
+        // Real git repo so churn_per_file succeeds.
+        let git = GitRepo::init(&dir).unwrap();
+        std::fs::write(dir.join("A.java"), "class A { void f(){ if(x){} } }\n").unwrap();
+        std::fs::write(dir.join("B.java"), "class B {}\n").unwrap();
+        {
+            let mut index = git.index().unwrap();
+            index.add_path(Path::new("A.java")).unwrap();
+            index.add_path(Path::new("B.java")).unwrap();
+            index.write().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = git.find_tree(tree_id).unwrap();
+            let sig = git2::Signature::now("t", "t@t").unwrap();
+            git.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+                .unwrap();
+        }
+
+        let mut repo = Repository::new(dir.clone());
+        let mut m = Module {
+            id: "m".into(),
+            name: "m".into(),
+            root: dir.clone(),
+            ..Default::default()
+        };
+        for (fqn, file, end) in [("a.A", "A.java", 1u32), ("b.B", "B.java", 1u32)] {
+            m.classes.insert(
+                fqn.into(),
+                Class {
+                    fqn: fqn.into(),
+                    name: fqn.rsplit('.').next().unwrap().into(),
+                    file: PathBuf::from(file),
+                    line_start: 1,
+                    line_end: end,
+                    kind: ClassKind::Class,
+                    ..Default::default()
+                },
+            );
+        }
+        repo.insert_module(m);
+
+        // A depends on B → B has fan_in 1.
+        let relations = vec![rel("a.A", "b.B")];
+        let coverage = CoverageReport {
+            format: CoverageFormat::Jacoco,
+            path: PathBuf::from("jacoco.xml"),
+            mtime_secs: None,
+            by_fqn: HashMap::from([("a.A".to_string(), 0.1), ("b.B".to_string(), 0.9)]),
+            by_file: HashMap::new(),
+        };
+        let opts = Options {
+            top: 5,
+            window_days: 365,
+            ..Default::default()
+        };
+
+        // With coverage present.
+        let scored = compute(&repo, &relations, Some(&coverage), &opts).unwrap();
+        assert_eq!(scored.len(), 2);
+        let a = scored.iter().find(|s| s.fqn == "a.A").unwrap();
+        let b = scored.iter().find(|s| s.fqn == "b.B").unwrap();
+        assert_eq!(a.cov, Some(0.1));
+        assert_eq!(a.fan_out, 1);
+        assert_eq!(b.fan_in, 1);
+
+        // Without coverage: cov is None everywhere, no crash, still 2 scores.
+        let degraded = compute(&repo, &relations, None, &opts).unwrap();
+        assert_eq!(degraded.len(), 2);
+        assert!(degraded.iter().all(|s| s.cov.is_none()));
     }
 }

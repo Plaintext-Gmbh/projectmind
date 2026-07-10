@@ -795,6 +795,25 @@ pub struct ClassOutline {
     /// Declared parent types: `extends` then `implements` / trait-impl
     /// targets. Drives the inheritance crumb in the GUI header.
     pub super_types: Vec<SuperTypeOutline>,
+    /// Line coverage for this class from a JaCoCo/LCOV/Cobertura report, when
+    /// one exists and resolves to this class (Cockpit 2.2, #158). `None` = no
+    /// coverage data. Filled by `class_outline_locked`, not by the pure
+    /// `build_class_outline`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<ClassCoverage>,
+}
+
+/// Per-class coverage surfaced on the class detail pane.
+#[derive(Debug, Serialize)]
+pub struct ClassCoverage {
+    /// Line coverage fraction, 0.0..=1.0.
+    pub line: f64,
+    /// Report format id (`jacoco`, `lcov`, `cobertura`).
+    pub format: String,
+    /// True when the report is older than 24h.
+    pub stale: bool,
+    /// Report age in seconds, when the mtime is known.
+    pub age_secs: Option<u64>,
 }
 
 /// One annotation as it appears in the class outline. `raw_args` is the
@@ -992,11 +1011,22 @@ fn list_modules_locked(state: &HostState) -> anyhow::Result<Vec<ModuleEntry>> {
     Ok(out)
 }
 
+/// Coverage-Report-Metadaten für die GUI (Format, Alter, Stale-Flag).
+#[derive(serde::Serialize)]
+struct CoverageMeta {
+    format: String,
+    path: std::path::PathBuf,
+    age_secs: Option<u64>,
+    stale: bool,
+}
+
 /// Ergebnis von `risk_atlas` (Browser-Mode-Pendant zum Tauri-Command) für die Treemap-GUI.
 #[derive(serde::Serialize)]
 struct RiskAtlasResult {
     window_days: u32,
     weights: risk::Weights,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    coverage: Option<CoverageMeta>,
     scores: Vec<risk::RiskScore>,
 }
 
@@ -1033,10 +1063,19 @@ fn risk_atlas_locked(
             .unwrap_or(risk::DEFAULT_CHURN_WINDOW_DAYS),
         weights: w,
     };
-    let scores = risk::compute(repo, &opts)?;
+    // Fan-in/out from the parsed relations graph; coverage from a report scan.
+    let relations = state.engine.relations(repo);
+    let coverage = projectmind_core::coverage::load(&repo.root);
+    let scores = risk::compute(repo, &relations, coverage.as_ref(), &opts)?;
     Ok(RiskAtlasResult {
         window_days: opts.window_days,
         weights: opts.weights,
+        coverage: coverage.as_ref().map(|c| CoverageMeta {
+            format: c.format.as_str().to_string(),
+            path: c.path.clone(),
+            age_secs: c.age_secs(),
+            stale: c.is_stale(),
+        }),
         scores,
     })
 }
@@ -1062,7 +1101,26 @@ fn class_outline_locked(state: &HostState, fqn: &str) -> anyhow::Result<ClassOut
     let (_module, class) = repo
         .find_class(fqn)
         .ok_or_else(|| anyhow::anyhow!("class not found: {fqn}"))?;
-    Ok(build_class_outline(class))
+    let mut outline = build_class_outline(class);
+    let report = projectmind_core::coverage::load(&repo.root);
+    outline.coverage = class_coverage(report.as_ref(), class);
+    Ok(outline)
+}
+
+/// Resolve per-class coverage from a repo's coverage report, if any covers
+/// the class. Mirrors the Tauri command so both detail panes match.
+fn class_coverage(
+    report: Option<&projectmind_core::coverage::CoverageReport>,
+    class: &projectmind_plugin_api::Class,
+) -> Option<ClassCoverage> {
+    let report = report?;
+    let line = report.coverage_for(&class.fqn, &class.file)?;
+    Some(ClassCoverage {
+        line,
+        format: report.format.as_str().to_string(),
+        stale: report.is_stale(),
+        age_secs: report.age_secs(),
+    })
 }
 
 fn visibility_str(v: projectmind_plugin_api::Visibility) -> String {
@@ -1128,6 +1186,7 @@ fn build_class_outline(class: &projectmind_plugin_api::Class) -> ClassOutline {
                 },
             })
             .collect(),
+        coverage: None,
     }
 }
 

@@ -175,5 +175,7 @@
   "integrity.field.builtAt": "Construit le",
   "integrity.field.builtAt.unknown": "inconnu (build locale)",
   "integrity.field.updaterKey": "Clé d'update (SHA-256)",
-  "integrity.foot.docs": "Comparez le préfixe avec la valeur documentée dans docs/security/updater-keys.md."
+  "integrity.foot.docs": "Comparez le préfixe avec la valeur documentée dans docs/security/updater-keys.md.",
+  "coverage.title": "Couverture",
+  "coverage.stale": "obsolète ({days}j)"
 }

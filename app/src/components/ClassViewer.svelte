@@ -149,6 +149,12 @@
     }, 1200);
   }
 
+  // Report age in whole days, for the "stale (Nd)" coverage badge. Clamps a
+  // missing age to 0 so the badge still renders rather than showing NaN.
+  function staleDays(ageSecs: number | null): number {
+    return Math.floor((ageSecs ?? 0) / 86400);
+  }
+
   function visibilityGlyph(v: MethodOutline['visibility'] | FieldOutline['visibility']): string {
     switch (v) {
       case 'public':
@@ -401,10 +407,32 @@
 
     {#if outlineOpen}
       <aside class="outline" aria-label={$t('outline.title')}>
+        <!-- Coverage badge renders independently of the methods/fields
+             empty-state below — a class with no members can still carry
+             a coverage number. -->
+        {#if outline?.coverage}
+          <div class="outline-section coverage" class:stale={outline.coverage.stale}>
+            <h3>{$t('coverage.title')}</h3>
+            <div
+              class="cov-badge"
+              title={`${outline.coverage.format} · ${Math.round(outline.coverage.line * 100)}%`}
+            >
+              <span class="cov-pct">{Math.round(outline.coverage.line * 100)}%</span>
+              <span class="cov-fmt">{outline.coverage.format}</span>
+              {#if outline.coverage.stale}
+                <span class="cov-stale"
+                  >{$t('coverage.stale', { days: staleDays(outline.coverage.age_secs) })}</span
+                >
+              {/if}
+            </div>
+          </div>
+        {/if}
         {#if outline === null}
           <div class="outline-placeholder">…</div>
         {:else if outline.methods.length === 0 && outline.fields.length === 0}
-          <div class="outline-placeholder">{$t('outline.empty')}</div>
+          {#if !outline.coverage}
+            <div class="outline-placeholder">{$t('outline.empty')}</div>
+          {/if}
         {:else}
           {#if outline.methods.length > 0}
             <div class="outline-section">
@@ -765,6 +793,31 @@
     font-family: var(--mono);
     font-weight: 400;
     color: var(--fg-2);
+  }
+
+  /* ----- Coverage badge ------------------------------------------------ */
+  .cov-badge {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 2px 6px;
+    font-family: var(--mono);
+  }
+  .cov-badge .cov-pct {
+    color: var(--fg-0);
+    font-weight: 600;
+  }
+  .cov-badge .cov-fmt {
+    /* 0.8em statt 10px: skaliert mit Zoom. */
+    font-size: 0.8em;
+    color: var(--fg-2);
+  }
+  .cov-badge .cov-stale {
+    font-size: 0.8em;
+    color: var(--warn);
+  }
+  .coverage.stale .cov-pct {
+    color: var(--warn);
   }
 
   .outline ul {
