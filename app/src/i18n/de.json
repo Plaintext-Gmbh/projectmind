@@ -94,6 +94,8 @@
   "diagram.codeCity.legendHeight": "Höhe = Zeilen/Größe",
   "diagram.codeCity.legendRisk": "Farbe = Risiko",
   "diagram.codeCity.legendGlow": "Glühen = Commits < 7d",
+  "diagram.codeCity.walk": "Begehen",
+  "diagram.codeCity.walkHud": "WASD bewegen · Maus umsehen · Shift rennen · Esc beendet",
   "diagram.drillHint": "Klicke auf einen Knoten, um hineinzuspringen",
   "diagram.colourBy": "einfärben nach",
   "diagram.colourBy.structure": "Nach Knotenart einfärben (Standard)",

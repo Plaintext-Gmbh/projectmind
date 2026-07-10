@@ -106,6 +106,8 @@
   "diagram.codeCity.legendHeight": "altura = líneas/tamaño",
   "diagram.codeCity.legendRisk": "color = riesgo",
   "diagram.codeCity.legendGlow": "brillo = commits < 7d",
+  "diagram.codeCity.walk": "Caminar",
+  "diagram.codeCity.walkHud": "WASD moverse · ratón mirar · Mayús correr · Esc salir",
   "diagram.description.c4Container": "Vista de contenedores C4 — módulos como contenedores, dependencias entre módulos como aristas.",
   "diagram.description.architectureLayers": "Mapa de capas draw.io — contacto externo en el borde, lógica de negocio en el medio, persistencia de datos dentro.",
   "diagram.description.languageStats": "Distribucion de archivos por lenguaje — numero de archivos y bytes por bucket.",
