@@ -162,7 +162,7 @@ pub struct ClassOutline {
     /// Declared parent types: `extends` targets first, then `implements` /
     /// trait-impl targets. Drives the inheritance crumb in the GUI header.
     pub super_types: Vec<SuperTypeOutline>,
-    /// Line coverage for this class from a JaCoCo/LCOV/Cobertura report, when
+    /// Line coverage for this class from a `JaCoCo`/LCOV/Cobertura report, when
     /// one exists and resolves to this class. `None` = no coverage data
     /// (Cockpit 2.2, #158). Populated by the `class_outline` command, not by
     /// [`build_class_outline`] (which is pure and repo-agnostic).
@@ -177,7 +177,7 @@ pub struct ClassCoverage {
     pub line: f64,
     /// Report format id (`jacoco`, `lcov`, `cobertura`).
     pub format: String,
-    /// True when the report is older than 24h (JaCoCo mtime > 24h etc.).
+    /// True when the report is older than 24h (`JaCoCo` mtime > 24h etc.).
     pub stale: bool,
     /// Report age in seconds, when the mtime is known.
     pub age_secs: Option<u64>,
