@@ -50,6 +50,7 @@
   import DiffView from './components/DiffView.svelte';
   import CompareView from './components/CompareView.svelte';
   import RiskAtlasView from './components/RiskAtlasView.svelte';
+  import PatternsView from './components/PatternsView.svelte';
   import KeyboardHelp from './components/KeyboardHelp.svelte';
   import StatusBar from './components/StatusBar.svelte';
   import McpToast from './components/McpToast.svelte';
@@ -1113,6 +1114,15 @@
           Risk Atlas
         </button>
       {/if}
+      {#if $repo}
+        <button
+          class:active={$viewMode === 'patterns'}
+          on:click={() => { followingMcp.set(false); viewMode.set('patterns'); }}
+          title="Patterns — Architektur-Drift als Compliance-Heatmap"
+        >
+          Patterns
+        </button>
+      {/if}
       {#if $viewMode === 'diff'}
         <button class="active">{$t('nav.diff')}</button>
       {/if}
@@ -1484,6 +1494,8 @@
     <CompareView />
   {:else if $viewMode === 'risk'}
     <RiskAtlasView />
+  {:else if $viewMode === 'patterns'}
+    <PatternsView />
   {:else}
     <section class="empty">
       <div class="welcome">

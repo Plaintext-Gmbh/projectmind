@@ -299,10 +299,10 @@ fn pattern_check_schema() -> Value {
         "properties": {
             "pattern": {
                 "type": "string",
-                "enum": ["no_static_state", "tx_on_service", "layered"],
-                "description": "Which pattern to evaluate. v1 ships three Spring-flavoured detectors."
+                "enum": ["repository", "layered", "di_only", "tx_on_service", "no_static_state"],
+                "description": "Which architectural pattern to evaluate. Accepts the PascalCase labels too (Repository | Layered | DI | Transactional | NoStaticState)."
             },
-            "module": { "type": "string", "description": "Optional module id filter. Omit to check across the whole repo." }
+            "module": { "type": "string", "description": "Optional module id filter. Omit to check across the whole repo (equivalent to scope `all`)." }
         },
         "required": ["pattern"]
     })
@@ -489,7 +489,7 @@ pub(crate) fn list() -> Value {
             },
             {
                 "name": "pattern_check",
-                "description": "Evaluate an architectural pattern against the open repository. v1 supports `no_static_state` (Spring components must not own mutable static fields), `tx_on_service` (@Transactional belongs on @Service, not @Controller), and `layered` (web/controller classes must not reference repositories or entities directly). Returns per-module compliance counts and a list of violations with file:line.",
+                "description": "Evaluate an architectural pattern (drift detection) against the open repository. Five Spring-flavoured detectors: `repository` (only @Repository classes may touch EntityManager / JdbcTemplate directly — a @Service that reaches for persistence primitives is drift), `layered` (web/controller classes must not reference repositories or entities directly — v1 flags intra-module only), `di_only` (no manual `new XxxService()` inside a @Component — inject beans instead), `tx_on_service` (@Transactional belongs on @Service, not @Controller), and `no_static_state` (Spring components must not own mutable static fields). Honours `.projectmind/patterns.toml` (layer order, package matchers, disabled detectors). Returns per-module compliance counts (`holds`), a list of `violations` with file:line, message, severity and a per-violation `confidence`, plus a detector-level `confidence`. Violations below 0.6 confidence are noise and hidden from the heatmap.",
                 "inputSchema": pattern_check_schema()
             },
             {
@@ -1538,7 +1538,7 @@ async fn pattern_check(state: &Mutex<ServerState>, args: Value) -> DispatchResul
         .map_err(|e| DispatchError::invalid_params(format!("pattern_check: {e}")))?;
     let pattern = Pattern::parse(&args.pattern).ok_or_else(|| {
         DispatchError::invalid_params(format!(
-            "pattern_check: unknown pattern `{}` (expected no_static_state | tx_on_service | layered)",
+            "pattern_check: unknown pattern `{}` (expected repository | layered | di_only | tx_on_service | no_static_state)",
             args.pattern
         ))
     })?;
@@ -1547,7 +1547,9 @@ async fn pattern_check(state: &Mutex<ServerState>, args: Value) -> DispatchResul
     };
     let state = state.lock().await;
     with_repo(&state, |repo| {
-        let result = core_patterns::check(repo, pattern, &scope);
+        // Per-repo config toggles detectors / layer rules; missing file = defaults.
+        let config = core_patterns::PatternConfig::load(&repo.root);
+        let result = core_patterns::check_with_config(repo, pattern, &scope, &config);
         let body = serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".into());
         Ok(text_result(body))
     })
@@ -1748,9 +1750,11 @@ mod tests {
             .iter()
             .map(|v| v.as_str().unwrap())
             .collect();
-        assert!(enum_values.contains(&"no_static_state"));
-        assert!(enum_values.contains(&"tx_on_service"));
+        assert!(enum_values.contains(&"repository"));
         assert!(enum_values.contains(&"layered"));
+        assert!(enum_values.contains(&"di_only"));
+        assert!(enum_values.contains(&"tx_on_service"));
+        assert!(enum_values.contains(&"no_static_state"));
     }
 
     #[test]

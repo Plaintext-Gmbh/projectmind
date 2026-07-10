@@ -428,6 +428,9 @@ fn route_api(
         }
         ("GET", "/api/list_modules") => Ok(serde_json::to_value(list_modules_locked(&guard)?)?),
         ("GET", "/api/risk_atlas") => Ok(serde_json::to_value(risk_atlas_locked(&guard, query)?)?),
+        ("GET", "/api/pattern_check") => {
+            Ok(serde_json::to_value(pattern_check_locked(&guard, query)?)?)
+        }
         ("GET", "/api/show_class") => {
             let fqn = required(query, "fqn")?;
             Ok(serde_json::to_value(show_class_locked(&guard, fqn)?)?)
@@ -1078,6 +1081,31 @@ fn risk_atlas_locked(
         }),
         scores,
     })
+}
+
+/// Pattern Lens (Cockpit 2.3) im Browser-Host. Ohne `pattern`-Query liefert es
+/// die komplette Heatmap (alle aktiven Detektoren via `check_all`); mit
+/// `pattern=<name>` nur einen. `module` schränkt auf ein Modul ein.
+/// `.projectmind/patterns.toml` steuert Layer-Regeln und deaktivierte Detektoren.
+fn pattern_check_locked(
+    state: &HostState,
+    query: &BTreeMap<String, String>,
+) -> anyhow::Result<Value> {
+    use projectmind_core::patterns::{self, Pattern, Scope};
+    let repo = repo(state)?;
+    let config = patterns::PatternConfig::load(&repo.root);
+    let scope = Scope {
+        module: query.get("module").cloned(),
+    };
+    if let Some(name) = query.get("pattern") {
+        let pattern =
+            Pattern::parse(name).ok_or_else(|| anyhow::anyhow!("unknown pattern `{name}`"))?;
+        let result = patterns::check_with_config(repo, pattern, &scope, &config);
+        Ok(serde_json::to_value(result)?)
+    } else {
+        let results = patterns::check_all(repo, &scope, &config);
+        Ok(serde_json::to_value(results)?)
+    }
 }
 
 fn show_class_locked(state: &HostState, fqn: &str) -> anyhow::Result<ClassDetails> {

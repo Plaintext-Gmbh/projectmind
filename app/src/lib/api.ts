@@ -727,3 +727,68 @@ export async function riskAtlas(opts: RiskAtlasOptions = {}): Promise<RiskAtlasR
     weights,
   });
 }
+
+// ---- Pattern Lens (Cockpit 2.3, Issue #159) -----------------------------
+
+/** One module's compliance count for a pattern: classes that satisfy the rule. */
+export interface ModuleHold {
+  module: string;
+  count: number;
+}
+
+/** One concrete architecture-drift violation. */
+export interface PatternViolation {
+  module: string;
+  file: string;
+  /** 1-based line; 0 when the offending element has no line attached. */
+  line: number;
+  fqn: string;
+  message: string;
+  /** 1=info, 2=warn, 3=critical. */
+  severity: number;
+  /** How clearly this hit matches the rule (0..=1). Below 0.6 = noise. */
+  confidence: number;
+}
+
+/** Aggregate result for one detector. */
+export interface PatternResult {
+  /** snake_case pattern id: repository | layered | di_only | tx_on_service | no_static_state. */
+  pattern: string;
+  holds: ModuleHold[];
+  violations: PatternViolation[];
+  /** Detector-level confidence 0..=1. */
+  confidence: number;
+}
+
+/** Violations below this confidence are hidden from the heatmap (noise floor). */
+export const PATTERN_CONFIDENCE_FLOOR = 0.6;
+
+/** Human-readable label per snake_case pattern id (heatmap rows). */
+export const PATTERN_LABELS: Record<string, string> = {
+  repository: 'Repository',
+  layered: 'Layered',
+  di_only: 'DI-only',
+  tx_on_service: '@Tx boundary',
+  no_static_state: 'No static state',
+};
+
+export interface PatternCheckOptions {
+  /** snake_case or PascalCase pattern id; omit for the full heatmap. */
+  pattern?: string;
+  /** Module id filter; omit for the whole repo. */
+  module?: string;
+}
+
+/**
+ * Pattern Lens: run architecture-drift detectors and return one
+ * {@link PatternResult} per active pattern (the compliance heatmap). Omitting
+ * `pattern` runs every enabled detector; passing it narrows to one. Dual-mode
+ * (Tauri invoke / browser-host HTTP), like every other read.
+ */
+export async function patternCheck(opts: PatternCheckOptions = {}): Promise<PatternResult[]> {
+  const { pattern, module } = opts;
+  if (!isTauriRuntime()) {
+    return api<PatternResult[]>(`/api/pattern_check${query({ pattern, module })}`);
+  }
+  return invoke<PatternResult[]>('pattern_check', { pattern, module });
+}
