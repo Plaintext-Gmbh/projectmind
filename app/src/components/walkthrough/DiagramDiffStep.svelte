@@ -1,21 +1,27 @@
 <script lang="ts">
   // Walkthrough `diagram-diff` step (#125).
   //
-  // Shows a before/after architecture snapshot for one diagram kind. The
-  // first implementation supports the folder map: `show_diagram('folder-map')`
-  // renders the current tree, and `list_changes_since(from, to)` supplies the
-  // file-level change set overlaid on it. The user toggles between three
-  // static modes — before / after / changed-only. Changed leaf nodes pulse
-  // once when the step opens; unchanged nodes fade back.
+  // Shows a before/after architecture snapshot for one diagram kind:
   //
-  // The heavy lifting (changed-node derivation, mode filtering, SVG) lives in
-  // `lib/diagramDiff.ts` so it is unit-tested without a DOM. This component is
-  // the thin shell that loads the data, owns the toggle + pulse lifecycle, and
+  //  - `folder-map` (the original): `show_diagram('folder-map')` renders the
+  //    current tree, `list_changes_since(from, to)` supplies the file-level
+  //    change set overlaid on it, and the user toggles three static modes —
+  //    before / after / changed-only. Changed leaf nodes pulse once; unchanged
+  //    nodes fade back. Heavy lifting lives in `lib/diagramDiff.ts`.
+  //  - `bean-graph-live` (V3.3): renders the animated Cytoscape bean-graph
+  //    *morph* instead — `BeanGraphLive` mounts with `autoMorphRef={from}`,
+  //    presses play, and animates the changed beans in while the layout eases.
+  //    A tour can thus "play" a bean-graph change. This path skips the entire
+  //    folder-map machinery below.
+  //
+  // This component is the thin shell that picks the path, loads the folder-map
+  // data (only in the static case), owns the toggle + pulse lifecycle, and
   // reuses the same shift-wheel zoom action as the other diagram views.
   import { onMount, tick } from 'svelte';
   import { showDiagram, listChangesSince } from '../../lib/api';
   import { t } from '../../lib/i18n';
   import { createShiftWheelZoom } from '../../lib/shiftWheelZoom';
+  import BeanGraphLive from '../BeanGraphLive.svelte';
   import {
     deriveChangedNodes,
     filterNodesForMode,
@@ -29,9 +35,19 @@
     type DiffStatus,
   } from '../../lib/diagramDiff';
 
-  export let diagram: 'folder-map' = 'folder-map';
+  /// The diagram kind this step diffs. `folder-map` is the original static
+  /// concentric-ring path (below); `bean-graph-live` renders the animated
+  /// Cytoscape morph (V3.3 / #125) — the changed beans animate in while the
+  /// layout eases, driven entirely by `BeanGraphLive` with `autoMorphRef`.
+  export let diagram: 'folder-map' | 'bean-graph-live' = 'folder-map';
   export let from: string;
   export let to: string | null = null;
+
+  /// True for the animated Cytoscape morph. The whole folder-map load / mode /
+  /// pulse machinery below is skipped in that case — BeanGraphLive owns its
+  /// data, ref and animation. (The bean-graph morph diffs `from`..working-tree;
+  /// `to` is not honoured — see the header note.)
+  $: isBeanGraphMorph = diagram === 'bean-graph-live';
 
   // Shift-wheel zoom, shared action + store used by the other diagram views.
   const { zoom, action: zoomAction } = createShiftWheelZoom(
@@ -102,7 +118,7 @@
     error = null;
     try {
       const [payload, delta] = await Promise.all([
-        showDiagram(diagram),
+        showDiagram('folder-map'),
         listChangesSince(from, to ?? undefined),
       ]);
       map = JSON.parse(payload) as FolderMap;
@@ -118,7 +134,9 @@
   }
 
   onMount(() => {
-    void load();
+    // The bean-graph morph path self-loads via BeanGraphLive; only the static
+    // folder-map path fetches the folder map + change set here.
+    if (!isBeanGraphMorph) void load();
     return () => {
       if (pulseTimer) clearTimeout(pulseTimer);
     };
@@ -136,6 +154,21 @@
 </script>
 
 <div class="dd-step">
+  {#if isBeanGraphMorph}
+    <!-- V3.3: animated Cytoscape bean-graph morph. BeanGraphLive owns the
+         data, ref and animation; we just supply the ref and a header. -->
+    <header class="dd-head">
+      <div class="dd-title">
+        <span class="dd-kicker">{$t('walkthrough.diagramDiff.kicker')}</span>
+        <strong class="dd-diagram">{diagram}</strong>
+        <span class="dd-range" title={rangeLabel}>{rangeLabel}</span>
+      </div>
+      <span class="dd-morph-hint">{$t('walkthrough.diagramDiff.morphHint')}</span>
+    </header>
+    <div class="dd-morph-stage" aria-label={$t('walkthrough.diagramDiff.morph.aria')}>
+      <BeanGraphLive autoMorphRef={from} embedded={true} />
+    </div>
+  {:else}
   <header class="dd-head">
     <div class="dd-title">
       <span class="dd-kicker">{$t('walkthrough.diagramDiff.kicker')}</span>
@@ -189,6 +222,7 @@
       </ul>
     {/if}
   {/if}
+  {/if}
 </div>
 
 <style>
@@ -216,6 +250,17 @@
     gap: 0.5rem;
     flex-wrap: wrap;
     min-width: 0;
+  }
+  /* V3.3 bean-graph morph: give the embedded live graph the whole stage. */
+  .dd-morph-stage {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+  }
+  .dd-morph-hint {
+    font-size: 0.75rem;
+    opacity: 0.7;
+    flex-shrink: 0;
   }
   .dd-kicker {
     text-transform: uppercase;

@@ -145,6 +145,7 @@
   "diff.rail.aria": "Navigation du diff — aller à un fichier ou un bloc modifié",
   "walkthrough.diagramDiff.modes.aria": "Mode d'instantané — avant, après ou seulement les modifications",
   "walkthrough.diagramDiff.legend.aria": "Légende des modifications",
+  "walkthrough.diagramDiff.morph.aria": "Morph animé du graphe Bean pour la modification",
   "keyboard.title": "Raccourcis clavier",
   "keyboard.section.navigation": "Navigation",
   "keyboard.section.zoom": "Zoom",
