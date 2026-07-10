@@ -18,7 +18,7 @@ that speaks the **Model Context Protocol (MCP)**.
 </p>
 <p align="center"><sub>An AI agent authors this tour <strong>live over MCP</strong> — steps, line highlights and narration are pushed into the viewer. No human clicked anything.</sub></p>
 
-> **Status:** v0.8 — MCP server + desktop app for **macOS, Linux and Windows**, with signed auto-updates. Java + Rust language plugins, Spring + Lombok framework recognisers, eight diagram types (bean graph, C4 container, folder heatmap, package tree, inheritance tree, doc graph, architecture layers, language stats), Markdown + HTML browsers (sandboxed), guided AI walkthroughs with quiz support, live AI-generated HTML/Markdown artifacts, and bidirectional MCP sync between LLM, desktop app and browser.
+> **Status:** v0.11 — MCP server + desktop app for **macOS, Linux and Windows**, with signed auto-updates. Java + Rust language plugins, Spring + Lombok framework recognisers, fourteen diagram types (see the catalogue below — from bean graph and C4 container up to an animated live bean graph and a 3D code city), Markdown + HTML browsers (sandboxed), guided AI walkthroughs with quiz support, presenter mode with PDF tour export, an Architect's Cockpit (risk atlas, pattern-drift detection, semantic tour lookup, morning briefing), live AI-generated HTML/Markdown artifacts, and bidirectional MCP sync between LLM, desktop app and browser.
 
 ## Quickstart
 
@@ -64,12 +64,44 @@ Modern AI-assisted development with CLI agents is great — until you want to *s
 
 ## GUI tabs
 
-The Tauri shell has four tabs (each disabled until a repository is open):
+The Tauri shell's main views (each disabled until a repository is open):
 
-- **Code** — module sidebar, class list, source viewer with stereotype filters, package drilldown.
-- **Diagrams** — Mermaid bean graph or package tree; click a node to drill in.
-- **MD** — every Markdown file in the repo, grouped by top-level directory, with rendered preview, mermaid blocks, and embedded images.
-- **HTML** — every `.html` / `.xhtml` / `.htm` / `.jsp` / `.vm` / `.ftl` file plus HTML snippets extracted from `.java` / `.kt` / `.groovy` / `.scala` string literals (Java text blocks supported). Toggle Rendered ↔ Source; Rendered uses a strict sandbox iframe (no JS, no network) so untrusted repo content stays inert.
+- **Files** — module sidebar, class list, source viewer with stereotype filters, package drilldown. Also hosts every Markdown file in the repo (rendered preview, mermaid blocks, embedded images) and every `.html` / `.xhtml` / `.htm` / `.jsp` / `.vm` / `.ftl` file plus HTML snippets extracted from `.java` / `.kt` / `.groovy` / `.scala` string literals (Java text blocks supported). Toggle Rendered ↔ Source; Rendered uses a strict sandbox iframe (no JS, no network) so untrusted repo content stays inert.
+- **Diagrams** — the fourteen-kind diagram catalogue below; click a node to drill in. A collapsible mini-map overlay (thumbnail + viewport rectangle, click/drag to pan) keeps you oriented on large graphs.
+- **Compare** — branch & tag compare with commits / changed files / unified diff sub-tabs.
+- **Risk Atlas** — per-class risk (churn + complexity + coverage + fan-in) as a treemap.
+- **Patterns** — architecture-drift compliance heatmap (patterns × modules); violation cells drill into `file:line` lists.
+
+A **Tour** / **Present** button appears while a guided walkthrough is active, and an **Artifact** button while an AI-pushed artifact is loaded.
+
+## Diagram catalogue
+
+Fourteen diagram kinds. Core contributes the filesystem- and git-based ones
+unconditionally; language and framework plugins contribute the rest, so the
+sidebar only offers what the open repo can actually render:
+
+- **Bean graph** — Mermaid injection graph, subgraphs per Maven module, colour-coded by stereotype.
+- **Live bean graph** — the interactive Cytoscape sibling of the bean graph: pan/zoom, since-ref diff overlay, animated morph, and the living modes below.
+- **Package tree** — Java packages / Rust module namespaces as a drillable tree.
+- **Inheritance tree** — `extends` / `implements` / Rust trait-impl edges; external supertypes grouped separately.
+- **Folder map** — treemap of the working tree with hierarchy / solar / top-down layouts; colour by structure, recency, author or diff (with legends).
+- **Doc graph** — the repo's markdown files as a clickable graph (network / radial / orphans layouts, orphan + dangling-link counts).
+- **C4 container** — one container per module, rendered via draw.io (exportable).
+- **Architecture layers** — layered draw.io view, kept for export.
+- **Architecture flow** — interactive Controller / Service / Repository / Entity bands with flow arrows whose width tracks the relation count.
+- **Module chord** — cross-module coupling as a circular chord diagram.
+- **Activity heatmap** — GitHub-style 7×52 commit calendar with streaks and a top-author summary.
+- **Timeline river** — per-module commit activity over the last 24 months; answers "when did module X go active or quiet".
+- **Language stats** — file / extension breakdown of the working tree.
+- **Code city** — the codebase as a 3D city (three.js, orbit camera): districts are folders, building height tracks file size, colour tracks the risk score.
+
+The live bean graph has three animation modes (one driver at a time): **Flow**
+simulates a request wave travelling from the controllers towards the
+repositories along the real relation edges; **Pulse** joins the repo's
+24-month commit activity onto the graph so modules with fresh commits visibly
+beat; **Cinematics** plays the commit timeline like a film — press play and
+watch the architecture diff morph step by step. All three are frontend-only
+overlays over data the MCP server already serves.
 
 ## What it looks like
 
@@ -92,16 +124,35 @@ custom agent — can connect to. It implements:
 | `open_repo` | Open a repository. Detects Maven multi-module layouts (any `pom.xml`) and Cargo workspaces (any `Cargo.toml` with a `[package]`); falls back to a single module otherwise. |
 | `repo_info` | Summary (modules, classes) of the active repo. |
 | `module_summary` | Per-module class count and stereotype histogram. |
+| `list_module_files` | List PDFs and images inside a module's root (source files are covered by `list_classes`). |
 | `list_classes` | List parsed classes (filter by stereotype). |
 | `find_class` | Case-insensitive substring search by simple or fully-qualified name. |
 | `class_outline` | Methods, fields, annotations and visibility of a class — without source. |
 | `show_class` | Source of a class with optional line-range highlights. |
+| `relations` | The full bean / injection graph as JSON: `{from, to, kind, cross_module}` edges. |
 | `list_changes_since` | Files changed since a given git ref. |
 | `show_diff` | Unified diff between two refs (or ref vs working tree). |
-| `show_diagram` | Mermaid bean graph (subgraphs per Maven module, colour-coded by stereotype) or package tree. |
+| `list_refs` | Local branches and tags with name, kind and target SHA — branches first, `master`/`main` floated to the top. |
+| `file_recency` | Per-file recency index: every path's most-recent commit (sha, summary, age), newest-first. The data behind the recency heatmap and author overlay. |
+| `commit_activity` | Per-module commit activity over the last 24 months — the data behind the timeline river; answers "when did module X go active or quiet". |
+| `show_diagram` | Diagram source for a given kind — Mermaid bean graph (subgraphs per Maven module, colour-coded by stereotype), package tree, inheritance tree and friends. The live/3D kinds (`bean-graph-live`, `timeline-river`, `code-city`) are rendered by the viewer from their own data endpoints. |
 | `list_html` | List HTML / XHTML / JSP / Velocity / FreeMarker template files in the open repository. |
 | `list_html_snippets` | Scan source files (`.java`, `.kt`, `.groovy`, `.scala`, incl. Java text blocks) for HTML snippets in string literals — filtered to ≥2 tags so XML namespace declarations and short error strings drop out. |
 | `plugin_info` | List active language and framework plugins. |
+| `risk_atlas` | Composite per-class risk scores from four signals — git churn, cyclomatic complexity, test coverage (JaCoCo/LCOV/Cobertura, gracefully absent), fan-in — with a `why` hint per class (`hot+uncovered+central`). Find the hotspots before reading any source. |
+| `pattern_check` | Architecture-drift detection: five Spring-flavoured detectors (`repository`, `layered`, `di_only`, `tx_on_service`, `no_static_state`) returning per-module compliance counts and `file:line` violations with confidence scores. Configurable via `.projectmind/patterns.toml`. |
+| `architect_briefing` | Morning briefing — what got *worse* since you last looked: diffs the current health snapshot against a previous session and reports new hotspots, pattern drift and risk deltas. Call this first in a session. |
+| `walkthrough_query` | Semantic lookup over curated tours: matches a natural-language question against every tour step and returns the best tour's steps with a confidence — the preferred way to answer "how does X work" before grepping. Answers `fallback: "grep"` when no tour matches. |
+| `tour_scaffold` | Machine skeleton for a "welcome to this repo" tour: ranks the modules worth touring (coupling + size + 90-day activity) and returns ready-made step targets plus facts bullets — the LLM writes the narration and calls `walkthrough_start`. `materialize: true` persists a template-narrated tour directly. |
+| `walkthrough_start` | Start a guided tour: pushes the tour body + step 0 to every open viewer. Replaces any previous tour; auto-launches the desktop GUI if nothing is open. |
+| `walkthrough_append` | Append one step to the active tour without moving the pointer — stream a tour while authoring it. |
+| `walkthrough_set_step` | Move the active tour's pointer to a 0-based step index (clamped). |
+| `walkthrough_clear` | End the active tour; viewers return to the previous view. |
+| `walkthrough_feedback` | Read the user's feedback events on the active tour (one entry per *Verstanden* / *Genauer* click), so the LLM can expand steps that were flagged. |
+| `view_class` | Open a class in every running viewer (desktop GUI and/or browser webapp); auto-launches the desktop GUI if none is up. |
+| `view_file` | Open an arbitrary file in every running viewer — Markdown rendered (mermaid + images), everything else as source. |
+| `view_diff` | Open the diff view between two refs (or ref vs working tree) in every running viewer. |
+| `view_diagram` | Open one of the fourteen diagram kinds in every running viewer. |
 | `start_gui` | Launch the ProjectMind desktop app if it isn't already running (the `view_*` tools auto-launch on demand, so call this only to bring up the window before any view intent). Honours `$PROJECTMIND_APP` for an override path. |
 | `open_browser_repo` | Start the in-process browser host that serves the ProjectMind webapp at a tokenized URL — same UI as the Tauri shell, but reachable from any browser. Default binds on `127.0.0.1`; pass `lan: true` to bind on `0.0.0.0` so the URL works from another device on the same WLAN (iPad / phone / second laptop). The bearer token in the URL fragment gates every API call. |
 | `browser_status` | Return the running browser host's bind address, tokenized URLs and open repo, or null if no host is started. Side-effect free — handy to re-surface the URL/token without restarting the host. |
