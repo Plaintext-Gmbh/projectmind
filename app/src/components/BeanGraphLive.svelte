@@ -19,7 +19,7 @@
   // the base cytoscape typings don't know about.
   import type { LayoutOptions } from 'cytoscape';
   import { beanGraphData, commitActivity, listChangesSince } from '../lib/api';
-  import type { ClassEntry, CommitActivity } from '../lib/api';
+  import type { ChangedFile, ClassEntry, CommitActivity } from '../lib/api';
   import { beanGraphElements } from '../lib/diagrams/beanGraphElements';
   import type { BeanGraphElements } from '../lib/diagrams/beanGraphElements';
   import { classifyBeanGraphDiff } from '../lib/diagrams/beanGraphDiff';
@@ -28,6 +28,8 @@
   import type { FlowPlan } from '../lib/diagrams/beanGraphFlow';
   import { planActivityPulse } from '../lib/diagrams/activityPulse';
   import type { ActivityPulsePlan } from '../lib/diagrams/activityPulse';
+  import { buildCommitTimeline, stepRange } from '../lib/diagrams/beanGraphCinematics';
+  import type { CinematicsRange, CinematicsStep } from '../lib/diagrams/beanGraphCinematics';
   import { classes, selectedClass, viewMode } from '../lib/store';
   import { t } from '../lib/i18n';
 
@@ -72,7 +74,7 @@
   // `morphRequested` mirrors the user's mode toggle; `resolveOverlayMode`
   // turns it + `diffRef` into the active overlay state (off / diff / morph).
   let morphRequested = autoMorphRef !== '';
-  $: overlayMode = resolveOverlayMode(!!diffRef, morphRequested);
+  $: overlayMode = resolveOverlayMode(!!diffRef, morphRequested, cinematicsActive);
 
   // --- Flow mode (V4.1 / #200 fourth toolbar mode) ---------------------------
   // A *simulated* request wave: BFS from the controller entry stereotypes along
@@ -108,7 +110,41 @@
   let pulsePlan: ActivityPulsePlan | null = null;
   /// `commit_activity` fetched lazily on first pulse activation and cached for
   /// the component's lifetime (re-toggling replans from the cache, no refetch).
+  /// Shared with the cinematics player (V4.3) — both build on the same walk.
   let activityCache: CommitActivity | null = null;
+
+  // --- Diff cinematics (V4.3 / #66 concept 2) ---------------------------------
+  // "Press play over a commit range": the per-module commit_activity is
+  // deduped into one global old→new timeline (≤40 frames), and each player
+  // step k paints the CUMULATIVE diff `timeline[0].sha .. timeline[k].sha`
+  // through the existing classify→paint path — newly touched classes pulse in,
+  // everything touched so far stays accented, the rest fades to ~50 %. Step 0
+  // is the baseline (from === to → empty diff → plain graph).
+  //
+  // Cinematics IS a since-ref overlay (it owns the same `changed`/`faded`
+  // classes), so it is the fourth `resolveOverlayMode` state and mutually
+  // exclusive with diff/morph; starting it also stops the flow and the
+  // activity pulse so the movie plays on a clean stage.
+  //
+  // Honest limitation (same contract as the morph, tooltip says so): the graph
+  // shows today's classes, so a step highlights "which of the current classes
+  // were touched up to this commit" — no historical intermediate states.
+  let cinematicsActive = false;
+  let cineTimeline: CinematicsStep[] = [];
+  let cineStep = 0;
+  let cinePlaying = false;
+  let cineLoading = false;
+  let cineError: string | null = null;
+  /// Change-sets already fetched, keyed by the step's `to` SHA (`from` is the
+  /// constant timeline start). Kept for the component's lifetime so replays
+  /// and scrubbing are instant.
+  const cineCache = new Map<string, ChangedFile[]>();
+  /// Last-request-wins guard for scrubbing: every shown step bumps this, and a
+  /// resolving fetch only paints when its ticket is still the newest.
+  let cineSeq = 0;
+  /// Node ids painted `changed` at the previously shown step — the delta
+  /// against the current step's cumulative set is what pulses ("newly touched").
+  let cinePrevNodeIds = new Set<string>();
   $: pulseHotCount = pulsePlan?.pulses.find((p) => p.intensity === 'hot')?.nodeIds.length ?? 0;
   $: pulseWarmCount = pulsePlan?.pulses.find((p) => p.intensity === 'warm')?.nodeIds.length ?? 0;
 
@@ -360,8 +396,10 @@
       return;
     }
     if (!cy || !els) return;
-    // Diff/morph and flow are mutually exclusive — applying a ref stops the flow.
+    // Diff/morph, flow and cinematics are mutually exclusive — applying a ref
+    // stops both players.
     if (flowActive) stopFlow();
+    if (cinematicsActive) stopCinematics();
     diffLoading = true;
     try {
       const changes = await listChangesSince(ref);
@@ -457,9 +495,11 @@
 
   /// Toggle the morph mode on/off. Flipping it while a ref is applied re-applies
   /// the overlay in the newly selected style (morph animates, plain diff snaps).
-  /// Turning morph on while the flow runs stops the flow (mutually exclusive).
+  /// Turning morph on while the flow or the cinematics player runs stops them
+  /// (mutually exclusive).
   function toggleMorph() {
     if (!morphRequested && flowActive) stopFlow();
+    if (!morphRequested && cinematicsActive) stopCinematics();
     morphRequested = !morphRequested;
     if (diffRef) void applyDiff();
   }
@@ -494,6 +534,8 @@
       morphRequested = false;
       clearDiff();
     }
+    // The cinematics player owns the same faded/pulse classes — stop it too.
+    if (cinematicsActive) stopCinematics();
     flowActive = true;
     flowPlan = planBeanGraphFlow(els);
     if (!flowPlan.animate) {
@@ -695,10 +737,207 @@
     cy?.elements().removeClass('activity-hot activity-warm activity-beat');
   }
 
-  /// Toggle the `changed` / `faded` classes and fire a one-shot pulse on the
-  /// changed nodes. Everything not changed fades; when nothing changed we leave
-  /// the graph plain rather than dim the whole thing.
-  function paintDiff(changedNodeIds: Set<string>, changedEdgeIds: Set<string>) {
+  // --- Cinematics playback (V4.3 / #66 concept 2) ------------------------------
+  // Auto-play advances one timeline step every CINE_STEP_MS via a recursive
+  // setTimeout (pattern: the flow's wave timer); the timer is only re-armed
+  // AFTER a step's fetch+paint resolved, so a slow change-set never piles up
+  // ticks. Scrubbing calls showCineStep directly — the sequence counter makes
+  // the latest request win over any still-in-flight older one.
+  const CINE_STEP_MS = 1200;
+  let cineTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /// Toggle the cinematics player. Turning it on clears every other overlay
+  /// (see startCinematics), builds the timeline and starts playing from the
+  /// baseline; turning it off stops the timers and restores the plain graph.
+  async function toggleCinematics() {
+    if (cinematicsActive) {
+      stopCinematics();
+    } else {
+      await startCinematics();
+    }
+  }
+
+  async function startCinematics() {
+    if (!cy || !els) return;
+    // The movie needs a clean stage: cinematics is mutually exclusive with the
+    // since-ref diff/morph overlay (same `changed`/`faded` classes), and the
+    // flow + activity-pulse loops are stopped too (timer hygiene — one
+    // animation driver at a time).
+    if (flowActive) stopFlow();
+    if (pulseActive) stopPulse();
+    if (diffRef || morphRequested) {
+      morphRequested = false;
+      clearDiff();
+    }
+    cinematicsActive = true;
+    cineError = null;
+    if (!activityCache) {
+      cineLoading = true;
+      try {
+        activityCache = await commitActivity();
+      } catch (err) {
+        cineError = String(err);
+        cinematicsActive = false;
+        return;
+      } finally {
+        cineLoading = false;
+      }
+      // The user may have toggled off (or the component unmounted) while the
+      // fetch was in flight — keep the cache, paint nothing.
+      if (!cinematicsActive || !cy || !els) return;
+    }
+    cineTimeline = buildCommitTimeline(activityCache);
+    cinePrevNodeIds = new Set();
+    cineStep = 0;
+    if (cineTimeline.length === 0) {
+      // Honest empty state: no commits in the window (or no git repo) — the
+      // toggle stays pressed and the label says why, but nothing plays.
+      return;
+    }
+    await showCineStep(0);
+    if (!cinematicsActive) return;
+    cinePlaying = true;
+    scheduleCineTick();
+  }
+
+  /// Stop the player: cancel the tick, invalidate any in-flight step fetch
+  /// (sequence bump) and strip the overlay classes back to the plain graph
+  /// (mirror of `stopFlow` / `stopPulse`'s cleanup role). The change-set cache
+  /// and the timeline stay for the next activation.
+  function stopCinematics() {
+    cinematicsActive = false;
+    cinePlaying = false;
+    cineSeq += 1;
+    if (cineTimer !== null) {
+      clearTimeout(cineTimer);
+      cineTimer = null;
+    }
+    if (pulseTimer) {
+      clearTimeout(pulseTimer);
+      pulseTimer = null;
+    }
+    cinePrevNodeIds = new Set();
+    cy?.elements().removeClass('changed faded pulse');
+  }
+
+  /// Resolve a step's change set: baseline (`from === to`) is empty by
+  /// construction (no fetch), otherwise cache-or-fetch keyed by the `to` SHA.
+  async function cineChanges(range: CinematicsRange): Promise<ChangedFile[]> {
+    if (range.from === range.to) return [];
+    const cached = cineCache.get(range.to);
+    if (cached) return cached;
+    const changes = await listChangesSince(range.from, range.to);
+    cineCache.set(range.to, changes);
+    return changes;
+  }
+
+  /// Warm the cache for step `k` without painting anything — fired after each
+  /// shown step so auto-play (and a forward scrub) usually hits the cache.
+  /// Best-effort: a failed prefetch is silent; the step itself will retry and
+  /// surface the error when actually shown.
+  function prefetchCineStep(k: number) {
+    if (k >= cineTimeline.length) return;
+    const range = stepRange(cineTimeline, k);
+    if (!range || range.from === range.to || cineCache.has(range.to)) return;
+    void listChangesSince(range.from, range.to)
+      .then((changes) => {
+        cineCache.set(range.to, changes);
+      })
+      .catch(() => {
+        /* best-effort — see doc comment */
+      });
+  }
+
+  /// Show timeline step `k`: fetch (or hit the cache for) the cumulative
+  /// change set, classify it through the existing diff join, and paint —
+  /// nodes newly touched since the previously shown step pulse in, the whole
+  /// cumulative set stays accented, the rest fades. Guarded by the sequence
+  /// counter so during scrubbing only the latest request paints.
+  async function showCineStep(k: number) {
+    if (!cy || !els || cineTimeline.length === 0) return;
+    const clamped = Math.max(0, Math.min(k, cineTimeline.length - 1));
+    cineStep = clamped;
+    cineError = null;
+    const range = stepRange(cineTimeline, clamped);
+    if (!range) return;
+    const seq = ++cineSeq;
+    try {
+      const changes = await cineChanges(range);
+      if (seq !== cineSeq || !cinematicsActive || !cy || !els) return;
+      const diff = classifyBeanGraphDiff(els, changes);
+      const fresh = new Set([...diff.changedNodeIds].filter((id) => !cinePrevNodeIds.has(id)));
+      paintDiff(diff.changedNodeIds, diff.changedEdgeIds, fresh);
+      cinePrevNodeIds = diff.changedNodeIds;
+      prefetchCineStep(clamped + 1);
+    } catch (err) {
+      if (seq === cineSeq) cineError = String(err);
+    }
+  }
+
+  function toggleCinePlay() {
+    if (cinePlaying) {
+      pauseCine();
+    } else {
+      void playCine();
+    }
+  }
+
+  /// Resume (or restart) auto-play. Pressing play at the final frame rewinds
+  /// to the baseline first, so ▶ always yields a moving picture.
+  async function playCine() {
+    if (!cinematicsActive || cineTimeline.length === 0) return;
+    cinePlaying = true;
+    if (cineStep >= cineTimeline.length - 1) {
+      await showCineStep(0);
+      if (!cinematicsActive || !cinePlaying) return;
+    }
+    scheduleCineTick();
+  }
+
+  function pauseCine() {
+    cinePlaying = false;
+    if (cineTimer !== null) {
+      clearTimeout(cineTimer);
+      cineTimer = null;
+    }
+  }
+
+  /// Arm the next auto-play tick. Each tick advances one step, awaits its
+  /// fetch+paint, and only then re-arms — reaching the final frame pauses the
+  /// player (the reel rests on "today"; ▶ replays from the baseline).
+  function scheduleCineTick() {
+    if (cineTimer !== null) clearTimeout(cineTimer);
+    cineTimer = setTimeout(async () => {
+      cineTimer = null;
+      if (!cinematicsActive || !cinePlaying) return;
+      if (cineStep + 1 >= cineTimeline.length) {
+        cinePlaying = false;
+        return;
+      }
+      await showCineStep(cineStep + 1);
+      if (cinematicsActive && cinePlaying) scheduleCineTick();
+    }, CINE_STEP_MS);
+  }
+
+  /// Slider scrub: jump straight to the step. The sequence counter in
+  /// showCineStep makes the latest scrub win over any in-flight older fetch;
+  /// a running auto-play simply continues from the scrubbed position.
+  function onCineScrub(evt: Event) {
+    const value = Number((evt.currentTarget as HTMLInputElement).value);
+    if (Number.isFinite(value)) void showCineStep(value);
+  }
+
+  /// Toggle the `changed` / `faded` classes and fire a one-shot pulse.
+  /// Everything not changed fades; when nothing changed we leave the graph
+  /// plain rather than dim the whole thing. By default every changed node
+  /// pulses; the cinematics player narrows the pulse to `pulseNodeIds` (only
+  /// the nodes NEWLY touched at this step) so the accumulated highlight stays
+  /// calm while the fresh arrivals carry the beat.
+  function paintDiff(
+    changedNodeIds: Set<string>,
+    changedEdgeIds: Set<string>,
+    pulseNodeIds?: Set<string>,
+  ) {
     if (!cy) return;
     cy.batch(() => {
       cy.elements().removeClass('changed faded pulse');
@@ -710,7 +949,13 @@
         e.addClass(changedEdgeIds.has(e.id()) ? 'changed' : 'faded');
       });
     });
-    pulseChanged();
+    if (pulseNodeIds) {
+      if (pulseNodeIds.size > 0) {
+        pulseNodes(cy.nodes().filter((n: { id: () => string }) => pulseNodeIds.has(n.id())));
+      }
+    } else {
+      pulseChanged();
+    }
   }
 
   /// One-shot pulse over a Cytoscape node collection: add the `pulse` class,
@@ -766,6 +1011,7 @@
     clearMorphTimers();
     stopFlow();
     stopPulse();
+    stopCinematics();
     cy?.destroy();
     cy = null;
   });
@@ -850,6 +1096,49 @@
       {/if}
       {#if pulseError}
         <span class="diff-error" title={pulseError}>⚠</span>
+      {/if}
+      <!-- Cinematics (V4.3): press play over the commit timeline. The toggle
+           reveals the player (play/pause + scrubber + step label); each step
+           paints the cumulative diff from the window start. Real commit data;
+           the tooltip carries the honest current-classes-only limitation. -->
+      <button
+        type="button"
+        class="cine-toggle"
+        class:active={cinematicsActive}
+        aria-pressed={cinematicsActive}
+        on:click={toggleCinematics}
+        disabled={cineLoading}
+        title={$t('diagram.beanGraphLive.cineTitle')}
+      >{cineLoading ? '…' : $t('diagram.beanGraphLive.cine')}</button>
+      {#if cinematicsActive && cineTimeline.length > 0}
+        <button
+          type="button"
+          class="cine-play"
+          on:click={toggleCinePlay}
+          title={cinePlaying ? $t('diagram.beanGraphLive.cinePause') : $t('diagram.beanGraphLive.cinePlay')}
+          aria-label={cinePlaying ? $t('diagram.beanGraphLive.cinePause') : $t('diagram.beanGraphLive.cinePlay')}
+        >{cinePlaying ? '❚❚' : '▶'}</button>
+        <input
+          type="range"
+          class="cine-slider"
+          min="0"
+          max={cineTimeline.length - 1}
+          step="1"
+          value={cineStep}
+          on:input={onCineScrub}
+          aria-label={$t('diagram.beanGraphLive.cineSlider')}
+        />
+        <span class="cine-step" title={cineTimeline[cineStep].summary}
+          >{$t('diagram.beanGraphLive.cineStep', {
+            step: cineStep + 1,
+            total: cineTimeline.length,
+            summary: cineTimeline[cineStep].summary,
+          })}</span>
+      {:else if cinematicsActive && !cineLoading}
+        <span class="cine-step">{$t('diagram.beanGraphLive.cineEmpty')}</span>
+      {/if}
+      {#if cineError}
+        <span class="diff-error" title={cineError}>⚠</span>
       {/if}
     {/if}
     <span class="hint">{$t('diagram.drillHint')}</span>
@@ -974,6 +1263,40 @@
   .pulse-summary {
     font-size: 11px;
     color: #ff7b72;
+  }
+  /* Cinematics toggle: text button that lights up (repository-stereotype
+     purple, distinct from the gold diff / blue flow / red pulse accents)
+     while the commit-timeline player is open. */
+  .toolbar button.cine-toggle {
+    width: auto;
+    padding: 0 8px;
+  }
+  .toolbar button.cine-toggle.active {
+    border-color: #d2a8ff;
+    color: #d2a8ff;
+  }
+  .toolbar button.cine-toggle:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .toolbar button.cine-play {
+    width: auto;
+    padding: 0 6px;
+    font-size: 10px;
+  }
+  .cine-slider {
+    width: 110px;
+    height: 22px;
+    margin: 0;
+    accent-color: #d2a8ff;
+  }
+  .cine-step {
+    font-size: 11px;
+    color: #d2a8ff;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .diff-summary {
     font-size: 11px;

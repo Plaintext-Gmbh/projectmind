@@ -31,8 +31,22 @@ describe('resolveOverlayMode', () => {
     expect(resolveOverlayMode(true, true)).toBe('morph');
   });
 
-  it('exposes exactly the three overlay states', () => {
-    expect([...BEAN_GRAPH_OVERLAY_MODES]).toEqual(['off', 'diff', 'morph']);
+  it('is cinematics whenever the player runs — ref and morph toggle are moot', () => {
+    // The component enforces the mutual exclusivity (starting cinematics
+    // clears the since-ref overlay, applying a ref stops cinematics); the pure
+    // precedence mirrors that: a running player IS the overlay.
+    expect(resolveOverlayMode(false, false, true)).toBe('cinematics');
+    expect(resolveOverlayMode(true, false, true)).toBe('cinematics');
+    expect(resolveOverlayMode(true, true, true)).toBe('cinematics');
+  });
+
+  it('defaults cinematics to off so pre-V4.3 call sites are unchanged', () => {
+    expect(resolveOverlayMode(true, true)).toBe(resolveOverlayMode(true, true, false));
+    expect(resolveOverlayMode(false, false)).toBe('off');
+  });
+
+  it('exposes exactly the four overlay states', () => {
+    expect([...BEAN_GRAPH_OVERLAY_MODES]).toEqual(['off', 'diff', 'morph', 'cinematics']);
   });
 });
 
