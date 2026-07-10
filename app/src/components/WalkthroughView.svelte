@@ -35,6 +35,7 @@
   import { readZoom, writeZoom, clampZoom, wheelDelta } from '../lib/shiftWheelZoom';
   import { openUrl } from '../lib/openUrl';
   import { expandStepRefs, matchLineAnchor } from '../lib/walkthroughText';
+  import { firstHighlightRange } from '../lib/walkthroughHighlight';
   import { compassFor, compassIconFor } from '../lib/compass';
   import { isCorrect, scoreQuiz, type QuizAnswer } from '../lib/quiz';
 
@@ -152,7 +153,37 @@
     // the fresh `body` hasn't been flushed into `step` at all — so the
     // loader would see a stale (or, on a fresh mount, null) step, skip the
     // fetch, and leave the target pane empty (#171).
-    await loadTargetForStep(body?.steps[_step] ?? null);
+    const activeStep = body?.steps[_step] ?? null;
+    await loadTargetForStep(activeStep);
+    await scrollToFirstHighlight(activeStep);
+  }
+
+  /// #175: when a step opens, bring its FIRST highlight range into view —
+  /// without this the pane sits at line 1 (or wherever the previous step
+  /// left it) and highlights below the fold go unseen. Steps without
+  /// highlights — or whose ranges point outside the loaded content — reset
+  /// the pane to the top instead, so the previous step's scroll offset
+  /// doesn't leak into this step. Diff targets are excluded (DiffView owns
+  /// its own focus rail, #126), markdown files too (FileView scrolls to its
+  /// own anchor), and note/artifact targets have no source lines at all.
+  async function scrollToFirstHighlight(s: WalkthroughStep | null) {
+    await tick(); // wait for the freshly loaded target to reach the DOM
+    const t = s?.target;
+    if (!targetEl || !t) return;
+    if (t.kind !== 'class' && t.kind !== 'file') return;
+    if (t.kind === 'file' && isMarkdown(t.path)) return;
+
+    const first = firstHighlightRange(t.highlight);
+    if (first) {
+      const line = targetEl.querySelector<HTMLElement>(`[data-line-no="${first.from}"]`);
+      if (line) {
+        line.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+      // Range beyond the rendered content — fall through to the top.
+    }
+    const scroller = plainEl ?? targetEl.querySelector<HTMLElement>('pre.source');
+    if (scroller) scroller.scrollTop = 0;
   }
 
   async function loadTargetForStep(s: WalkthroughStep | null) {
