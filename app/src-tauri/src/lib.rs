@@ -28,7 +28,7 @@ use projectmind_core::state::{self, UiState, ViewIntent};
 use projectmind_core::walkthrough::{
     self as wt, FeedbackEvent, FeedbackKind, FeedbackLog, Walkthrough,
 };
-use projectmind_core::{diagram, risk, tts, Engine, Repository};
+use projectmind_core::{code_city, diagram, risk, tts, Engine, Repository};
 use projectmind_framework_lombok::LombokPlugin;
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_lang_java::JavaPlugin;
@@ -618,6 +618,19 @@ fn bean_graph_data(state: State<'_, Arc<AppState>>) -> Result<diagram::BeanGraph
         .ok_or_else(|| "no repository open".to_string())?;
     let spring = SpringPlugin::new();
     Ok(diagram::render_bean_graph_data(repo, &spring))
+}
+
+/// JSON payload for the 3D code city (`code-city`, #66). Own command like
+/// `bean_graph_data` — `show_diagram` does not serve it. Relations come from
+/// the engine (no re-scan), the same contract `risk_atlas` uses.
+#[tauri::command]
+fn code_city_data(state: State<'_, Arc<AppState>>) -> Result<code_city::CodeCityData, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    let relations = state.engine.relations(repo);
+    Ok(code_city::build(repo, &relations))
 }
 
 #[tauri::command]
@@ -1320,6 +1333,7 @@ pub fn run() {
             file_recency,
             commit_activity,
             bean_graph_data,
+            code_city_data,
             list_refs,
             list_annotations,
             add_annotation,

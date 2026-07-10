@@ -209,6 +209,11 @@ impl Engine {
         // module over a time axis. Unconditional for the same reason: its
         // payload carries a `no_git` empty state.
         out.insert("timeline-river".to_string());
+        // code-city (#66) renders the walked file tree as a 3D city.
+        // Unconditional like folder-map: it's a pure filesystem capability —
+        // even a repo with zero parsed classes gets buildings from file
+        // sizes; the risk/recency joins degrade to None in the payload.
+        out.insert("code-city".to_string());
         // doc-graph is always meaningful when the repo has at least one
         // markdown file. Unconditional on plugins because it's purely a
         // filesystem scan, not language-specific parsing.

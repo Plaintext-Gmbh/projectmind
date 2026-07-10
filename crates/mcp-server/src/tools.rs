@@ -104,7 +104,8 @@ fn diagram_schema() -> Value {
                     "module-chord",
                     "activity-heatmap",
                     "timeline-river",
-                    "language-stats"
+                    "language-stats",
+                    "code-city"
                 ]
             }
         },
@@ -1269,6 +1270,10 @@ fn view_diagram(args: Value) -> DispatchResult {
         && args.kind != "activity-heatmap"
         && args.kind != "timeline-river"
         && args.kind != "language-stats"
+        // Live-only kind like `timeline-river`: rendered by the viewers from
+        // their own data endpoint (`code_city_data`); `show_diagram` does not
+        // serve it, but `view_diagram` may push it.
+        && args.kind != "code-city"
     {
         return Err(DispatchError::invalid_params(format!(
             "unknown diagram type: {}",
@@ -2149,6 +2154,28 @@ mod tests {
         assert!(required.contains(&"title"));
         assert!(required.contains(&"format"));
         assert!(required.contains(&"content"));
+    }
+
+    /// Guard against the classic wiring miss (#66): a new live-only diagram
+    /// kind must land in the `view_diagram` schema enum, or MCP callers can
+    /// never push it even though the viewers render it.
+    #[test]
+    fn view_diagram_schema_includes_live_only_kinds() {
+        let v = list();
+        let tools = v["tools"].as_array().unwrap();
+        let vd = tools
+            .iter()
+            .find(|t| t["name"] == "view_diagram")
+            .expect("view_diagram tool registered");
+        let kinds: Vec<&str> = vd["inputSchema"]["properties"]["type"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(kinds.contains(&"bean-graph-live"));
+        assert!(kinds.contains(&"timeline-river"));
+        assert!(kinds.contains(&"code-city"));
     }
 
     #[test]

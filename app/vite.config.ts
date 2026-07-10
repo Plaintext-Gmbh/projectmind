@@ -50,6 +50,10 @@ export default defineConfig(async () => ({
           ) {
             return 'cytoscape';
           }
+          // Three.js powers only the code-city diagram; CodeCity.svelte
+          // dynamic-imports it (same pattern as cytoscape above), so the
+          // start bundle pays 0 KB until that diagram is opened.
+          if (id.includes('node_modules/three')) return 'three';
           return undefined;
         },
       },
@@ -58,6 +62,9 @@ export default defineConfig(async () => ({
     // ES2015 transpilation.
     target: 'es2022',
     // Squelch the 500 KB warning — we already split the heavyweights.
-    chunkSizeWarningLimit: 1000,
+    // 1600 because the deliberately split three chunk is ~700 KB minified:
+    // it's a lazy chunk that only loads when the code-city diagram opens,
+    // so its size never taxes the start bundle.
+    chunkSizeWarningLimit: 1600,
   },
 }));

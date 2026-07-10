@@ -17,6 +17,7 @@ pub mod annotations;
 pub mod architecture_flow;
 pub mod artifact;
 pub mod cargo;
+pub mod code_city;
 pub mod code_graph;
 pub mod code_graph_sqlite;
 pub mod coverage;
