@@ -146,6 +146,95 @@ pub fn render_bean_graph(repo: &Repository, framework: &dyn FrameworkPlugin) -> 
     out
 }
 
+/// One node in the live bean graph — a class touched by at least one relation.
+#[derive(Debug, Clone, Serialize)]
+pub struct BeanNode {
+    /// Fully-qualified class name (stable id, matches relation `from`/`to`).
+    pub id: String,
+    /// Simple class name shown on the node.
+    pub label: String,
+    /// Module id the class belongs to (Maven `groupId:artifactId` / Cargo crate).
+    pub module: String,
+    /// Primary stereotype (`service`, `rest-controller`, …) or `null` when the
+    /// class has none. Matches the priority order the Mermaid `classDef` uses.
+    pub stereotype: Option<String>,
+}
+
+/// One directed edge in the live bean graph, mirroring [`Relation`].
+#[derive(Debug, Clone, Serialize)]
+pub struct BeanEdge {
+    /// Source class FQN.
+    pub from: String,
+    /// Target class FQN.
+    pub to: String,
+    /// Relation kind, serialised as the snake-case [`RelationKind`] name
+    /// (`extends`, `implements`, `uses`, `injects`, `calls`, `annotated`,
+    /// `other`) so the frontend can key an edge style off it.
+    pub kind: RelationKind,
+}
+
+/// JSON payload for the interactive Cytoscape bean graph (`bean-graph-live`).
+///
+/// Additive sibling of [`render_bean_graph`]: it draws from the exact same
+/// data source (framework relations grouped by module + the stereotype
+/// lookup) but ships nodes/edges as data instead of Mermaid text, so a
+/// stateful frontend renderer (Cytoscape) can lay it out, pan/zoom, and
+/// drill down. The Mermaid renderer stays the MCP contract and fallback.
+#[derive(Debug, Clone, Serialize)]
+pub struct BeanGraphData {
+    /// Nodes, one per class that participates in at least one relation,
+    /// sorted by id for stable output.
+    pub nodes: Vec<BeanNode>,
+    /// Directed edges, one per framework relation, in discovery order.
+    pub edges: Vec<BeanEdge>,
+}
+
+/// Build the JSON model for the interactive bean graph.
+///
+/// Same collection logic as [`render_bean_graph`] step 1: every relation the
+/// framework reports contributes an edge, and the first module that mentions
+/// a class owns it. Only classes that appear on a relation become nodes — we
+/// deliberately do not dump every parsed class, matching the Mermaid view.
+#[must_use]
+pub fn render_bean_graph_data(repo: &Repository, framework: &dyn FrameworkPlugin) -> BeanGraphData {
+    // 1. Collect relations and the module that owns each touched node — the
+    //    same first-mention rule the Mermaid renderer uses.
+    let mut edges: Vec<BeanEdge> = Vec::new();
+    let mut node_modules: BTreeMap<String, String> = BTreeMap::new(); // fqn → module_id
+    for (mod_id, module) in &repo.modules {
+        for rel in framework.relations(module) {
+            node_modules
+                .entry(rel.from.clone())
+                .or_insert_with(|| mod_id.clone());
+            node_modules
+                .entry(rel.to.clone())
+                .or_insert_with(|| mod_id.clone());
+            edges.push(BeanEdge {
+                from: rel.from,
+                to: rel.to,
+                kind: rel.kind,
+            });
+        }
+    }
+
+    // 2. Primary stereotype per class (same priority lookup as the Mermaid view).
+    let stereotype_for = stereotype_lookup(repo);
+
+    // 3. One node per touched class. `node_modules` is a BTreeMap, so iteration
+    //    is already sorted by FQN — stable output for tests and diffs.
+    let nodes = node_modules
+        .into_iter()
+        .map(|(fqn, module)| BeanNode {
+            label: simple_name(&fqn).to_string(),
+            stereotype: stereotype_for.get(&fqn).cloned(),
+            module,
+            id: fqn,
+        })
+        .collect();
+
+    BeanGraphData { nodes, edges }
+}
+
 /// Render the package tree as Mermaid.
 #[must_use]
 pub fn render_package_tree(repo: &Repository) -> String {
@@ -1244,6 +1333,45 @@ mod tests {
             out.contains("call onNodeClick(\"class\",\"g:m1\",\"a.A\")"),
             "missing class click in:\n{out}"
         );
+    }
+
+    #[test]
+    fn bean_graph_data_mirrors_bean_graph_nodes_and_edges() {
+        let mut repo = Repository::default();
+        let mut m1 = Module {
+            id: "g:m1".into(),
+            ..Default::default()
+        };
+        m1.classes.insert("a.A".into(), class("a.A", "service"));
+        m1.classes.insert("a.B".into(), class("a.B", "controller"));
+        repo.insert_module(m1);
+
+        let data = render_bean_graph_data(&repo, &DummyFw);
+        // DummyFw chains stereotyped classes: one edge a.A → a.B (Injects).
+        assert_eq!(data.edges.len(), 1);
+        assert_eq!(data.edges[0].from, "a.A");
+        assert_eq!(data.edges[0].to, "a.B");
+        assert_eq!(data.edges[0].kind, RelationKind::Injects);
+        // Both touched classes become nodes, carrying module + stereotype.
+        assert_eq!(data.nodes.len(), 2);
+        let a = data.nodes.iter().find(|n| n.id == "a.A").unwrap();
+        assert_eq!(a.label, "A");
+        assert_eq!(a.module, "g:m1");
+        assert_eq!(a.stereotype.as_deref(), Some("service"));
+        let b = data.nodes.iter().find(|n| n.id == "a.B").unwrap();
+        assert_eq!(b.stereotype.as_deref(), Some("controller"));
+
+        // RelationKind serialises snake_case so the frontend can key styles off it.
+        let json = serde_json::to_string(&data).unwrap();
+        assert!(json.contains("\"kind\":\"injects\""), "json:\n{json}");
+    }
+
+    #[test]
+    fn bean_graph_data_is_empty_for_empty_repo() {
+        let repo = Repository::default();
+        let data = render_bean_graph_data(&repo, &DummyFw);
+        assert!(data.nodes.is_empty());
+        assert!(data.edges.is_empty());
     }
 
     fn class_with_supers(

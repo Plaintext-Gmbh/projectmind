@@ -458,6 +458,16 @@ fn route_api(
             let repo = repo(&guard)?;
             Ok(serde_json::to_value(git::commit_activity(&repo.root))?)
         }
+        ("GET", "/api/bean_graph_data") => {
+            // Interactive Cytoscape bean graph (`bean-graph-live`). Own
+            // endpoint like `commit_activity` — the Mermaid `bean-graph`
+            // still flows through `show_diagram`.
+            let repo = repo(&guard)?;
+            let spring = SpringPlugin::new();
+            Ok(serde_json::to_value(diagram::render_bean_graph_data(
+                repo, &spring,
+            ))?)
+        }
         ("GET", "/api/list_refs") => {
             let repo = repo(&guard)?;
             Ok(serde_json::to_value(git::list_refs(&repo.root)?)?)

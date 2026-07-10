@@ -53,6 +53,7 @@
   import { renderTimelineRiver } from '../lib/diagrams/timelineRiver';
   import { createViewportStore } from '../lib/diagrams/viewport';
   import MiniMap from './MiniMap.svelte';
+  import BeanGraphLive from './BeanGraphLive.svelte';
 
   export let kind: DiagramKind;
   export let folderLayout: 'hierarchy' | 'solar' | 'td' = 'solar';
@@ -392,6 +393,26 @@
     loading = true;
     error = null;
     try {
+      // bean-graph-live is rendered by the <BeanGraphLive> Cytoscape
+      // component, which fetches its own payload (beanGraphData) and owns
+      // pan/zoom. Short-circuit here: clear every SVG-path state var and let
+      // the template branch mount the component instead of the SVG stage.
+      if (k === 'bean-graph-live') {
+        mermaidSource = '';
+        svg = '';
+        drawIoXml = '';
+        docGraph = null;
+        folderMap = null;
+        selectedFolderNode = null;
+        languageStats = null;
+        architectureFlow = null;
+        moduleChord = null;
+        activityHeatmap = null;
+        timelineRiver = null;
+        loading = false;
+        return;
+      }
+
       // Fetch git facts (recency + author) when the user is looking at
       // the folder map in either git-driven mode. Cached per repo root,
       // so toggling between R and A re-renders without a re-fetch.
@@ -806,6 +827,11 @@
 </script>
 
 <div class="root">
+  {#if kind === 'bean-graph-live'}
+    <!-- Interactive Cytoscape bean graph. Owns its own toolbar / pan / zoom,
+         so it replaces the shared SVG toolbar+stage entirely. -->
+    <BeanGraphLive />
+  {:else}
   <div class="toolbar">
     <button on:click={() => zoomBy(1.25)} title="Zoom in" disabled={!!drawIoXml}>＋</button>
     <button on:click={() => zoomBy(0.8)} title="Zoom out" disabled={!!drawIoXml}>－</button>
@@ -1073,6 +1099,7 @@
         </aside>
       {/if}
     </div>
+  {/if}
   {/if}
 </div>
 

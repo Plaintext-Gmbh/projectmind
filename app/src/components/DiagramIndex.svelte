@@ -24,6 +24,8 @@
     switch (kind) {
       case 'bean-graph':
         return $t('diagram.beanGraph');
+      case 'bean-graph-live':
+        return $t('diagram.beanGraphLive');
       case 'package-tree':
         return $t('diagram.packageTree');
       case 'folder-map':
@@ -55,6 +57,8 @@
     switch (kind) {
       case 'bean-graph':
         return $t('diagram.description.beanGraph');
+      case 'bean-graph-live':
+        return $t('diagram.description.beanGraphLive');
       case 'package-tree':
         return $t('diagram.description.packageTree');
       case 'folder-map':

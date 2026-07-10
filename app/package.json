@@ -38,6 +38,8 @@
     "@tauri-apps/plugin-dialog": "^2.0.0",
     "@tauri-apps/plugin-process": "^2.0.0",
     "@tauri-apps/plugin-updater": "^2.0.0",
+    "cytoscape": "^3.34.0",
+    "cytoscape-fcose": "^2.2.0",
     "marked": "^18.0.2",
     "mermaid": "^11.15.0"
   },
