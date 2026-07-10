@@ -52,3 +52,95 @@ export function authorIdentity(
   if (name && name.trim()) return name.trim();
   return null;
 }
+
+/// One swatch in the recency legend: the sampled age (seconds) and the
+/// colour `recencyColor` produces for it. Kept in this module so the legend
+/// swatches can never drift from the scale that colours the boxes.
+export interface RecencyLegendStop {
+  /// i18n key for the label ("today" · "this week" · ">6 months").
+  key: 'today' | 'week' | 'stale';
+  /// Representative age in seconds used to sample the colour.
+  secs_ago: number;
+  /// The `recencyColor` swatch for that age.
+  color: string;
+}
+
+const DAY = 86_400;
+
+/// Fixed three-stop legend for the recency heatmap (#63.1): today, this
+/// week, and the >6-month stale tail. Sampling the actual `recencyColor`
+/// keeps the swatches honest — change the scale and the legend follows.
+export function recencyLegend(): RecencyLegendStop[] {
+  return [
+    { key: 'today', secs_ago: DAY / 6, color: recencyColor(DAY / 6) },
+    { key: 'week', secs_ago: DAY * 3, color: recencyColor(DAY * 3) },
+    { key: 'stale', secs_ago: DAY * 210, color: recencyColor(DAY * 210) },
+  ];
+}
+
+/// Per-file git fact the author legend aggregates over: who last touched it
+/// and how long ago. Mirrors the component's per-path cache, but as a plain
+/// value so the aggregation stays pure and unit-testable.
+export interface AuthorFact {
+  /// Stable author identity (see {@link authorIdentity}); null skips the file.
+  author: string | null;
+  /// Seconds since that author's most-recent touching commit.
+  secs_ago: number;
+}
+
+/// One row in the author overlay's side legend (#63.2). `commits` counts the
+/// files where this author is the most-recent toucher (the cheap proxy the
+/// overlay already uses); `lastTouchedSecsAgo` is the freshest of those.
+export interface AuthorLegendRow {
+  identity: string;
+  color: string;
+  /// Files most-recently touched by this author.
+  commits: number;
+  /// Smallest `secs_ago` across this author's files.
+  lastTouchedSecsAgo: number;
+}
+
+/// Aggregate per-file author facts into the legend rows. Deterministic: rows
+/// are sorted by commit count descending, then identity ascending, so the
+/// same repo always renders the same legend order. Files with no author are
+/// skipped. An `undefined`/empty input yields an empty legend (no throw).
+export function buildAuthorLegend(facts: Iterable<AuthorFact>): AuthorLegendRow[] {
+  const byAuthor = new Map<string, { commits: number; lastTouchedSecsAgo: number }>();
+  for (const f of facts) {
+    if (!f || !f.author) continue;
+    const cur = byAuthor.get(f.author);
+    if (cur) {
+      cur.commits += 1;
+      if (f.secs_ago < cur.lastTouchedSecsAgo) cur.lastTouchedSecsAgo = f.secs_ago;
+    } else {
+      byAuthor.set(f.author, { commits: 1, lastTouchedSecsAgo: f.secs_ago });
+    }
+  }
+  return [...byAuthor.entries()]
+    .map(([identity, agg]) => ({
+      identity,
+      color: authorColor(identity),
+      commits: agg.commits,
+      lastTouchedSecsAgo: agg.lastTouchedSecsAgo,
+    }))
+    .sort((a, b) => b.commits - a.commits || a.identity.localeCompare(b.identity));
+}
+
+/// Compact relative-age label for hover tooltips ("just now", "3d", "5w",
+/// "2y"). Coarse by design — the legend hover wants a glance-value, not a
+/// precise timestamp. Negative / sub-minute ages collapse to "just now".
+export function humanizeAge(secs_ago: number): string {
+  if (secs_ago < 60) return 'just now';
+  const min = Math.floor(secs_ago / 60);
+  if (min < 60) return `${min}m`;
+  const hours = Math.floor(secs_ago / 3600);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(secs_ago / DAY);
+  if (days < 7) return `${days}d`;
+  const weeks = Math.floor(days / 7);
+  if (days < 30) return `${weeks}w`;
+  const months = Math.floor(days / 30);
+  if (days < 365) return `${months}mo`;
+  const years = Math.floor(days / 365);
+  return `${years}y`;
+}

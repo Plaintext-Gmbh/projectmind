@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { authorColor, authorIdentity, recencyColor } from './folderMapColors';
+import {
+  authorColor,
+  authorIdentity,
+  buildAuthorLegend,
+  humanizeAge,
+  recencyColor,
+  recencyLegend,
+} from './folderMapColors';
 
 /// Pull `H/S/L` triples out of an `hsl(h, s%, l%)` string for numeric
 /// comparison. The renderer rounds at emit time, so the test only has to
@@ -112,5 +119,98 @@ describe('authorIdentity', () => {
     expect(authorIdentity('', '')).toBeNull();
     expect(authorIdentity('   ', '   ')).toBeNull();
     expect(authorIdentity(undefined, undefined)).toBeNull();
+  });
+});
+
+describe('recencyLegend', () => {
+  const day = 86_400;
+
+  it('has exactly the three documented stops in fresh→stale order', () => {
+    const stops = recencyLegend();
+    expect(stops.map((s) => s.key)).toEqual(['today', 'week', 'stale']);
+    // Ages increase down the legend.
+    for (let i = 1; i < stops.length; i++) {
+      expect(stops[i].secs_ago).toBeGreaterThan(stops[i - 1].secs_ago);
+    }
+  });
+
+  it('samples the real recencyColor so swatches never drift from the scale', () => {
+    for (const stop of recencyLegend()) {
+      expect(stop.color).toBe(recencyColor(stop.secs_ago));
+    }
+  });
+
+  it('spans the hot→cool hue range across the three stops', () => {
+    const [today, , stale] = recencyLegend();
+    const hot = Number(/hsl\((\d+)/.exec(today.color)![1]);
+    const cold = Number(/hsl\((\d+)/.exec(stale.color)![1]);
+    expect(hot).toBeLessThanOrEqual(60); // near the hot anchor
+    expect(cold).toBeGreaterThanOrEqual(150); // well toward the cool anchor
+    expect(stale.secs_ago).toBeGreaterThan(day * 180); // > 6 months
+  });
+});
+
+describe('buildAuthorLegend', () => {
+  it('aggregates commits per author and picks the freshest touch', () => {
+    const rows = buildAuthorLegend([
+      { author: 'alice@example.com', secs_ago: 500 },
+      { author: 'alice@example.com', secs_ago: 100 },
+      { author: 'bob@example.com', secs_ago: 900 },
+    ]);
+    expect(rows).toHaveLength(2);
+    const alice = rows.find((r) => r.identity === 'alice@example.com')!;
+    expect(alice.commits).toBe(2);
+    expect(alice.lastTouchedSecsAgo).toBe(100); // freshest of the two
+    expect(alice.color).toBe(authorColor('alice@example.com'));
+  });
+
+  it('sorts by commit count desc, then identity asc — deterministically', () => {
+    const facts = [
+      { author: 'bob@example.com', secs_ago: 10 },
+      { author: 'alice@example.com', secs_ago: 10 },
+      { author: 'alice@example.com', secs_ago: 20 },
+      { author: 'carol@example.com', secs_ago: 10 }, // ties bob on 1 commit
+    ];
+    const first = buildAuthorLegend(facts).map((r) => `${r.identity}:${r.commits}`);
+    // Alice (2) leads; bob & carol tie at 1 → identity ascending (bob < carol).
+    expect(first).toEqual([
+      'alice@example.com:2',
+      'bob@example.com:1',
+      'carol@example.com:1',
+    ]);
+    // Re-running on a shuffled input yields the same order.
+    const shuffled = buildAuthorLegend([facts[3], facts[1], facts[0], facts[2]]).map(
+      (r) => `${r.identity}:${r.commits}`,
+    );
+    expect(shuffled).toEqual(first);
+  });
+
+  it('skips files with no author and never throws on empty input', () => {
+    expect(buildAuthorLegend([])).toEqual([]);
+    expect(
+      buildAuthorLegend([
+        { author: null, secs_ago: 100 },
+        { author: 'alice@example.com', secs_ago: 100 },
+      ]),
+    ).toHaveLength(1);
+  });
+});
+
+describe('humanizeAge', () => {
+  const day = 86_400;
+
+  it('collapses sub-minute / negative ages to "just now"', () => {
+    expect(humanizeAge(0)).toBe('just now');
+    expect(humanizeAge(59)).toBe('just now');
+    expect(humanizeAge(-100)).toBe('just now');
+  });
+
+  it('steps through the units as age grows', () => {
+    expect(humanizeAge(60 * 5)).toBe('5m');
+    expect(humanizeAge(3600 * 3)).toBe('3h');
+    expect(humanizeAge(day * 3)).toBe('3d');
+    expect(humanizeAge(day * 14)).toBe('2w');
+    expect(humanizeAge(day * 90)).toBe('3mo');
+    expect(humanizeAge(day * 365 * 2)).toBe('2y');
   });
 });

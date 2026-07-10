@@ -20,7 +20,12 @@
     recencyColor,
     authorColor,
     authorIdentity,
+    recencyLegend,
+    buildAuthorLegend,
+    humanizeAge,
+    type AuthorLegendRow,
   } from '../lib/folderMapColors';
+  import { t } from '../lib/i18n';
   import { wheelDelta } from '../lib/shiftWheelZoom';
   import {
     renderFolderMap,
@@ -104,6 +109,24 @@
   let factsByPath: Map<string, GitFact> | null = null;
   let factsForRoot: string | null = null;
   let gitError: string | null = null;
+
+  /// Fixed three-stop swatch legend for the recency heatmap (#63.1). Static —
+  /// the colours come straight from `recencyColor` so they can't drift from
+  /// the scale that tints the boxes.
+  const recencyStops = recencyLegend();
+
+  /// Side-legend rows for the author overlay (#63.2): one row per author with
+  /// their stable hue, file count and freshest touch. Derived from the same
+  /// `factsByPath` cache both git-driven modes share, so switching between
+  /// recency and author never re-fetches. Empty until the facts load or when
+  /// the repo has no git history. Recomputed whenever the cache is replaced.
+  let authorLegend: AuthorLegendRow[] = [];
+  $: authorLegend =
+    effectiveColorBy === 'author' && factsByPath
+      ? buildAuthorLegend(
+          [...factsByPath.values()].map((f) => ({ author: f.author, secs_ago: f.secs_ago })),
+        )
+      : [];
 
   /// Per-path change status against `diffRef`. Same load-once-per-(repo,ref)
   /// caching shape as the recency/author cache above. `null` = not loaded;
@@ -769,28 +792,33 @@
       >TD</button>
       {#if !compareWith}
         <span class="divider"></span>
+        <span class="colour-by-label">{$t('diagram.colourBy')}</span>
         <button
           class:active={colorBy === 'structure'}
           on:click={() => setColorBy('structure')}
-          title="Colour by node kind (default)"
+          title={$t('diagram.colourBy.structure')}
+          aria-label={$t('diagram.colourBy.structure')}
           aria-pressed={colorBy === 'structure'}
         >S</button>
         <button
           class:active={colorBy === 'recency'}
           on:click={() => setColorBy('recency')}
-          title="Colour by last commit recency — recent files glow, stale ones recede"
+          title={$t('diagram.colourBy.recency')}
+          aria-label={$t('diagram.colourBy.recency')}
           aria-pressed={colorBy === 'recency'}
         >R</button>
         <button
           class:active={colorBy === 'author'}
           on:click={() => setColorBy('author')}
-          title="Colour by last committer — same author always gets the same hue"
+          title={$t('diagram.colourBy.author')}
+          aria-label={$t('diagram.colourBy.author')}
           aria-pressed={colorBy === 'author'}
         >A</button>
         <button
           class:active={colorBy === 'diff'}
           on:click={() => setColorBy('diff')}
-          title="Overlay git status against a ref — added / modified / deleted"
+          title={$t('diagram.colourBy.diff')}
+          aria-label={$t('diagram.colourBy.diff')}
           aria-pressed={colorBy === 'diff'}
         >D</button>
         {#if colorBy === 'diff'}
@@ -800,7 +828,7 @@
             spellcheck="false"
             autocomplete="off"
             value={diffRef}
-            title="Git ref to compare against (e.g. HEAD~1, main, a1b2c3d)"
+            title={$t('diagram.colourBy.diffRefTitle')}
             on:change={(e) => setDiffRef((e.target as HTMLInputElement).value)}
             on:keydown={(e) => {
               if (e.key === 'Enter') setDiffRef((e.target as HTMLInputElement).value);
@@ -808,13 +836,23 @@
           />
         {/if}
         {#if (colorBy === 'recency' || colorBy === 'author') && gitError}
-          <span class="hint" style="color: var(--error);" title={gitError}>⚠ git unavailable</span>
+          <span class="hint" style="color: var(--error);" title={gitError}>⚠ {$t('diagram.colourBy.gitUnavailable')}</span>
         {/if}
         {#if colorBy === 'diff' && diffError}
-          <span class="hint" style="color: var(--error);" title={diffError}>⚠ git unavailable</span>
+          <span class="hint" style="color: var(--error);" title={diffError}>⚠ {$t('diagram.colourBy.gitUnavailable')}</span>
+        {/if}
+        {#if colorBy === 'recency' && !gitError}
+          <span class="recency-legend" aria-label={$t('diagram.colourBy.recency')}>
+            {#each recencyStops as stop (stop.key)}
+              <span class="swatch-item">
+                <span class="swatch" style="background:{stop.color}"></span>
+                {$t(`diagram.colourBy.recency.${stop.key}`)}
+              </span>
+            {/each}
+          </span>
         {/if}
       {:else if diffError}
-        <span class="hint" style="color: var(--error);" title={diffError}>⚠ git unavailable</span>
+        <span class="hint" style="color: var(--error);" title={diffError}>⚠ {$t('diagram.colourBy.gitUnavailable')}</span>
       {/if}
     {:else if kind === 'doc-graph'}
       <span class="divider"></span>
@@ -974,6 +1012,25 @@
           {/if}
         </aside>
       {/if}
+      {#if kind === 'folder-map' && !compareWith && colorBy === 'author' && authorLegend.length > 0}
+        <aside class="author-legend" aria-label={$t('diagram.colourBy.author')}>
+          <h4>{$t('diagram.colourBy.author.legend')}</h4>
+          <ul>
+            {#each authorLegend.slice(0, 24) as row (row.identity)}
+              <li
+                title={$t('diagram.colourBy.author.hover', {
+                  commits: row.commits,
+                  ago: humanizeAge(row.lastTouchedSecsAgo),
+                })}
+              >
+                <span class="swatch" style="background:{row.color}"></span>
+                <span class="author-name">{row.identity}</span>
+                <span class="author-count">{row.commits}</span>
+              </li>
+            {/each}
+          </ul>
+        </aside>
+      {/if}
     </div>
   {/if}
 </div>
@@ -1041,6 +1098,89 @@
   .diff-ref:focus {
     outline: none;
     border-color: var(--accent-2);
+  }
+
+  .colour-by-label {
+    font-size: 11px;
+    color: var(--fg-2);
+    margin-right: 2px;
+  }
+
+  .recency-legend {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-left: 8px;
+    font-size: 11px;
+    color: var(--fg-2);
+  }
+
+  .swatch-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+  }
+
+  .swatch {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  }
+
+  .author-legend {
+    position: absolute;
+    left: 14px;
+    bottom: 14px;
+    width: min(240px, calc(100% - 28px));
+    max-height: calc(100% - 28px);
+    overflow: auto;
+    padding: 10px 12px;
+    background: color-mix(in srgb, var(--bg-1) 94%, transparent);
+    border: 1px solid var(--bg-3);
+    border-radius: 6px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  }
+
+  .author-legend h4 {
+    margin: 0 0 8px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-2);
+  }
+
+  .author-legend ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .author-legend li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 3px 0;
+    font-size: 12px;
+    color: var(--fg-1);
+    cursor: default;
+  }
+
+  .author-legend .author-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+
+  .author-legend .author-count {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg-2);
+    flex-shrink: 0;
   }
 
   .doc-summary {
