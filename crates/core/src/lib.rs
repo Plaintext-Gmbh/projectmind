@@ -17,6 +17,8 @@ pub mod annotations;
 pub mod architecture_flow;
 pub mod artifact;
 pub mod cargo;
+pub mod code_graph;
+pub mod code_graph_sqlite;
 pub mod diagram;
 pub mod doc_graph;
 pub mod engine;
@@ -29,14 +31,18 @@ pub mod language_stats;
 pub mod maven;
 pub mod module_chord;
 pub mod patterns;
+pub mod persistence;
 pub mod repository;
 pub mod risk;
 pub mod state;
 pub mod walkthrough;
 
 pub use cargo::CargoCrate;
+pub use code_graph::MemoryCodeGraphStore;
+pub use code_graph_sqlite::SqliteCodeGraphStore;
 pub use engine::{Engine, TabDescriptor};
 pub use maven::MavenModule;
+pub use persistence::{resolve_stores, PersistenceConfig, ResolvedStores};
 pub use repository::{Repository, RepositoryError};
 
 /// Process-wide mutex for tests that mutate the `PROJECTMIND_STATE`

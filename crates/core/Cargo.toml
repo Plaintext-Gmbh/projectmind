@@ -26,3 +26,5 @@ quick-xml   = { workspace = true }
 regex       = { workspace = true }
 nucleo-matcher = { workspace = true }
 dirs        = { workspace = true }
+rusqlite    = { workspace = true }
+toml        = { workspace = true }

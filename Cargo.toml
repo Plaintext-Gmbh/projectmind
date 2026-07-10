@@ -77,6 +77,12 @@ quick-xml = "0.39"
 # Pattern matching (HTML snippet detection)
 regex = "1"
 
+# Persistence (code-graph cache + per-repo config)
+# rusqlite `bundled` compiles SQLite in: portable build, no system libsqlite.
+# toml stays on 0.9.x — the 1.x line raised its MSRV to 1.85, workspace is 1.80.
+rusqlite = { version = "0.40", features = ["bundled"] }
+toml     = "0.9"
+
 # Fuzzy matching (markdown / class / snippet search)
 nucleo-matcher = "0.3"
 
