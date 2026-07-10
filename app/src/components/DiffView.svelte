@@ -3,7 +3,8 @@
   import { showDiff, type DiffFocus } from '../lib/api';
   import { t } from '../lib/i18n';
   import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
-  import { focusLineIndex, type DiffLine } from '../lib/diffFocus';
+  import { buildDiffIndex, focusLineIndex, type DiffFile, type DiffLine } from '../lib/diffFocus';
+  import DiffRail from './DiffRail.svelte';
 
   export let reference: string;
   export let to: string | null = null;
@@ -18,6 +19,11 @@
   let loading = false;
   let error: string | null = null;
 
+  /// Structured per-file / per-hunk navigation index (#126). Drives the
+  /// side rail; derived from `lines` so the flat render stays the source
+  /// of truth for the visual diff.
+  let diffFiles: DiffFile[] = [];
+
   /// `index → element ref` map of rendered diff lines. Populated by
   /// the `bind:this` on the `<span class="line">` block; used to
   /// scroll the focused line into view.
@@ -26,6 +32,10 @@
   /// pulse. Cleared after the CSS animation finishes so the same
   /// focus can be re-triggered when the tour pointer moves.
   let pulseIdx: number | null = null;
+  /// Flat-line index the diff is currently focused on (tour focus or a
+  /// rail click). Drives the rail's active marker. Persists past the
+  /// pulse so the rail keeps highlighting the last-visited hunk.
+  let activeLine: number | null = null;
 
   // Shift + wheel zoom, persisted under the per-component key.
   const { zoom, action: zoomAction } = createShiftWheelZoom('projectmind.diffview.zoom');
@@ -41,13 +51,16 @@
     try {
       raw = await showDiff(ref, target ?? undefined);
       lines = parse(raw);
+      diffFiles = buildDiffIndex(lines);
       lineEls = [];
+      activeLine = null;
       // Wait for the bind:this refs to land, then react to the current focus.
       await tick();
       await applyFocus(focus);
     } catch (err) {
       error = String(err);
       lines = [];
+      diffFiles = [];
     } finally {
       loading = false;
     }
@@ -63,16 +76,29 @@
       pulseIdx = null;
       return;
     }
+    await scrollAndPulse(idx);
+  }
+
+  /// Scroll the flat-line at `idx` into view, mark it active for the rail,
+  /// and play a one-shot pulse. Shared by tour focus and rail clicks so
+  /// both go through exactly one navigation path (#126).
+  async function scrollAndPulse(idx: number) {
     await tick();
     const el = lineEls[idx];
     if (!el) return;
     el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    activeLine = idx;
     pulseIdx = idx;
     // Clear the pulse after the animation duration so re-focusing the
-    // same line later still triggers the highlight.
+    // same line later still triggers the highlight. `activeLine` stays
+    // so the rail keeps the marker highlighted.
     window.setTimeout(() => {
       if (pulseIdx === idx) pulseIdx = null;
     }, 1400);
+  }
+
+  function onRailJump(e: CustomEvent<{ startLine: number }>) {
+    void scrollAndPulse(e.detail.startLine);
   }
 
   function parse(diff: string): DiffLine[] {
@@ -111,9 +137,12 @@
   {:else if lines.length === 0}
     <div class="status">{$t('diff.noChanges')}</div>
   {:else}
-    <pre class="diff"><!--
+    <div class="body">
+      <pre class="diff"><!--
    --><!-- prettier-ignore -->{#each lines as l, i (i)}<span class="line {l.kind}" class:pulse={pulseIdx === i} bind:this={lineEls[i]}>{l.text || ' '}</span>
 {/each}</pre>
+      <DiffRail files={diffFiles} {activeLine} on:jump={onRailJump} />
+    </div>
   {/if}
 </section>
 
@@ -164,6 +193,29 @@
     color: var(--error);
   }
 
+  /* Diff area + navigation rail sit side-by-side and share the flex row.
+     The theme-aware diff colours live here so both the diff body and the
+     embedded rail (#126) inherit them. */
+  .body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    /* Defaults below are for the dark theme; light theme overrides follow
+       the matching :global(:root[data-theme='light']) block. */
+    --diff-add-fg: #b8eaa6;
+    --diff-add-bg: #2ea043;
+    --diff-del-fg: #f8b6b6;
+    --diff-del-bg: #cf222e;
+  }
+
+  :global(:root[data-theme='light']) .body {
+    --diff-add-fg: #044317;
+    --diff-add-bg: #1a7f37;
+    --diff-del-fg: #82071e;
+    --diff-del-bg: #cf222e;
+  }
+
   .diff {
     margin: 0;
     padding: 16px;
@@ -172,23 +224,10 @@
     line-height: 1.5;
     overflow: auto;
     flex: 1;
+    min-width: 0;
     background: var(--bg-0);
     color: var(--fg-0);
     white-space: pre;
-    /* Diff colours are theme-aware via these custom properties.
-       Defaults below are for the dark theme; light theme overrides
-       follow the matching :global(:root[data-theme='light']) block. */
-    --diff-add-fg: #b8eaa6;
-    --diff-add-bg: #2ea043;
-    --diff-del-fg: #f8b6b6;
-    --diff-del-bg: #cf222e;
-  }
-
-  :global(:root[data-theme='light']) .diff {
-    --diff-add-fg: #044317;
-    --diff-add-bg: #1a7f37;
-    --diff-del-fg: #82071e;
-    --diff-del-bg: #cf222e;
   }
 
   .line {
