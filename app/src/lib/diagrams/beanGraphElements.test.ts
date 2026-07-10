@@ -41,8 +41,8 @@ describe('beanGraphElements', () => {
   it('maps nodes with label, module and stereotype class', () => {
     const payload: BeanGraphData = {
       nodes: [
-        { id: 'a.A', label: 'A', module: 'g:m1', stereotype: 'service' },
-        { id: 'a.B', label: 'B', module: 'g:m1', stereotype: null },
+        { id: 'a.A', label: 'A', module: 'g:m1', stereotype: 'service', path: 'm1/a/A.java' },
+        { id: 'a.B', label: 'B', module: 'g:m1', stereotype: null, path: null },
       ],
       edges: [],
     };
@@ -56,6 +56,7 @@ describe('beanGraphElements', () => {
         module: 'g:m1',
         stereoClass: 'stereo-service',
         stereotype: 'service',
+        path: 'm1/a/A.java',
       },
     });
     // null stereotype → default class, raw value preserved.
@@ -66,8 +67,8 @@ describe('beanGraphElements', () => {
   it('maps edges to Cytoscape source/target with a rel class and unique ids', () => {
     const payload: BeanGraphData = {
       nodes: [
-        { id: 'a.A', label: 'A', module: 'g:m1', stereotype: 'service' },
-        { id: 'a.B', label: 'B', module: 'g:m1', stereotype: 'controller' },
+        { id: 'a.A', label: 'A', module: 'g:m1', stereotype: 'service', path: null },
+        { id: 'a.B', label: 'B', module: 'g:m1', stereotype: 'controller', path: null },
       ],
       edges: [
         { from: 'a.A', to: 'a.B', kind: 'injects' },
@@ -87,9 +88,9 @@ describe('beanGraphElements', () => {
   it('flags cross-module edges and keeps same-module edges unflagged', () => {
     const payload: BeanGraphData = {
       nodes: [
-        { id: 'a.A', label: 'A', module: 'g:m1', stereotype: null },
-        { id: 'b.B', label: 'B', module: 'g:m2', stereotype: null },
-        { id: 'a.C', label: 'C', module: 'g:m1', stereotype: null },
+        { id: 'a.A', label: 'A', module: 'g:m1', stereotype: null, path: null },
+        { id: 'b.B', label: 'B', module: 'g:m2', stereotype: null, path: null },
+        { id: 'a.C', label: 'C', module: 'g:m1', stereotype: null, path: null },
       ],
       edges: [
         { from: 'a.A', to: 'b.B', kind: 'uses' }, // cross-module
@@ -103,7 +104,7 @@ describe('beanGraphElements', () => {
 
   it('drops edges whose endpoints are missing from the node set', () => {
     const payload: BeanGraphData = {
-      nodes: [{ id: 'a.A', label: 'A', module: 'g:m1', stereotype: null }],
+      nodes: [{ id: 'a.A', label: 'A', module: 'g:m1', stereotype: null, path: null }],
       edges: [{ from: 'a.A', to: 'ghost.X', kind: 'calls' }],
     };
     const out = beanGraphElements(payload);
