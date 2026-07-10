@@ -10,8 +10,11 @@
   /// `codeCityLayout.ts` — this component only maps the model onto
   /// InstancedMesh instances and wires orbit + picking.
   ///
-  /// Stage 1/3 of the #66 flythrough: orbit camera + click-drill only.
-  /// First-person walk (V4.6b) and tour waypoints (V4.6c) come on top.
+  /// Stage 2/3 of the #66 flythrough: orbit camera + click-drill, plus a
+  /// first-person walk mode (V4.6b) — PointerLockControls own the look,
+  /// the pure `cityWalk.ts` owns movement/collision/terrain, and a
+  /// crosshair raycast reuses the exact same drill codepath as orbit.
+  /// Tour waypoints (V4.6c) come on top.
   import { onDestroy, onMount } from 'svelte';
   import { get } from 'svelte/store';
   import { codeCityData } from '../lib/api';
@@ -22,6 +25,7 @@
     type CityBuilding,
     type CityModel,
   } from '../lib/diagrams/codeCityLayout';
+  import { groundHeightAt, stepMovement, WALK_DEFAULTS } from '../lib/diagrams/cityWalk';
   import { classes, fileView, followingMcp, repo, selectedClass, viewMode } from '../lib/store';
   import { t } from '../lib/i18n';
 
@@ -42,6 +46,8 @@
   // so they don't drag the chunk into the eager bundle.
   type Three = typeof import('three');
   type OrbitControlsT = import('three/examples/jsm/controls/OrbitControls.js').OrbitControls;
+  type PointerLockControlsT =
+    import('three/examples/jsm/controls/PointerLockControls.js').PointerLockControls;
 
   let three: Three | null = null;
   let model: CityModel | null = null;
@@ -53,6 +59,23 @@
   let raycaster: import('three').Raycaster | null = null;
   let disposables: { dispose(): void }[] = [];
   let resizeObserver: ResizeObserver | null = null;
+
+  // --- First-person walk state (V4.6b) --------------------------------------
+  let PointerLock:
+    | (new (camera: import('three').Camera, domElement: HTMLElement) => PointerLockControlsT)
+    | null = null;
+  let plc: PointerLockControlsT | null = null;
+  /// Walk toggle — orbit is the default; flipping back restores this pose.
+  let walkMode = false;
+  /// Orbit pose saved on walk entry, restored verbatim on exit.
+  let savedOrbit: { pos: [number, number, number]; target: [number, number, number] } | null =
+    null;
+  /// Building under the crosshair (walk-mode hover — same drill as orbit).
+  let walkTarget: CityBuilding | null = null;
+  /// Currently pressed movement keys (KeyboardEvent.code values).
+  const keys = new Set<string>();
+  /// Timestamp of the previous walk frame, for dt (ms, from setAnimationLoop).
+  let lastTick = 0;
 
   /// Warm accent the glow lightens towards — the "freshly built" read.
   const GLOW_COLOR = '#ffd666';
@@ -73,11 +96,13 @@
       empty = buildingCount === 0;
 
       // Dynamic imports — the whole three chunk lands only now.
-      const [threeModule, { OrbitControls }] = await Promise.all([
+      const [threeModule, { OrbitControls }, { PointerLockControls }] = await Promise.all([
         import('three'),
         import('three/examples/jsm/controls/OrbitControls.js'),
+        import('three/examples/jsm/controls/PointerLockControls.js'),
       ]);
       three = threeModule;
+      PointerLock = PointerLockControls;
 
       if (empty) {
         loading = false;
@@ -109,10 +134,12 @@
     renderer.setSize(container.clientWidth || 1, container.clientHeight || 1);
     container.appendChild(renderer.domElement);
 
+    // Near plane 0.1: at walking eye height the camera gets close to facades;
+    // 0.5 would clip them. Depth precision stays fine (plateau steps are 0.6).
     camera = new T.PerspectiveCamera(
       50,
       (container.clientWidth || 1) / (container.clientHeight || 1),
-      0.5,
+      0.1,
       m.world * 10,
     );
     controls = new OrbitControls(camera, renderer.domElement);
@@ -190,19 +217,162 @@
 
     // Continuous loop — damping needs per-frame control updates anyway;
     // torn down via setAnimationLoop(null) in onDestroy.
-    renderer.setAnimationLoop(() => {
-      controls?.update();
+    renderer.setAnimationLoop((time: number) => {
+      if (walkMode) stepWalkFrame(time);
+      else controls?.update();
       if (renderer && scene && camera) renderer.render(scene, camera);
     });
   }
 
   /// Fly the orbit camera back to the establishing shot.
   export function resetCamera() {
-    if (!camera || !controls || !model) return;
+    if (!camera || !controls || !model || walkMode) return;
     const fit = cameraFitFor(model);
     camera.position.set(...fit.position);
     controls.target.set(...fit.target);
     controls.update();
+  }
+
+  // --- First-person walk (V4.6b) ---------------------------------------------
+
+  function toggleWalk() {
+    if (walkMode) exitWalk();
+    else enterWalk();
+  }
+
+  /// Switch orbit → walk: freeze OrbitControls, remember their pose, drop
+  /// the camera to eye height (keeping the current heading, levelling the
+  /// gaze) and grab the pointer. Esc (= pointer-lock exit) leaves the mode.
+  function enterWalk() {
+    if (walkMode || !three || !camera || !controls || !renderer || !model || !PointerLock) return;
+    savedOrbit = {
+      pos: camera.position.toArray() as [number, number, number],
+      target: controls.target.toArray() as [number, number, number],
+    };
+    controls.enabled = false;
+
+    // Keep the orbit heading but level the gaze and clamp into the city —
+    // "drop down where you were looking". YXZ is the PointerLockControls
+    // euler order, so yaw survives the round-trip through the quaternion.
+    const e = new three.Euler(0, 0, 0, 'YXZ');
+    e.setFromQuaternion(camera.quaternion);
+    const x = Math.min(Math.max(camera.position.x, 0), model.world);
+    const z = Math.min(Math.max(camera.position.z, 0), model.world);
+    camera.position.set(x, groundHeightAt(model, x, z) + WALK_DEFAULTS.eyeHeight, z);
+    camera.rotation.set(0, e.y, 0, 'YXZ');
+
+    plc = new PointerLock(camera, renderer.domElement);
+    plc.addEventListener('unlock', onWalkUnlock);
+    hover = null;
+    walkTarget = null;
+    walkMode = true;
+    lastTick = 0;
+    document.addEventListener('keydown', onWalkKeyDown);
+    document.addEventListener('keyup', onWalkKeyUp);
+    renderer.domElement.addEventListener('mousedown', onWalkMouseDown);
+    plc.lock();
+  }
+
+  /// Switch walk → orbit: tear the pointer-lock plumbing down and restore
+  /// the exact orbit pose saved on entry.
+  function exitWalk() {
+    if (!walkMode) return;
+    walkMode = false;
+    walkTarget = null;
+    keys.clear();
+    document.removeEventListener('keydown', onWalkKeyDown);
+    document.removeEventListener('keyup', onWalkKeyUp);
+    renderer?.domElement.removeEventListener('mousedown', onWalkMouseDown);
+    if (plc) {
+      // Listener off first — plc.unlock() would re-dispatch into exitWalk.
+      plc.removeEventListener('unlock', onWalkUnlock);
+      plc.unlock();
+      plc.dispose();
+      plc = null;
+    }
+    if (camera && controls && savedOrbit) {
+      camera.position.set(...savedOrbit.pos);
+      controls.target.set(...savedOrbit.target);
+    }
+    savedOrbit = null;
+    if (controls) {
+      controls.enabled = true;
+      controls.update();
+    }
+  }
+
+  /// Pointer lock released (Esc or focus loss) → back to orbit.
+  function onWalkUnlock() {
+    exitWalk();
+  }
+
+  const MOVE_CODES = new Set([
+    'KeyW',
+    'KeyA',
+    'KeyS',
+    'KeyD',
+    'ArrowUp',
+    'ArrowDown',
+    'ArrowLeft',
+    'ArrowRight',
+    'ShiftLeft',
+    'ShiftRight',
+  ]);
+
+  function onWalkKeyDown(e: KeyboardEvent) {
+    if (!MOVE_CODES.has(e.code)) return;
+    e.preventDefault(); // arrows would scroll the pane
+    keys.add(e.code);
+  }
+
+  function onWalkKeyUp(e: KeyboardEvent) {
+    keys.delete(e.code);
+  }
+
+  /// Walk-mode drill: while locked, a click drills into the building under
+  /// the crosshair — the same `drillInto` codepath as the orbit click.
+  /// Unlocked (the browser can deny the grab, e.g. Chrome's cooldown right
+  /// after an Esc), a click on the stage re-requests the lock instead.
+  function onWalkMouseDown(e: MouseEvent) {
+    if (e.button !== 0 || !plc) return;
+    if (!plc.isLocked) {
+      plc.lock();
+      return;
+    }
+    if (walkTarget) drillInto(walkTarget);
+  }
+
+  /// One walk frame: WASD intent + camera yaw → pure `stepMovement`
+  /// (collision, terraces, bounds), result written back onto the camera;
+  /// then the crosshair pick for the HUD.
+  function stepWalkFrame(now: number) {
+    if (!three || !camera || !model) return;
+    const dt = lastTick === 0 ? 0 : Math.min((now - lastTick) / 1000, 0.1);
+    lastTick = now;
+    const e = new three.Euler(0, 0, 0, 'YXZ');
+    e.setFromQuaternion(camera.quaternion);
+    const pose = stepMovement(
+      model,
+      { x: camera.position.x, y: camera.position.y, z: camera.position.z, yaw: e.y },
+      {
+        forward:
+          (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) -
+          (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0),
+        strafe:
+          (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) -
+          (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0),
+        sprint: keys.has('ShiftLeft') || keys.has('ShiftRight'),
+      },
+      dt,
+    );
+    camera.position.set(pose.x, pose.y, pose.z);
+
+    // Crosshair raycast from the screen centre.
+    if (!raycaster || !buildingsMesh) return;
+    raycaster.setFromCamera(new three.Vector2(0, 0), camera);
+    const hit = raycaster.intersectObject(buildingsMesh, false)[0];
+    const b = hit?.instanceId !== undefined ? (model.buildings[hit.instanceId] ?? null) : null;
+    if (b !== walkTarget) walkTarget = b;
   }
 
   // --- Picking ---------------------------------------------------------------
@@ -224,6 +394,7 @@
   }
 
   function onPointerMove(e: PointerEvent) {
+    if (walkMode) return; // pointer-lock coordinates are stale — crosshair picks instead
     hover = pick(e);
     if (renderer) renderer.domElement.style.cursor = hover ? 'pointer' : 'grab';
   }
@@ -235,10 +406,12 @@
   // Click vs orbit-drag: only a press that barely moved counts as a drill.
   let downAt: { x: number; y: number } | null = null;
   function onPointerDown(e: PointerEvent) {
+    if (walkMode) return; // walk clicks drill via onWalkMouseDown
     if (e.button === 0) downAt = { x: e.clientX, y: e.clientY };
   }
 
   function onPointerUp(e: PointerEvent) {
+    if (walkMode) return;
     if (!downAt || e.button !== 0) return;
     const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
     downAt = null;
@@ -284,6 +457,9 @@
   });
 
   onDestroy(() => {
+    // A drill out of walk mode destroys this component while the pointer is
+    // still locked — release it (and the key listeners) first.
+    exitWalk();
     // WKWebView leaks GPU memory on every kind switch unless the renderer
     // and its GPU resources are torn down explicitly.
     if (renderer) {
@@ -312,6 +488,15 @@
 <div class="city-root">
   <div class="toolbar">
     <button type="button" on:click={resetCamera} title={$t('diagram.resetView')}>⌂</button>
+    <button
+      type="button"
+      class="walk-toggle"
+      class:active={walkMode}
+      aria-pressed={walkMode}
+      disabled={loading || !!error || empty}
+      on:click={toggleWalk}
+      title={$t('diagram.codeCity.walkHud')}
+    >{$t('diagram.codeCity.walk')}</button>
     <span class="summary">{buildingCount} · {districtCount}</span>
     <span class="divider"></span>
     <span class="legend">
@@ -362,6 +547,16 @@
         {/if}
       </div>
     {/if}
+    {#if walkMode}
+      <div class="crosshair" aria-hidden="true"></div>
+      {#if walkTarget}
+        <div class="walk-target">
+          <span class="tt-label">{walkTarget.label}</span>
+          <span class="tt-path">{walkTarget.id}</span>
+        </div>
+      {/if}
+      <div class="walk-hud">{$t('diagram.codeCity.walkHud')}</div>
+    {/if}
   </div>
 </div>
 
@@ -393,6 +588,19 @@
   }
   .toolbar button:hover {
     border-color: var(--accent-2);
+  }
+  .toolbar button.walk-toggle {
+    width: auto;
+    padding: 0 8px;
+    font-size: 11px;
+  }
+  .toolbar button.walk-toggle.active {
+    border-color: var(--accent-2);
+    color: var(--accent-2);
+  }
+  .toolbar button.walk-toggle:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
   .summary {
     font-family: var(--mono);
@@ -469,6 +677,72 @@
     gap: 8px;
     margin-top: 2px;
     color: var(--fg-1, var(--fg-0));
+  }
+  /* --- Walk-mode HUD (V4.6b) --- */
+  .crosshair {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 14px;
+    height: 14px;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 9;
+  }
+  .crosshair::before,
+  .crosshair::after {
+    content: '';
+    position: absolute;
+    background: rgba(255, 255, 255, 0.75);
+  }
+  .crosshair::before {
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    transform: translateX(-50%);
+  }
+  .crosshair::after {
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 1px;
+    transform: translateY(-50%);
+  }
+  .walk-target {
+    position: absolute;
+    left: 50%;
+    top: calc(50% + 22px);
+    transform: translateX(-50%);
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    max-width: 70%;
+    pointer-events: none;
+    z-index: 9;
+    background: color-mix(in srgb, var(--bg-1) 82%, black);
+    border: 1px solid var(--bg-3);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 11px;
+    color: var(--fg-0);
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .walk-hud {
+    position: absolute;
+    left: 50%;
+    bottom: 12px;
+    transform: translateX(-50%);
+    pointer-events: none;
+    z-index: 9;
+    background: color-mix(in srgb, var(--bg-1) 75%, black);
+    border: 1px solid var(--bg-3);
+    border-radius: 12px;
+    padding: 4px 12px;
+    font-size: 11px;
+    color: var(--fg-2);
+    white-space: nowrap;
   }
   .placeholder,
   .error {
