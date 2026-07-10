@@ -170,6 +170,8 @@
   "outline.show": "Übersicht einblenden",
   "outline.hide": "Übersicht ausblenden",
   "outline.inheritance": "Vererbung",
+  "coverage.title": "Testabdeckung",
+  "coverage.stale": "veraltet ({days}d)",
   "gutter.show": "Annotierten Gutter einblenden",
   "gutter.hide": "Annotierten Gutter ausblenden",
   "layout.modules.show": "Modul-Seitenleiste einblenden",

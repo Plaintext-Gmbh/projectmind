@@ -124,6 +124,23 @@ impl Engine {
         self.frameworks.iter().map(|p| p.info().id).collect()
     }
 
+    /// Collect every framework relation across all of `repo`'s modules.
+    ///
+    /// Reads the already-parsed modules — no file I/O or re-scan — so it's
+    /// cheap enough to feed the Risk Atlas's fan-in/out signal on large
+    /// repos (#158). Relations are per-module today, so cross-module edges
+    /// only appear when a framework resolves targets to FQNs that live in
+    /// another module (Spring bean injection does).
+    pub fn relations(&self, repo: &Repository) -> Vec<projectmind_plugin_api::Relation> {
+        let mut out = Vec::new();
+        for module in repo.modules.values() {
+            for fw in &self.frameworks {
+                out.extend(fw.relations(module));
+            }
+        }
+        out
+    }
+
     /// Diagram kinds that the active plugin set can render against `repo`.
     /// "folder-map" is always present (it's a core capability); language and
     /// framework plugins contribute the rest. Languages only contribute when

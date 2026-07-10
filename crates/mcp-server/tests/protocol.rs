@@ -329,15 +329,49 @@ fn risk_atlas_returns_envelope_with_window_and_weights() {
         serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(body["window_days"], 90);
     assert!(body["weights"]["churn"].is_number());
+    // Coverage envelope present (null when no report) and scores array.
+    assert!(body.get("coverage").is_some(), "missing coverage envelope");
     assert!(body["scores"].is_array());
     let scores = body["scores"].as_array().unwrap();
     assert!(!scores.is_empty(), "expected at least one scored class");
     let first = &scores[0];
     for k in [
-        "fqn", "module", "file", "score", "churn", "cx", "sloc", "why",
+        "fqn", "module", "file", "score", "churn", "cx", "cov", "fan_in", "fan_out", "sloc", "why",
     ] {
         assert!(first.get(k).is_some(), "missing field {k} in score entry");
     }
+    // No coverage report in this fixture → cov is null, degrades gracefully.
+    assert!(
+        first["cov"].is_null(),
+        "cov should be null without a report"
+    );
+    assert!(body["coverage"].is_null(), "coverage meta should be null");
+}
+
+#[test]
+fn risk_atlas_surfaces_coverage_from_jacoco_report() {
+    let tmp = TempRepo::create_git_repo_with_jacoco();
+    let mut s = Server::spawn();
+    let path = tmp.root.to_string_lossy().into_owned();
+    s.call(&format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"open_repo","arguments":{{"path":"{path}"}}}}}}"#
+    ));
+    let resp = s.call(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"risk_atlas","arguments":{"top":5}}}"#,
+    );
+    assert!(resp["error"].is_null(), "unexpected error: {resp}");
+    let body: serde_json::Value =
+        serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    // Coverage report detected → meta populated.
+    assert_eq!(body["coverage"]["format"], "jacoco");
+    let scores = body["scores"].as_array().unwrap();
+    let hello = scores
+        .iter()
+        .find(|s| s["fqn"] == "demo.Hello")
+        .expect("demo.Hello scored");
+    // JaCoCo report says 8 covered / 2 missed → 0.8.
+    let cov = hello["cov"].as_f64().expect("cov populated from report");
+    assert!((cov - 0.8).abs() < 1e-6, "expected 0.8, got {cov}");
 }
 
 #[test]
@@ -531,6 +565,26 @@ impl TempRepo {
         }
         let _ = commit.status();
         Self { root }
+    }
+
+    /// Like [`Self::create_git_repo_with_class`] but drops a JaCoCo report at
+    /// `target/site/jacoco/jacoco.xml` reporting 80% line coverage for
+    /// `demo.Hello`. Exercises the coverage loader end-to-end through the MCP
+    /// `risk_atlas` tool.
+    fn create_git_repo_with_jacoco() -> Self {
+        let repo = Self::create_git_repo_with_class();
+        let jdir = repo.root.join("target/site/jacoco");
+        std::fs::create_dir_all(&jdir).unwrap();
+        let xml = r#"<?xml version="1.0"?>
+<report name="demo">
+  <package name="demo">
+    <class name="demo/Hello" sourcefilename="Hello.java">
+      <counter type="LINE" missed="2" covered="8"/>
+    </class>
+  </package>
+</report>"#;
+        std::fs::write(jdir.join("jacoco.xml"), xml).unwrap();
+        repo
     }
 }
 

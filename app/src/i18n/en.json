@@ -170,6 +170,8 @@
   "outline.show": "Show outline",
   "outline.hide": "Hide outline",
   "outline.inheritance": "Inheritance",
+  "coverage.title": "Coverage",
+  "coverage.stale": "stale ({days}d)",
   "gutter.show": "Show annotated gutter",
   "gutter.hide": "Hide annotated gutter",
   "layout.modules.show": "Show modules sidebar",

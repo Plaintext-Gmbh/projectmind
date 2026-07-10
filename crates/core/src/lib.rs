@@ -19,6 +19,7 @@ pub mod artifact;
 pub mod cargo;
 pub mod code_graph;
 pub mod code_graph_sqlite;
+pub mod coverage;
 pub mod diagram;
 pub mod doc_graph;
 pub mod engine;
