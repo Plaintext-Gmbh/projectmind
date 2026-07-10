@@ -23,8 +23,18 @@
   import { beanGraphElements } from '../lib/diagrams/beanGraphElements';
   import type { BeanGraphElements } from '../lib/diagrams/beanGraphElements';
   import { classifyBeanGraphDiff } from '../lib/diagrams/beanGraphDiff';
+  import { resolveOverlayMode, planBeanGraphMorph } from '../lib/diagrams/beanGraphMorph';
   import { classes, selectedClass, viewMode } from '../lib/store';
   import { t } from '../lib/i18n';
+
+  /// When set, apply this ref and play the morph on mount without the user
+  /// touching the toolbar. Used by the `diagram-diff` walkthrough step so a
+  /// tour can "press play" on a bean-graph change (V3.3 / #125). Empty = the
+  /// normal interactive component (toolbar-driven).
+  export let autoMorphRef = '';
+  /// Hide the since-ref toolbar controls when the component is embedded in a
+  /// walkthrough step (the step supplies the ref and drives the morph itself).
+  export let embedded = false;
 
   let container: HTMLDivElement;
   // Cytoscape has no bundled types available without the dep loaded eagerly;
@@ -48,6 +58,17 @@
   let diffLoading = false;
   let diffError: string | null = null;
   let changedCount = 0;
+
+  // --- Morph mode (V3.3 / #125 fourth mode) ----------------------------------
+  // The morph is the animated cousin of the V3.2 diff: instead of snapping the
+  // `changed`/`faded` classes on, the changed elements start recessed (small +
+  // transparent, `.morph-enter`), then pulse in + thicken while the fcose
+  // layout eases into place; the unchanged elements settle to the same faded
+  // rest-state. After it plays the graph rests in exactly the V3.2 diff look.
+  // `morphRequested` mirrors the user's mode toggle; `resolveOverlayMode`
+  // turns it + `diffRef` into the active overlay state (off / diff / morph).
+  let morphRequested = autoMorphRef !== '';
+  $: overlayMode = resolveOverlayMode(!!diffRef, morphRequested);
 
   // Stereotype fill/stroke/text — byte-parity with the Rust STEREOTYPE_STYLES
   // so the interactive graph reads like the Mermaid one.
@@ -179,6 +200,19 @@
             selector: 'node.pulse',
             style: { 'border-width': 8, 'border-color': '#ffd666' },
           },
+          // --- Morph entry start-state (V3.3) -------------------------------
+          // Changed elements are parked here for one frame before the morph
+          // strips the class, so the transition eases them *in* from recessed
+          // (shrunk + transparent) rather than snapping to `changed`. The base
+          // node/edge `transition-property` above (opacity/border/width) does
+          // the easing; adding `width height` to a longer node transition would
+          // fight the layout run, so we keep the recede subtle (opacity + a
+          // thin border) and let the pulse carry the "arrival".
+          {
+            selector: 'node.morph-enter',
+            style: { opacity: 0.15, 'border-width': 0.5 },
+          },
+          { selector: 'edge.morph-enter', style: { opacity: 0.1, width: 0.5 } },
         ],
         // fcose-specific options aren't in the base cytoscape LayoutOptions
         // union (the extension ships no types), so cast through unknown.
@@ -230,7 +264,8 @@
 
   /// Load the change set for `diffInput` and paint the overlay. Empty input
   /// clears the overlay (plain graph). Errors (not a git repo, unknown ref)
-  /// surface inline and leave the graph un-faded.
+  /// surface inline and leave the graph un-faded. When `morphRequested` is set
+  /// the overlay arrives via the animated morph instead of the static paint.
   async function applyDiff() {
     const ref = diffInput.trim();
     diffError = null;
@@ -244,14 +279,99 @@
       const changes = await listChangesSince(ref);
       diffRef = ref;
       const diff = classifyBeanGraphDiff(els, changes);
-      paintDiff(diff.changedNodeIds, diff.changedEdgeIds);
       changedCount = diff.changedNodeIds.size;
+      if (morphRequested) {
+        morphIn(diff);
+      } else {
+        paintDiff(diff.changedNodeIds, diff.changedEdgeIds);
+      }
     } catch (err) {
       diffError = String(err);
       clearDiff();
     } finally {
       diffLoading = false;
     }
+  }
+
+  /// Play the morph (V3.3): animate the changed elements *in* and settle the
+  /// rest to the faded rest-state, ending in the same look `paintDiff` would
+  /// produce statically. One-shot — safe to call repeatedly (each call cancels
+  /// the previous timers).
+  ///
+  /// Mechanics, in order:
+  ///  1. Build the plan (which ids enter, which recede) from the classification
+  ///     plus the current graph's ids — pure, testable.
+  ///  2. Park the changed elements in the recessed `.morph-enter` start-state
+  ///     and set the final `changed`/`faded` classes in the same batch.
+  ///  3. Next frame, strip `.morph-enter` so the base `transition-property`
+  ///     eases opacity/stroke/width from recessed → full (the "enter").
+  ///  4. Re-run the fcose layout with `animate: true` so the graph physically
+  ///     eases into place around the change instead of jumping.
+  ///  5. Fire the existing one-shot pulse on the changed nodes for the accent.
+  function morphIn(diff: ReturnType<typeof classifyBeanGraphDiff>) {
+    if (!cy) return;
+    clearMorphTimers();
+
+    const allNodeIds = cy.nodes().map((n: { id: () => string }) => n.id());
+    const allEdgeIds = cy.edges().map((e: { id: () => string }) => e.id());
+    const plan = planBeanGraphMorph(diff, allNodeIds, allEdgeIds);
+
+    // Empty diff: leave the graph plain (parity with paintDiff's guard).
+    if (!plan.animate) {
+      cy.elements().removeClass('changed faded pulse morph-enter');
+      return;
+    }
+
+    cy.batch(() => {
+      cy.elements().removeClass('changed faded pulse morph-enter');
+      cy.nodes().forEach((n: { id: () => string; addClass: (c: string) => void }) => {
+        if (plan.enterNodeIds.has(n.id())) n.addClass('changed morph-enter');
+        else n.addClass('faded');
+      });
+      cy.edges().forEach((e: { id: () => string; addClass: (c: string) => void }) => {
+        if (plan.enterEdgeIds.has(e.id())) e.addClass('changed morph-enter');
+        else e.addClass('faded');
+      });
+    });
+
+    // Strip the start-state next frame so the transition runs (an immediate
+    // remove would coincide with the add and never animate).
+    morphRaf = requestAnimationFrame(() => {
+      morphRaf = null;
+      cy?.elements('.morph-enter').removeClass('morph-enter');
+    });
+
+    // Let the layout ease around the change. `fit: false` keeps the viewport
+    // steady so the reader's eye stays on the pulsing nodes.
+    cy.layout({
+      name: 'fcose',
+      quality: 'default',
+      animate: true,
+      animationDuration: 600,
+      fit: false,
+      randomize: false,
+      nodeSeparation: 90,
+      nodeRepulsion: 6000,
+      idealEdgeLength: 70,
+      packComponents: true,
+    } as unknown as LayoutOptions).run();
+
+    pulseChanged();
+  }
+
+  let morphRaf: ReturnType<typeof requestAnimationFrame> | null = null;
+  function clearMorphTimers() {
+    if (morphRaf !== null) {
+      cancelAnimationFrame(morphRaf);
+      morphRaf = null;
+    }
+  }
+
+  /// Toggle the morph mode on/off. Flipping it while a ref is applied re-applies
+  /// the overlay in the newly selected style (morph animates, plain diff snaps).
+  function toggleMorph() {
+    morphRequested = !morphRequested;
+    if (diffRef) void applyDiff();
   }
 
   /// Toggle the `changed` / `faded` classes and fire a one-shot pulse on the
@@ -293,16 +413,27 @@
       clearTimeout(pulseTimer);
       pulseTimer = null;
     }
-    cy?.elements().removeClass('changed faded pulse');
+    clearMorphTimers();
+    cy?.elements().removeClass('changed faded pulse morph-enter');
   }
 
   function onDiffKey(evt: KeyboardEvent) {
     if (evt.key === 'Enter') void applyDiff();
   }
 
-  onMount(mountGraph);
+  onMount(async () => {
+    await mountGraph();
+    // When embedded in a walkthrough step with a ref, press play automatically:
+    // apply the ref and morph the change in without the user touching anything.
+    if (autoMorphRef && cy && els) {
+      diffInput = autoMorphRef;
+      morphRequested = true;
+      await applyDiff();
+    }
+  });
   onDestroy(() => {
     if (pulseTimer) clearTimeout(pulseTimer);
+    clearMorphTimers();
     cy?.destroy();
     cy = null;
   });
@@ -314,7 +445,7 @@
     <button type="button" on:click={() => zoomBy(0.8)} title={$t('diagram.zoomOut')}>－</button>
     <button type="button" on:click={fit} title={$t('diagram.resetView')}>⌂</button>
     <span class="summary">{nodeCount} · {edgeCount}</span>
-    {#if !empty}
+    {#if !empty && !embedded}
       <span class="divider"></span>
       <label class="since-label" for="bean-diff-ref">{$t('diagram.beanGraphLive.since')}</label>
       <input
@@ -334,6 +465,16 @@
         disabled={diffLoading}
         title={$t('diagram.beanGraphLive.applyDiff')}
       >{diffLoading ? '…' : $t('diagram.beanGraphLive.applyDiff')}</button>
+      <!-- Morph toggle (V3.3): when on, the overlay arrives via the animated
+           transition instead of the static V3.2 diff paint. -->
+      <button
+        type="button"
+        class="morph-toggle"
+        class:active={overlayMode === 'morph'}
+        aria-pressed={morphRequested}
+        on:click={toggleMorph}
+        title={$t('diagram.beanGraphLive.morphTitle')}
+      >{$t('diagram.beanGraphLive.morph')}</button>
       {#if diffRef}
         <button
           type="button"
@@ -432,6 +573,15 @@
   .since-apply:disabled {
     opacity: 0.6;
     cursor: default;
+  }
+  /* Morph toggle: a text button that lights up when the animated mode is on. */
+  .toolbar button.morph-toggle {
+    width: auto;
+    padding: 0 8px;
+  }
+  .toolbar button.morph-toggle.active {
+    border-color: #f0b429;
+    color: #f0b429;
   }
   .diff-summary {
     font-size: 11px;

@@ -592,14 +592,18 @@ export type WalkthroughTarget =
   | { kind: 'atlas'; module?: string | null; highlight_fqns?: string[] }
   // #125: before/after architecture snapshot for one diagram kind. Renders the
   // current diagram overlaid with the file-level change set between two refs
-  // (`from`..`to`); the user toggles before / after / changed-only. Only
-  // `folder-map` is supported today. NOTE: the Rust `WalkthroughTarget` enum
-  // does not yet carry this variant — see the PR follow-up. Old tours never
-  // emit it, so the union stays backward-compatible (the `note` default and
-  // every other kind render exactly as before).
+  // (`from`..`to`); the user toggles before / after / changed-only.
+  // - `folder-map` (default): the static concentric-ring diff.
+  // - `bean-graph-live` (V3.3): the animated Cytoscape bean-graph *morph* — the
+  //   changed beans animate in from `from`..working-tree while the layout
+  //   eases (`to` is ignored for this kind; ProjectMind can't re-analyse an old
+  //   ref, so the morph runs against the current graph).
+  // NOTE: the Rust `WalkthroughTarget` enum carries `diagram` as a free string,
+  // so no backend change is needed for the new kind. Old tours never emit this
+  // variant, so the union stays backward-compatible.
   | {
       kind: 'diagram-diff';
-      diagram?: 'folder-map';
+      diagram?: 'folder-map' | 'bean-graph-live';
       from: string;
       to?: string | null;
     }
