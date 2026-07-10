@@ -380,6 +380,294 @@ pub fn file_recency(repo_root: &Path) -> Result<Vec<FileRecency>, GitError> {
     Ok(out)
 }
 
+/// One commit that touched a module, reduced to what the timeline-river
+/// renderer needs to place a "drop" on the module's band.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitDrop {
+    /// Seconds elapsed between the commit and the time `commit_activity`
+    /// ran. Negative deltas (commits with future timestamps) are clamped
+    /// to 0. The renderer maps this onto the horizontal (time) axis —
+    /// larger values are further to the left (older).
+    pub secs_ago: u64,
+    /// Short (7-char) commit hash, for tooltips.
+    pub sha: String,
+    /// First line of the commit message, for tooltips.
+    pub summary: String,
+}
+
+/// Commit activity for a single module: the module id plus every commit
+/// (within the window / cap) that touched a file attributed to it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleActivity {
+    /// Module identifier. Either a Maven `artifactId` / Cargo crate name
+    /// (when the file falls inside a discovered module root) or, as a
+    /// fallback, the file's top-level directory (`.` for repo-root files).
+    pub module: String,
+    /// Commits that touched this module, newest-first. A single commit that
+    /// touched two modules appears once in each module's list.
+    pub commits: Vec<CommitDrop>,
+}
+
+/// Timeline-river payload (concept 4 of #63): per-module commit activity
+/// over a bounded time window, ready to render as a horizontal river of
+/// commit drops. Mirrors [`crate::activity_heatmap::ActivityHeatmap`]'s
+/// no-git-empty-state style so the frontend never needs an error path for
+/// "this is just not a git repo".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitActivity {
+    /// Repository root, for display.
+    pub root: String,
+    /// Wall-clock time (seconds since epoch) when the walk ran. The x-axis
+    /// anchor: a drop's `secs_ago` is measured back from here.
+    pub now_secs: i64,
+    /// Width of the time window in seconds (see [`ACTIVITY_WINDOW_SECS`]).
+    /// Commits older than this are dropped. The renderer uses it to bound
+    /// the axis so the oldest drops don't fall off the left edge.
+    pub window_secs: u64,
+    /// One entry per module that saw at least one commit in the window,
+    /// sorted by most-recent activity (freshest module first).
+    pub modules: Vec<ModuleActivity>,
+    /// Total commits counted across all modules (a commit touching N
+    /// modules counts N times).
+    pub total_commits: usize,
+    /// `true` when the walker hit [`ACTIVITY_MAX_COMMITS`] and stopped early.
+    pub truncated: bool,
+    /// `true` when no git repository was found at `root`.
+    pub no_git: bool,
+}
+
+/// Time window the timeline river covers: 24 months. Commits older than
+/// this are dropped so the axis stays legible on long-lived repos.
+pub const ACTIVITY_WINDOW_SECS: u64 = 24 * 30 * 86_400;
+
+/// Hard cap on commits visited before bailing, independent of the window —
+/// a safety belt for pathological histories.
+pub const ACTIVITY_MAX_COMMITS: usize = 5_000;
+
+/// Cap on distinct modules kept. Realistic monorepos have well under this;
+/// the cap only guards against a degenerate history that produced thousands
+/// of top-level directories.
+pub const ACTIVITY_MAX_MODULES: usize = 500;
+
+/// Build the per-module commit-activity river for the git repository at
+/// `repo_root`.
+///
+/// Walks HEAD backwards over the last [`ACTIVITY_WINDOW_SECS`] (capped at
+/// [`ACTIVITY_MAX_COMMITS`] visited commits). For each commit it diffs
+/// against its parent(s), attributes every touched file to a module, and
+/// records a [`CommitDrop`] on that module's band.
+///
+/// Module attribution reuses the same discovery the engine uses when
+/// opening a repo: Maven modules (`pom.xml`) first, then Cargo crates
+/// (`Cargo.toml`). A file is attributed to the deepest discovered module
+/// whose root contains it; files outside any module (or in a repo with no
+/// build manifests) fall back to their top-level directory, with `.` for
+/// files sitting directly in the repo root.
+///
+/// Falls back to an empty payload (`no_git = true`) when the directory
+/// isn't a git checkout, mirroring [`crate::activity_heatmap::build`].
+#[must_use]
+pub fn commit_activity(repo_root: &Path) -> CommitActivity {
+    let root_str = repo_root.to_string_lossy().to_string();
+    let now_secs = i64::try_from(
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs()),
+    )
+    .unwrap_or(i64::MAX);
+
+    let Ok(repo) = GitRepo::discover(repo_root) else {
+        return empty_activity(root_str, now_secs, true);
+    };
+
+    // Canonicalise so the module roots (which come back absolute + resolved
+    // from discovery) can be reduced to repo-relative prefixes that line up
+    // with the repo-relative diff paths.
+    let base = std::fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
+    let module_roots = discover_module_roots(&base);
+
+    let window_start = now_secs - i64::try_from(ACTIVITY_WINDOW_SECS).unwrap_or(i64::MAX);
+
+    let Ok(mut walk) = repo.revwalk() else {
+        return empty_activity(root_str, now_secs, false);
+    };
+    if walk.push_head().is_err() {
+        // Empty repo / no HEAD → a git repo with no activity.
+        return empty_activity(root_str, now_secs, false);
+    }
+    let _ = walk.set_sorting(git2::Sort::TIME);
+
+    // module id → (most-recent secs_ago, drops)
+    let mut per_module: HashMap<String, Vec<CommitDrop>> = HashMap::new();
+    let mut total_commits = 0usize;
+    let mut truncated = false;
+
+    for (visited, oid_res) in walk.enumerate() {
+        if visited >= ACTIVITY_MAX_COMMITS {
+            truncated = true;
+            break;
+        }
+        let Ok(oid) = oid_res else { continue };
+        let Ok(commit) = repo.find_commit(oid) else {
+            continue;
+        };
+        let commit_time = commit.time().seconds();
+        if commit_time < window_start {
+            // TIME-sorted walk: once we're past the window everything else
+            // is older too.
+            break;
+        }
+        let secs_ago = u64::try_from((now_secs - commit_time).max(0)).unwrap_or(0);
+        let sha = oid.to_string();
+        let short_sha: String = sha.chars().take(7).collect();
+        let summary = commit
+            .summary()
+            .map(ToString::to_string)
+            .unwrap_or_default();
+
+        let Ok(tree) = commit.tree() else { continue };
+        let parent_trees: Vec<git2::Tree<'_>> =
+            commit.parents().filter_map(|p| p.tree().ok()).collect();
+        let touched = if parent_trees.is_empty() {
+            paths_in_diff(
+                repo.diff_tree_to_tree(None, Some(&tree), None)
+                    .ok()
+                    .as_ref(),
+            )
+        } else {
+            let mut paths: Vec<PathBuf> = Vec::new();
+            for parent in &parent_trees {
+                if let Ok(diff) = repo.diff_tree_to_tree(Some(parent), Some(&tree), None) {
+                    paths.extend(paths_in_diff(Some(&diff)));
+                }
+            }
+            paths
+        };
+
+        // Which modules did this commit touch? A commit that changes two
+        // files in the same module still records a single drop for it.
+        let mut modules_hit: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for path in touched {
+            modules_hit.insert(module_of(&path, &module_roots));
+        }
+        for module in modules_hit {
+            if per_module.len() >= ACTIVITY_MAX_MODULES && !per_module.contains_key(&module) {
+                continue;
+            }
+            per_module.entry(module).or_default().push(CommitDrop {
+                secs_ago,
+                sha: short_sha.clone(),
+                summary: summary.clone(),
+            });
+            total_commits += 1;
+        }
+    }
+
+    // Newest-activity-first module ordering (smallest min secs_ago wins).
+    let mut modules: Vec<ModuleActivity> = per_module
+        .into_iter()
+        .map(|(module, commits)| ModuleActivity { module, commits })
+        .collect();
+    modules.sort_by(|a, b| {
+        let a_min = a
+            .commits
+            .iter()
+            .map(|c| c.secs_ago)
+            .min()
+            .unwrap_or(u64::MAX);
+        let b_min = b
+            .commits
+            .iter()
+            .map(|c| c.secs_ago)
+            .min()
+            .unwrap_or(u64::MAX);
+        a_min.cmp(&b_min).then_with(|| a.module.cmp(&b.module))
+    });
+
+    CommitActivity {
+        root: root_str,
+        now_secs,
+        window_secs: ACTIVITY_WINDOW_SECS,
+        modules,
+        total_commits,
+        truncated,
+        no_git: false,
+    }
+}
+
+/// Empty timeline-river payload — used for both the no-git case and an
+/// empty/HEAD-less repository.
+fn empty_activity(root: String, now_secs: i64, no_git: bool) -> CommitActivity {
+    CommitActivity {
+        root,
+        now_secs,
+        window_secs: ACTIVITY_WINDOW_SECS,
+        modules: Vec::new(),
+        total_commits: 0,
+        truncated: false,
+        no_git,
+    }
+}
+
+/// A discovered module, reduced to what attribution needs: the module root
+/// relative to the repo root (deepest first, so the first prefix match is
+/// the most specific) and the module's display id. An empty `rel_root`
+/// means the module root *is* the repo root (single-module repo) and thus
+/// contains every file.
+struct ModuleRoot {
+    rel_root: PathBuf,
+    id: String,
+}
+
+/// Reuse the engine's module discovery (Maven first, then Cargo) so the
+/// timeline river groups commits by the same modules the rest of the app
+/// shows. `base` is the canonicalised repo root; each module root is
+/// reduced to a repo-relative prefix. Returns roots deepest-first; an empty
+/// vec means "attribute by top-level directory" (a manifest-less repo).
+fn discover_module_roots(base: &Path) -> Vec<ModuleRoot> {
+    let rel = |root: &Path| root.strip_prefix(base).unwrap_or(root).to_path_buf();
+    let maven = crate::maven::discover(base);
+    if !maven.is_empty() {
+        return maven
+            .into_iter()
+            .map(|m| ModuleRoot {
+                rel_root: rel(&m.root),
+                id: m.artifact_id,
+            })
+            .collect();
+    }
+    crate::cargo::discover(base)
+        .into_iter()
+        .map(|c| ModuleRoot {
+            rel_root: rel(&c.root),
+            id: c.name,
+        })
+        .collect()
+}
+
+/// Attribute a repo-relative `path` to a module id. Prefers the deepest
+/// discovered module whose (repo-relative) root is a prefix of the file;
+/// otherwise falls back to the file's top-level directory (`.` for
+/// repo-root files).
+fn module_of(path: &Path, module_roots: &[ModuleRoot]) -> String {
+    for m in module_roots {
+        // Empty rel_root = repo root itself, contains everything.
+        if m.rel_root.as_os_str().is_empty() || path.starts_with(&m.rel_root) {
+            return m.id.clone();
+        }
+    }
+    // Fallback: top-level directory. A single-component path is a repo-root
+    // file (its only component is the file name), so it maps to ".".
+    if path.components().count() <= 1 {
+        return ".".to_string();
+    }
+    path.components()
+        .next()
+        .and_then(|c| c.as_os_str().to_str())
+        .filter(|s| !s.is_empty())
+        .map_or_else(|| ".".to_string(), ToString::to_string)
+}
+
 /// Helper: collect paths from a diff. Returns an empty list when `diff` is
 /// `None` (let callers stay terse).
 fn paths_in_diff(diff: Option<&Diff<'_>>) -> Vec<PathBuf> {
@@ -571,6 +859,93 @@ mod tests {
         let y = by_path.get(&PathBuf::from("y.md")).unwrap();
         assert_eq!(y.author_name.as_deref(), Some("Alice"));
         assert_eq!(y.author_email.as_deref(), Some("alice@example.com"));
+    }
+
+    #[test]
+    fn commit_activity_groups_commits_by_top_level_dir() {
+        let tmp = TempDir::new();
+        let repo = init_repo(tmp.path());
+        // Two top-level "modules" (auth/, billing/) plus a repo-root file.
+        // Timestamps are recent so they fall inside the window.
+        let now = i64::try_from(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        )
+        .unwrap();
+        fs::create_dir_all(tmp.path().join("auth")).unwrap();
+        fs::create_dir_all(tmp.path().join("billing")).unwrap();
+        commit_file(&repo, tmp.path(), "auth/a.rs", "1", "auth one", now - 300);
+        commit_file(
+            &repo,
+            tmp.path(),
+            "billing/b.rs",
+            "1",
+            "bill one",
+            now - 200,
+        );
+        commit_file(&repo, tmp.path(), "auth/a.rs", "2", "auth two", now - 100);
+        commit_file(&repo, tmp.path(), "README.md", "x", "root file", now - 50);
+
+        let out = commit_activity(tmp.path());
+        assert!(!out.no_git);
+        let by_module: HashMap<_, _> = out.modules.iter().map(|m| (m.module.clone(), m)).collect();
+
+        // auth touched twice, billing once, "." (repo-root README) once.
+        assert_eq!(by_module.get("auth").unwrap().commits.len(), 2);
+        assert_eq!(by_module.get("billing").unwrap().commits.len(), 1);
+        assert_eq!(by_module.get(".").unwrap().commits.len(), 1);
+        // Total = 2 + 1 + 1 (each commit touched exactly one module here).
+        assert_eq!(out.total_commits, 4);
+
+        // Modules are sorted freshest-first: "." (README, now-50) is the most
+        // recent activity, then auth (now-100), then billing (now-200).
+        let order: Vec<&str> = out.modules.iter().map(|m| m.module.as_str()).collect();
+        assert_eq!(order, vec![".", "auth", "billing"]);
+
+        // secs_ago is monotonic within a module (drops in newest-first order).
+        let auth = by_module.get("auth").unwrap();
+        assert!(auth.commits[0].secs_ago <= auth.commits[1].secs_ago);
+        assert!(!auth.commits[0].sha.is_empty());
+        assert_eq!(auth.commits[0].summary, "auth two");
+    }
+
+    #[test]
+    fn commit_activity_no_git_is_empty_not_error() {
+        let tmp = TempDir::new();
+        // Fresh dir, never `git init`ed.
+        let out = commit_activity(tmp.path());
+        assert!(out.no_git);
+        assert!(out.modules.is_empty());
+        assert_eq!(out.total_commits, 0);
+    }
+
+    #[test]
+    fn commit_activity_drops_commits_older_than_window() {
+        let tmp = TempDir::new();
+        let repo = init_repo(tmp.path());
+        // One ancient commit (well outside the 24-month window) and one
+        // recent commit. Only the recent one should survive.
+        fs::create_dir_all(tmp.path().join("old")).unwrap();
+        commit_file(&repo, tmp.path(), "old/x.rs", "1", "ancient", 1_000_000_000);
+        let now = i64::try_from(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        )
+        .unwrap();
+        fs::create_dir_all(tmp.path().join("fresh")).unwrap();
+        commit_file(&repo, tmp.path(), "fresh/y.rs", "1", "recent", now - 100);
+
+        let out = commit_activity(tmp.path());
+        let modules: Vec<&str> = out.modules.iter().map(|m| m.module.as_str()).collect();
+        assert!(modules.contains(&"fresh"), "recent commit kept");
+        assert!(
+            !modules.contains(&"old"),
+            "ancient commit dropped by window"
+        );
     }
 
     #[test]

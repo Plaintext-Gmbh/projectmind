@@ -33,6 +33,7 @@ const allKinds: Record<DiagramKind, true> = {
   'architecture-flow': true,
   'module-chord': true,
   'activity-heatmap': true,
+  'timeline-river': true,
   'language-stats': true,
 };
 

@@ -3,8 +3,14 @@
   import { get } from 'svelte/store';
   import mermaid from 'mermaid';
   import DrawIoFrame from './DrawIoFrame.svelte';
-  import { showDiagram, fileRecency, listChangesSince, revealInFileManager } from '../lib/api';
-  import type { ChangedFile, ClassEntry, DiagramKind } from '../lib/api';
+  import {
+    showDiagram,
+    fileRecency,
+    commitActivity,
+    listChangesSince,
+    revealInFileManager,
+  } from '../lib/api';
+  import type { ChangedFile, ClassEntry, DiagramKind, CommitActivity } from '../lib/api';
   import {
     classes,
     selectedClass,
@@ -44,6 +50,7 @@
     renderActivityHeatmap,
     type ActivityHeatmap,
   } from '../lib/diagrams/activityHeatmap';
+  import { renderTimelineRiver } from '../lib/diagrams/timelineRiver';
   import { createViewportStore } from '../lib/diagrams/viewport';
   import MiniMap from './MiniMap.svelte';
 
@@ -65,6 +72,7 @@
   let architectureFlow: ArchitectureFlow | null = null;
   let moduleChord: ModuleChord | null = null;
   let activityHeatmap: ActivityHeatmap | null = null;
+  let timelineRiver: CommitActivity | null = null;
   let selectedDocId: string | null = null;
   let selectedFolderNode: FolderMapNode | null = null;
   let revealError: string | null = null;
@@ -393,6 +401,29 @@
       const wantChanges = k === 'folder-map' && effectiveColorBy === 'diff';
       if (wantChanges) await ensureChangesForCurrentRepo();
 
+      // timeline-river has its own endpoint (commit_activity) rather than a
+      // show_diagram payload, so it takes an early branch before the shared
+      // showDiagram fetch — mirrors how folder-map's colour overlays pull
+      // from the dedicated file_recency endpoint.
+      if (k === 'timeline-river') {
+        mermaidSource = '';
+        docGraph = null;
+        drawIoXml = '';
+        folderMap = null;
+        selectedFolderNode = null;
+        languageStats = null;
+        architectureFlow = null;
+        moduleChord = null;
+        activityHeatmap = null;
+        timelineRiver = await commitActivity();
+        svg = renderTimelineRiver(timelineRiver);
+        resetView();
+        await tick();
+        applyRenderedSvgSize();
+        return;
+      }
+      timelineRiver = null;
+
       const payload = await showDiagram(k);
       docGraph = null;
       drawIoXml = '';
@@ -458,30 +489,36 @@
       resetView();
       await tick();
       if (drawIoXml) return;
-      const node = stage?.querySelector('svg') as SVGSVGElement | null;
-      if (node) {
-        // Drop Mermaid's inline width/maxWidth so we control sizing.
-        node.removeAttribute('style');
-        // Compute fit-to-stage at scale=1 from the SVG's viewBox aspect ratio.
-        const vb = (node.getAttribute('viewBox') ?? '').split(/\s+/).map(Number);
-        const [, , vbW = 0, vbH = 0] = vb;
-        const sw = stage?.clientWidth ?? 0;
-        const sh = stage?.clientHeight ?? 0;
-        if (vbW > 0 && vbH > 0 && sw > 0 && sh > 0) {
-          const fit = Math.min(sw / vbW, sh / vbH);
-          viewport.setBaseSize(vbW * fit, vbH * fit);
-        } else {
-          viewport.setBaseSize(sw, sh);
-        }
-        node.style.display = 'block';
-        applyBaseSize();
-      }
+      applyRenderedSvgSize();
     } catch (err) {
       error = String(err);
       svg = '';
     } finally {
       loading = false;
     }
+  }
+
+  /// Fit the freshly-rendered stage `<svg>` to the stage box at scale=1 so
+  /// live zoom/pan then works off the viewport transform. Shared by every
+  /// render path (mermaid + the hand-rolled SVG renderers).
+  function applyRenderedSvgSize() {
+    const node = stage?.querySelector('svg') as SVGSVGElement | null;
+    if (!node) return;
+    // Drop Mermaid's inline width/maxWidth so we control sizing.
+    node.removeAttribute('style');
+    // Compute fit-to-stage at scale=1 from the SVG's viewBox aspect ratio.
+    const vb = (node.getAttribute('viewBox') ?? '').split(/\s+/).map(Number);
+    const [, , vbW = 0, vbH = 0] = vb;
+    const sw = stage?.clientWidth ?? 0;
+    const sh = stage?.clientHeight ?? 0;
+    if (vbW > 0 && vbH > 0 && sw > 0 && sh > 0) {
+      const fit = Math.min(sw / vbW, sh / vbH);
+      viewport.setBaseSize(vbW * fit, vbH * fit);
+    } else {
+      viewport.setBaseSize(sw, sh);
+    }
+    node.style.display = 'block';
+    applyBaseSize();
   }
 
   /// Build the per-render fill resolver from the current colour-by state.
@@ -894,6 +931,10 @@
     {:else if kind === 'activity-heatmap' && activityHeatmap}
       <span class="doc-summary">
         {activityHeatmap.total_commits} Commits · {activityHeatmap.distinct_authors} Autoren · Streak {activityHeatmap.longest_streak_days}d
+      </span>
+    {:else if kind === 'timeline-river' && timelineRiver}
+      <span class="doc-summary">
+        {timelineRiver.total_commits} Commits · {timelineRiver.modules.length} Module · 24 Monate
       </span>
     {/if}
     {#if !drawIoXml}

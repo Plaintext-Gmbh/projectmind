@@ -23,6 +23,7 @@ export type DiagramKind =
   | 'architecture-flow'
   | 'module-chord'
   | 'activity-heatmap'
+  | 'timeline-river'
   | 'language-stats';
 export type FolderMapLayout = 'hierarchy' | 'solar' | 'td';
 
