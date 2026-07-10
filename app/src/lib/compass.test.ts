@@ -47,6 +47,27 @@ describe('compassFor', () => {
     expect(compassFor({ kind: 'note' })).toEqual([]);
   });
 
+  it('shows last three FQN segments for a risk target (#160)', () => {
+    expect(compassFor({ kind: 'risk', fqn: 'com.example.svc.user.UserService' })).toEqual([
+      'svc',
+      'user',
+      'UserService',
+    ]);
+  });
+
+  it('shows pattern id and scope for a pattern target (#160)', () => {
+    expect(compassFor({ kind: 'pattern', pattern: 'Repository', scope: 'module:auth' })).toEqual([
+      'Repository',
+      'module:auth',
+    ]);
+    expect(compassFor({ kind: 'pattern', pattern: 'Layered' })).toEqual(['Layered']);
+  });
+
+  it('shows module or repo for an atlas target (#160)', () => {
+    expect(compassFor({ kind: 'atlas', module: 'auth' })).toEqual(['atlas · auth']);
+    expect(compassFor({ kind: 'atlas' })).toEqual(['atlas · repo']);
+  });
+
   it('returns no crumbs for an undefined target', () => {
     expect(compassFor(undefined)).toEqual([]);
   });
@@ -57,6 +78,9 @@ describe('compassIconFor', () => {
     ['class', 'C'],
     ['file', 'F'],
     ['diff', 'Δ'],
+    ['risk', 'R'],
+    ['pattern', 'P'],
+    ['atlas', '▦'],
     ['note', '·'],
   ])('maps %s to %s', (kind, expected) => {
     expect(compassIconFor({ kind } as WalkthroughStep['target'])).toBe(expected);

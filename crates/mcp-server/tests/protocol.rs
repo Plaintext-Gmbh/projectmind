@@ -446,6 +446,65 @@ fn present_artifact_rejects_unknown_format() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+#[test]
+fn walkthrough_start_stamps_schema_v2_and_accepts_new_kinds() {
+    // Cockpit 2.4 (#160): a tour authored with risk / pattern / atlas steps
+    // must round-trip through walkthrough_start, and the on-disk body must be
+    // stamped schemaVersion 2.
+    let (mut s, dir) = spawn_isolated();
+    s.call(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#);
+    let start = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"walkthrough_start","arguments":{"title":"2.4 tour","steps":[{"title":"Risk","target":{"kind":"risk","fqn":"a.b.C","focus":"validateToken","show":["churn","cx","cov"]}},{"title":"Pattern","target":{"kind":"pattern","pattern":"Repository","scope":"module:auth","view":"violations"}},{"title":"Atlas","target":{"kind":"atlas","module":"auth","highlight_fqns":["a.b.C"]}}]}}}"#;
+    let resp = s.call(start);
+    assert!(resp["error"].is_null(), "unexpected error: {resp}");
+    let payload: serde_json::Value =
+        serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(payload["ok"], true);
+    assert_eq!(payload["total"], 3);
+
+    // Append a fourth step of a new kind — walkthrough_append must accept it.
+    let append = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"walkthrough_append","arguments":{"step":{"title":"More risk","target":{"kind":"risk","fqn":"a.b.D"}}}}}"#;
+    let resp = s.call(append);
+    assert!(resp["error"].is_null(), "append error: {resp}");
+    let payload: serde_json::Value =
+        serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(payload["total"], 4);
+
+    // The body persisted next to the statefile carries schemaVersion 2 and the
+    // new kinds verbatim.
+    let body: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("walkthrough.json")).unwrap())
+            .unwrap();
+    assert_eq!(body["schemaVersion"], 2);
+    let steps = body["steps"].as_array().unwrap();
+    assert_eq!(steps.len(), 4);
+    assert_eq!(steps[0]["target"]["kind"], "risk");
+    assert_eq!(steps[0]["target"]["show"][0], "churn");
+    assert_eq!(steps[1]["target"]["kind"], "pattern");
+    assert_eq!(steps[1]["target"]["scope"], "module:auth");
+    assert_eq!(steps[2]["target"]["kind"], "atlas");
+    assert_eq!(steps[2]["target"]["highlight_fqns"][0], "a.b.C");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn walkthrough_append_rejects_unknown_kind() {
+    // The union stays narrow: an unknown step kind is a params error, not a
+    // silently dropped step.
+    let (mut s, dir) = spawn_isolated();
+    s.call(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#);
+    s.call(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"walkthrough_start","arguments":{"title":"t","steps":[{"title":"n","target":{"kind":"note"}}]}}}"#,
+    );
+    let resp = s.call(
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"walkthrough_append","arguments":{"step":{"title":"x","target":{"kind":"bogus"}}}}}"#,
+    );
+    assert_eq!(
+        resp["error"]["code"], -32602,
+        "expected invalid params: {resp}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 // ----- helpers -----
 
 /// Spawn a server against an isolated statefile directory, pre-seeding a fresh

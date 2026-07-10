@@ -3,6 +3,13 @@
   import { riskAtlas, type RiskScore, type RiskWeights } from '../lib/api';
   import { classes, selectedClass, viewMode } from '../lib/store';
   import { get } from 'svelte/store';
+  import {
+    treemap,
+    tileValue as val,
+    colorForScore as colorFor,
+    shortName,
+    type TreemapRect,
+  } from '../lib/treemap';
 
   // Cockpit 2.1 — Risk Atlas (Issue #157):
   //   Treemap (Fläche = SLOC, Farbe = Score) auf dem bereits gemergten risk_atlas-Backend.
@@ -28,13 +35,7 @@
   let boxW = 0;
   let boxH = 0;
 
-  interface Rect {
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-    item: RiskScore;
-  }
+  type Rect = TreemapRect;
 
   function loadWeights(): RiskWeights {
     try {
@@ -82,47 +83,9 @@
     onWeightChange();
   }
 
-  // Rekursiver, flächentreuer Treemap (alternierende Halbierung nach kumuliertem SLOC).
-  // Bewusst simpel + korrekt; squarified-Optimierung der Seitenverhältnisse ist ein Follow-up.
-  function val(it: RiskScore): number {
-    return Math.max(it.sloc, 1);
-  }
-
-  function treemap(items: RiskScore[], x: number, y: number, w: number, h: number): Rect[] {
-    if (items.length === 0 || w <= 0 || h <= 0) return [];
-    if (items.length === 1) return [{ x, y, w, h, item: items[0] }];
-    const total = items.reduce((s, it) => s + val(it), 0);
-    let acc = 0;
-    let split = 1;
-    for (let i = 0; i < items.length - 1; i++) {
-      acc += val(items[i]);
-      if (acc >= total / 2) {
-        split = i + 1;
-        break;
-      }
-    }
-    const a = items.slice(0, split);
-    const b = items.slice(split);
-    const frac = a.reduce((s, it) => s + val(it), 0) / total;
-    if (w >= h) {
-      const aw = w * frac;
-      return [...treemap(a, x, y, aw, h), ...treemap(b, x + aw, y, w - aw, h)];
-    }
-    const ah = h * frac;
-    return [...treemap(a, x, y, w, ah), ...treemap(b, x, y + ah, w, h - ah)];
-  }
-
-  // Farbskala: Score 0 (grün) -> 100 (rot).
-  function colorFor(score: number): string {
-    const s = Math.max(0, Math.min(100, score));
-    const hue = 120 - (s / 100) * 120;
-    return `hsl(${hue}, 65%, 42%)`;
-  }
-
-  function shortName(fqn: string): string {
-    const i = fqn.lastIndexOf('.');
-    return i >= 0 ? fqn.slice(i + 1) : fqn;
-  }
+  // Treemap-Layout + Farbskala + Namensfunktion aus lib/treemap (geteilt mit
+  // dem Walkthrough-`atlas`-Step, Cockpit 2.4). `val`/`colorFor`/`shortName`
+  // sind oben als Aliase importiert.
 
   // Klick: passende ClassEntry im Store finden und im Code-Tab öffnen (bestehende Mechanik).
   function openClass(fqn: string) {
