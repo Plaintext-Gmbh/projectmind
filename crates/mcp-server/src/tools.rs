@@ -146,15 +146,17 @@ fn walkthrough_step_schema() -> Value {
             "narration": { "type": "string", "description": "Markdown shown alongside the target. Optional but strongly recommended — this is what the user reads." },
             "target": {
                 "type": "object",
-                "description": "What to render in the main pane. `kind` selects the viewer: class | file | diff | artifact | risk | pattern | atlas | note. The risk/pattern/atlas kinds (Cockpit 2.4) pull live signals from the Risk Atlas + Pattern Lens.",
+                "description": "What to render in the main pane. `kind` selects the viewer: class | file | diff | artifact | risk | pattern | atlas | diagram-diff | note. The risk/pattern/atlas kinds (Cockpit 2.4) pull live signals from the Risk Atlas + Pattern Lens. kind=diagram-diff renders a before/after architecture snapshot of one diagram between two git refs (`from`/`to`) with before / after / changed-only toggles.",
                 "properties": {
-                    "kind": { "type": "string", "enum": ["class", "file", "diff", "artifact", "risk", "pattern", "atlas", "note"] },
+                    "kind": { "type": "string", "enum": ["class", "file", "diff", "artifact", "risk", "pattern", "atlas", "diagram-diff", "note"] },
                     "fqn":  { "type": "string", "description": "Class FQN (kind=class or kind=risk)" },
                     "path": { "type": "string", "description": "Absolute file path (kind=file)" },
                     "anchor": { "type": "string", "description": "Heading slug (kind=file, markdown only)" },
                     "id":   { "type": "string", "description": "Artifact id from present_artifact (kind=artifact)" },
                     "ref":  { "type": "string", "description": "Base git ref (kind=diff)" },
-                    "to":   { "type": "string", "description": "Target git ref or omit for working tree (kind=diff)" },
+                    "diagram": { "type": "string", "enum": ["folder-map", "bean-graph-live"], "description": "Diagram kind to snapshot (kind=diagram-diff). Omit for the default `folder-map`; `bean-graph-live` renders an animated bean-graph morph." },
+                    "from": { "type": "string", "description": "Base git ref for the before state, e.g. `HEAD~5` or a branch name (kind=diagram-diff)." },
+                    "to":   { "type": "string", "description": "Target git ref or omit for working tree (kind=diff or kind=diagram-diff)" },
                     "show": {
                         "type": "array",
                         "description": "Risk signals to surface in the header bar (kind=risk). Empty = every signal with data.",
@@ -2221,6 +2223,53 @@ mod tests {
         assert!(props.get("highlight_fqns").is_some());
         assert!(props.get("show").is_some());
         assert!(props.get("pattern").is_some());
+    }
+
+    #[test]
+    fn walkthrough_step_schema_advertises_diagram_diff() {
+        // #125: the before/after architecture snapshot (`diagram-diff`) must be
+        // offered to the LLM in the step schema of BOTH authoring tools —
+        // walkthrough_start and walkthrough_append — or schema-faithful MCP
+        // clients can never emit it.
+        let v = list();
+        let tools = v["tools"].as_array().unwrap();
+        let start = tools
+            .iter()
+            .find(|t| t["name"] == "walkthrough_start")
+            .expect("walkthrough_start tool registered");
+        let append = tools
+            .iter()
+            .find(|t| t["name"] == "walkthrough_append")
+            .expect("walkthrough_append tool registered");
+        let targets = [
+            &start["inputSchema"]["properties"]["steps"]["items"]["properties"]["target"],
+            &append["inputSchema"]["properties"]["step"]["properties"]["target"],
+        ];
+        for target in targets {
+            let kinds: Vec<&str> = target["properties"]["kind"]["enum"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap())
+                .collect();
+            assert!(
+                kinds.contains(&"diagram-diff"),
+                "kind `diagram-diff` missing from {kinds:?}"
+            );
+            // The refs + diagram selector must be documented properties.
+            let props = &target["properties"];
+            assert!(props.get("diagram").is_some());
+            assert!(props.get("from").is_some());
+            assert!(props.get("to").is_some());
+            // Only the diagram kinds the GUI actually renders are offered.
+            let diagram_kinds: Vec<&str> = props["diagram"]["enum"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap())
+                .collect();
+            assert_eq!(diagram_kinds, ["folder-map", "bean-graph-live"]);
+        }
     }
 
     #[test]
