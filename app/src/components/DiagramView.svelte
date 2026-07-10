@@ -22,6 +22,24 @@
     authorIdentity,
   } from '../lib/folderMapColors';
   import { wheelDelta } from '../lib/shiftWheelZoom';
+  import {
+    renderFolderMap,
+    type FolderMap,
+    type FolderMapNode,
+    type FillFor,
+  } from '../lib/diagrams/folderMap';
+  import { renderDocGraph, type DocGraph } from '../lib/diagrams/docGraph';
+  import { renderLanguageStats, type LanguageStats } from '../lib/diagrams/languageStats';
+  import {
+    renderArchitectureFlow,
+    type ArchitectureFlow,
+  } from '../lib/diagrams/architectureFlow';
+  import { renderModuleChord, type ModuleChord } from '../lib/diagrams/moduleChord';
+  import {
+    renderActivityHeatmap,
+    type ActivityHeatmap,
+  } from '../lib/diagrams/activityHeatmap';
+  import { createViewportStore } from '../lib/diagrams/viewport';
 
   export let kind: DiagramKind;
   export let folderLayout: 'hierarchy' | 'solar' | 'td' = 'solar';
@@ -30,148 +48,6 @@
   /// (target), and the toolbar's colour-by / diff-ref controls are hidden —
   /// they're driven by the embedding view instead.
   export let compareWith: string | null = null;
-
-  interface FolderMapNode {
-    id: string;
-    parent: string | null;
-    label: string;
-    path: string;
-    kind: 'root' | 'folder' | 'file';
-    depth: number;
-    weight: number;
-  }
-
-  interface FolderMap {
-    root: string;
-    max_depth: number;
-    truncated: boolean;
-    nodes: FolderMapNode[];
-  }
-
-  interface DocNode {
-    id: string;
-    abs: string;
-    rel: string;
-    title: string;
-    inbound: number;
-    outbound: number;
-    external: number;
-    orphan: boolean;
-  }
-
-  interface DocEdge {
-    from: string;
-    to: string;
-    label: string;
-    href: string;
-  }
-
-  interface DanglingDocLink {
-    from: string;
-    label: string;
-    href: string;
-    resolved: string;
-  }
-
-  interface DocGraph {
-    root: string;
-    nodes: DocNode[];
-    edges: DocEdge[];
-    dangling: DanglingDocLink[];
-    orphan_count: number;
-    dangling_count: number;
-    external_count: number;
-  }
-
-  interface LanguageBucket {
-    language: string;
-    extension: string | null;
-    files: number;
-    bytes: number;
-  }
-
-  interface LanguageStats {
-    root: string;
-    total_files: number;
-    total_bytes: number;
-    truncated: boolean;
-    buckets: LanguageBucket[];
-  }
-
-  interface FlowClass {
-    fqn: string;
-    name: string;
-    module: string;
-    stereotype: string | null;
-  }
-  interface FlowLayer {
-    id: string;
-    label: string;
-    description: string;
-    color: string;
-    classes: FlowClass[];
-    stereotypes: Record<string, number>;
-  }
-  interface FlowEdge {
-    from: string;
-    to: string;
-    count: number;
-  }
-  interface ArchitectureFlow {
-    root: string;
-    total_classes: number;
-    total_modules: number;
-    cross_module_edges: number;
-    layers: FlowLayer[];
-    edges: FlowEdge[];
-  }
-
-  interface ChordModule {
-    id: string;
-    label: string;
-    classes: number;
-    outgoing: number;
-    incoming: number;
-    internal: number;
-  }
-  interface ChordEdge {
-    from: string;
-    to: string;
-    count: number;
-  }
-  interface ModuleChord {
-    root: string;
-    modules: ChordModule[];
-    edges: ChordEdge[];
-    total_relations: number;
-  }
-
-  interface ActivityAuthorSlice {
-    name: string;
-    commits: number;
-  }
-  interface ActivityDay {
-    date: string;
-    commits: number;
-    top_authors: ActivityAuthorSlice[];
-  }
-  interface ActivityAuthorTotals {
-    name: string;
-    commits: number;
-  }
-  interface ActivityHeatmap {
-    root: string;
-    start_date: string;
-    end_date: string;
-    days: ActivityDay[];
-    total_commits: number;
-    distinct_authors: number;
-    top_authors: ActivityAuthorTotals[];
-    max_commits_per_day: number;
-    longest_streak_days: number;
-    truncated: boolean;
-    no_git: boolean;
-  }
 
   let stage: HTMLDivElement;
   let mermaidSource = '';
@@ -364,27 +240,31 @@
     await render(kind, folderLayout, docGraphLayout);
   }
 
-  // viewport state
-  let scale = 1;
-  let tx = 0;
-  let ty = 0;
+  // Viewport (pan / zoom) state now lives in a small per-instance Svelte
+  // store (`lib/diagrams/viewport.ts`) so the Mini-Map (#66) can read the
+  // viewport rectangle and drive pan/zoom through the same pure reducers the
+  // stage uses. `scale`/`tx`/`ty` are the live transform; `baseW`/`baseH`
+  // are the fit-to-stage SVG size at scale 1, stamped once per render.
+  //
+  // The base size still drives an explicit width/height on the SVG (see
+  // `applyBaseSize`) — the previous approach of mutating SVG width/height on
+  // every wheel tick was crisper at extreme zoom but unreliable under
+  // WKWebView (querySelector('svg') sometimes missed the freshly-attached
+  // node after HMR / async render, so the wrapper translated without the SVG
+  // scaling — "ganze Panel verschoben, aber nicht skaliert"). The CSS
+  // transform below always applies regardless of when the SVG mounts.
+  const viewport = createViewportStore();
+  $: scale = $viewport.scale;
+  $: tx = $viewport.tx;
+  $: ty = $viewport.ty;
+  $: baseW = $viewport.baseW;
+  $: baseH = $viewport.baseH;
+
   let dragging = false;
   let dragStartX = 0;
   let dragStartY = 0;
   let dragStartTx = 0;
   let dragStartTy = 0;
-
-  // SVG fit-to-stage size at scale=1. We still set width/height once during
-  // render() so the SVG occupies the stage sensibly; live zoom is then
-  // applied via a CSS transform on the wrapper (see `diagramTransform`
-  // below). The previous approach — mutating SVG width/height on every
-  // wheel tick — was crisper at extreme zoom but unreliable under WKWebView:
-  // querySelector('svg') sometimes missed the freshly-attached node after
-  // HMR / async render, so the wrapper translated without the SVG scaling
-  // ("ganze Panel verschoben, aber nicht skaliert"). CSS transform always
-  // applies regardless of when the SVG mounts.
-  let baseW = 0;
-  let baseH = 0;
 
   // Combined translate + scale for the .diagram wrapper. Reactive so any
   // tx/ty/scale update lands in one transform string.
@@ -438,9 +318,7 @@
   }
 
   function resetView() {
-    scale = 1;
-    tx = 0;
-    ty = 0;
+    viewport.reset();
   }
 
   function openFolderNode(path: string, nodeKind: string) {
@@ -519,14 +397,14 @@
         ) {
           selectedFolderNode = null;
         }
-        svg = renderFolderMap(folderMap, layout);
+        svg = renderFolderMap(folderMap, layout, buildFillFor(folderMap));
       } else if (k === 'doc-graph') {
         mermaidSource = '';
         docGraph = JSON.parse(payload) as DocGraph;
         if (selectedDocId && !docGraph.nodes.some((n) => n.id === selectedDocId)) {
           selectedDocId = null;
         }
-        svg = renderDocGraph(docGraph, docLayout);
+        svg = renderDocGraph(docGraph, docLayout, selectedDocId);
       } else if (k === 'architecture-layers') {
         mermaidSource = '';
         svg = '';
@@ -567,11 +445,9 @@
         const sh = stage?.clientHeight ?? 0;
         if (vbW > 0 && vbH > 0 && sw > 0 && sh > 0) {
           const fit = Math.min(sw / vbW, sh / vbH);
-          baseW = vbW * fit;
-          baseH = vbH * fit;
+          viewport.setBaseSize(vbW * fit, vbH * fit);
         } else {
-          baseW = sw;
-          baseH = sh;
+          viewport.setBaseSize(sw, sh);
         }
         node.style.display = 'block';
         applyBaseSize();
@@ -584,24 +460,11 @@
     }
   }
 
-  function renderFolderMap(map: FolderMap, layout: 'hierarchy' | 'solar' | 'td'): string {
-    // Build the fill resolver once per render, then capture it in the
-    // closure. The three layout renderers below all consult `currentFillFor`
-    // when emitting circles.
-    currentFillFor = buildFillFor(map);
-    if (layout === 'solar') return renderFolderSolar(map);
-    if (layout === 'td') return renderFolderTopDown(map);
-    return renderFolderHierarchy(map);
-  }
-
-  // Captured by each layout renderer so we don't have to thread the resolver
-  // through three function signatures. Reset at the top of every render.
-  let currentFillFor: ((id: string, kind: 'root' | 'folder' | 'file') => string | null) =
-    () => null;
-
-  function buildFillFor(
-    map: FolderMap,
-  ): (id: string, kind: 'root' | 'folder' | 'file') => string | null {
+  /// Build the per-render fill resolver from the current colour-by state.
+  /// The pure `renderFolderMap` (in `lib/diagrams/folderMap.ts`) calls this
+  /// resolver per node; it lives here because it depends on the fetched git
+  /// facts / diff status the component owns.
+  function buildFillFor(map: FolderMap): FillFor {
     if (effectiveColorBy === 'diff') {
       return buildDiffFillFor(map);
     }
@@ -664,9 +527,7 @@
   /// so a tinted parent says "something interesting happened in here";
   /// untouched files / folders stay null and fall back to the structure
   /// palette.
-  function buildDiffFillFor(
-    map: FolderMap,
-  ): (id: string, kind: 'root' | 'folder' | 'file') => string | null {
+  function buildDiffFillFor(map: FolderMap): FillFor {
     if (!changesByPath || changesByPath.size === 0) {
       return () => null;
     }
@@ -746,331 +607,6 @@
     return `hsl(${h}, ${s}%, ${l}%)`;
   }
 
-  /// Helper used by all three folder-map layouts. Returns the `<circle>`
-  /// element string — without a fill override when colour-by is `structure`,
-  /// with an inline fill (and a tinted, lighter stroke) in `recency` mode.
-  function circleSvg(
-    n: FolderMapNode,
-    r: number,
-  ): string {
-    const fill = currentFillFor(n.id, n.kind);
-    if (fill === null) {
-      return `<circle r="${r}"/>`;
-    }
-    // Stroke is the same hue ~25% lighter so the rim still reads.
-    return `<circle r="${r}" style="fill:${fill};stroke:color-mix(in srgb, ${fill} 60%, white);"/>`;
-  }
-
-  function renderFolderHierarchy(map: FolderMap): string {
-    const nodes = [...map.nodes].sort((a, b) => a.depth - b.depth || a.id.localeCompare(b.id));
-    const byParent = groupByParent(nodes);
-    const rows: Array<{ n: FolderMapNode; x: number; y: number }> = [];
-    const nextY = { value: 70 };
-    const xGap = 210;
-    const yGap = 58;
-    function place(id: string, depth: number) {
-      const n = nodes.find((node) => node.id === id);
-      if (!n) return;
-      const children = byParent.get(id) ?? [];
-      if (children.length === 0) {
-        rows.push({ n, x: 80 + depth * xGap, y: nextY.value });
-        nextY.value += yGap;
-        return;
-      }
-      const before = nextY.value;
-      for (const child of children) place(child.id, depth + 1);
-      const after = nextY.value - yGap;
-      rows.push({ n, x: 80 + depth * xGap, y: (before + after) / 2 });
-    }
-    place('.', 0);
-    const byId = new Map(rows.map((r) => [r.n.id, r]));
-    const width = Math.max(900, Math.max(...rows.map((r) => r.x), 0) + 260);
-    const height = Math.max(520, nextY.value + 70);
-    const edges = rows
-      .filter((r) => r.n.parent)
-      .map((r) => {
-        const p = byId.get(r.n.parent ?? '');
-        if (!p) return '';
-        return `<path d="M${p.x + 70} ${p.y} C${p.x + 135} ${p.y}, ${r.x - 70} ${r.y}, ${r.x - 10} ${r.y}" class="edge"/>`;
-      })
-      .join('');
-    const body = rows
-      .map(({ n, x, y }) => {
-        const radius = nodeRadius(n);
-        return `<g class="node ${n.kind}" data-path="${esc(n.path)}" data-kind="${n.kind}" transform="translate(${x} ${y})">
-          ${circleSvg(n, radius)}
-          <text x="${radius + 8}" y="-3">${esc(shortLabel(n.label, 22))}</text>
-          <text x="${radius + 8}" y="13" class="meta">${n.kind} · ${n.weight}</text>
-        </g>`;
-      })
-      .join('');
-    return folderSvg(width, height, edges + body, map);
-  }
-
-  function renderFolderTopDown(map: FolderMap): string {
-    const nodes = [...map.nodes].sort((a, b) => a.depth - b.depth || a.id.localeCompare(b.id));
-    const byId = new Map(nodes.map((n) => [n.id, n]));
-    const byParent = groupByParent(nodes);
-    const placed = new Map<string, { n: FolderMapNode; x: number; y: number }>();
-    const leafX = { value: 95 };
-    const xGap = 120;
-    const yGap = 112;
-
-    function place(id: string, depth: number): number {
-      const n = byId.get(id);
-      if (!n) return leafX.value;
-      const children = byParent.get(id) ?? [];
-      let x: number;
-      if (children.length === 0) {
-        x = leafX.value;
-        leafX.value += xGap;
-      } else {
-        const childXs = children.map((child) => place(child.id, depth + 1));
-        x = (childXs[0] + childXs[childXs.length - 1]) / 2;
-      }
-      placed.set(id, { n, x, y: 70 + depth * yGap });
-      return x;
-    }
-
-    place('.', 0);
-    const rows = [...placed.values()];
-    const width = Math.max(900, leafX.value + 95);
-    const height = Math.max(520, Math.max(...rows.map((r) => r.y), 0) + 120);
-    const edges = rows
-      .filter((r) => r.n.parent)
-      .map((r) => {
-        const p = placed.get(r.n.parent ?? '');
-        if (!p) return '';
-        return `<path d="M${p.x} ${p.y + 32} C${p.x} ${p.y + 70}, ${r.x} ${r.y - 70}, ${r.x} ${r.y - 18}" class="edge"/>`;
-      })
-      .join('');
-    const body = rows
-      .map(({ n, x, y }) => {
-        const radius = nodeRadius(n);
-        return `<g class="node ${n.kind}" data-path="${esc(n.path)}" data-kind="${n.kind}" transform="translate(${x} ${y})">
-          ${circleSvg(n, radius)}
-          <text y="${radius + 17}" text-anchor="middle">${esc(shortLabel(n.label, 14))}</text>
-          <text y="${radius + 31}" class="meta" text-anchor="middle">${n.kind} · ${n.weight}</text>
-        </g>`;
-      })
-      .join('');
-    return folderSvg(width, height, edges + body, map);
-  }
-
-  function renderFolderSolar(map: FolderMap): string {
-    const nodes = map.nodes;
-    const byParent = groupByParent(nodes);
-    const width = 1400;
-    const height = 900;
-    const cx = width / 2;
-    const cy = height / 2;
-    const placed = new Map<string, { n: FolderMapNode; x: number; y: number }>();
-    placed.set('.', { n: nodes[0], x: cx, y: cy });
-    const maxDepth = Math.max(...nodes.map((n) => n.depth), 1);
-    const rings = Array.from({ length: maxDepth }, (_, i) => {
-      const r = 105 + i * 118;
-      return `<circle class="orbit" cx="${cx}" cy="${cy}" r="${r}"/>`;
-    }).join('');
-    for (let depth = 1; depth <= maxDepth; depth++) {
-      const level = nodes.filter((n) => n.depth === depth);
-      const radius = 105 + (depth - 1) * 118;
-      level.forEach((n, i) => {
-        const angle = -Math.PI / 2 + (i / Math.max(level.length, 1)) * Math.PI * 2;
-        placed.set(n.id, {
-          n,
-          x: cx + Math.cos(angle) * radius,
-          y: cy + Math.sin(angle) * radius,
-        });
-      });
-    }
-    const edges = nodes
-      .filter((n) => n.parent)
-      .map((n) => {
-        const a = placed.get(n.parent ?? '');
-        const b = placed.get(n.id);
-        if (!a || !b) return '';
-        return `<line class="edge" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`;
-      })
-      .join('');
-    const body = [...placed.values()]
-      .map(({ n, x, y }) => {
-        const r = nodeRadius(n);
-        return `<g class="node ${n.kind}" data-path="${esc(n.path)}" data-kind="${n.kind}" transform="translate(${x} ${y})">
-          ${circleSvg(n, r)}
-          <text y="${r + 16}" text-anchor="middle">${esc(shortLabel(n.label, 18))}</text>
-        </g>`;
-      })
-      .join('');
-    return folderSvg(width, height, rings + edges + body, map);
-  }
-
-  function renderDocGraph(
-    graph: DocGraph,
-    layout: 'network' | 'radial' | 'orphans',
-  ): string {
-    if (graph.nodes.length === 0) return emptyDocGraphSvg();
-    const placed = placeDocNodes(graph, layout);
-    const width = 1400;
-    const height = 900;
-    const defs = `<defs>
-      <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-        <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
-      </marker>
-    </defs>`;
-    const edges = graph.edges
-      .map((e) => {
-        const from = placed.get(e.from);
-        const to = placed.get(e.to);
-        if (!from || !to) return '';
-        const dx = to.x - from.x;
-        const dy = to.y - from.y;
-        const len = Math.max(1, Math.sqrt(dx * dx + dy * dy));
-        const fromR = docNodeRadius(from.node) + 4;
-        const toR = docNodeRadius(to.node) + 10;
-        const x1 = from.x + (dx / len) * fromR;
-        const y1 = from.y + (dy / len) * fromR;
-        const x2 = to.x - (dx / len) * toR;
-        const y2 = to.y - (dy / len) * toR;
-        const curve = Math.min(80, Math.max(-80, (from.node.rel.localeCompare(to.node.rel) - 0.5) * 80));
-        const mx = (x1 + x2) / 2 - (dy / len) * curve;
-        const my = (y1 + y2) / 2 + (dx / len) * curve;
-        return `<path class="doc-edge" d="M${x1} ${y1} Q${mx} ${my} ${x2} ${y2}">
-          <title>${esc(e.from)} → ${esc(e.to)} (${esc(e.label)})</title>
-        </path>`;
-      })
-      .join('');
-    const nodes = [...placed.values()]
-      .map(({ node, x, y }) => {
-        const r = docNodeRadius(node);
-        const classes = ['node', 'doc-node'];
-        if (node.orphan) classes.push('orphan');
-        if (node.id === selectedDocId) classes.push('selected');
-        const subtitle = `${node.inbound} in · ${node.outbound} out · ${node.external} external`;
-        return `<g class="${classes.join(' ')}" data-id="${esc(node.id)}" transform="translate(${x} ${y})">
-          <circle r="${r}"/>
-          <text y="${r + 18}" text-anchor="middle">${esc(shortLabel(node.title || node.rel, 22))}</text>
-          <text y="${r + 33}" class="meta" text-anchor="middle">${esc(shortLabel(node.rel, 26))}</text>
-          <title>${esc(node.rel)}\n${esc(subtitle)}</title>
-        </g>`;
-      })
-      .join('');
-    const stats = `<g class="doc-stats" transform="translate(24 30)">
-      <text>docs ${graph.nodes.length}</text>
-      <text y="18">links ${graph.edges.length}</text>
-      <text y="36">orphans ${graph.orphan_count}</text>
-      <text y="54">dangling ${graph.dangling_count}</text>
-      <text y="72">external ${graph.external_count}</text>
-    </g>`;
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">
-      ${defs}
-      <style>
-        .doc-edge{stroke:#64748b;stroke-width:1.6;fill:none;opacity:.58;marker-end:url(#arrow)}
-        .doc-node{cursor:pointer}
-        .doc-node circle{fill:#1f2937;stroke:#38bdf8;stroke-width:2;filter:drop-shadow(0 10px 18px rgba(0,0,0,.35))}
-        .doc-node.orphan circle{stroke:#f59e0b;stroke-dasharray:5 4}
-        .doc-node.selected circle{fill:#0f766e;stroke:#5eead4;stroke-width:4}
-        text{fill:#e5edf8;font:13px ui-sans-serif,system-ui,sans-serif;paint-order:stroke;stroke:#090d14;stroke-width:3px;stroke-linejoin:round}
-        .meta{fill:#9aa8ba;font-size:11px}
-        .doc-stats text{fill:#cbd5e1;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;stroke:none}
-      </style>
-      <rect width="100%" height="100%" fill="#090d14"/>
-      ${edges}
-      ${nodes}
-      ${stats}
-    </svg>`;
-  }
-
-  function placeDocNodes(
-    graph: DocGraph,
-    layout: 'network' | 'radial' | 'orphans',
-  ): Map<string, { node: DocNode; x: number; y: number }> {
-    if (layout === 'orphans') return placeDocOrphans(graph);
-    if (layout === 'radial') return placeDocRadial(graph);
-    return placeDocNetwork(graph);
-  }
-
-  function placeDocNetwork(graph: DocGraph): Map<string, { node: DocNode; x: number; y: number }> {
-    const out = new Map<string, { node: DocNode; x: number; y: number }>();
-    const nodes = [...graph.nodes].sort(
-      (a, b) => b.inbound + b.outbound - (a.inbound + a.outbound) || a.rel.localeCompare(b.rel),
-    );
-    const cx = 700;
-    const cy = 450;
-    nodes.forEach((node, i) => {
-      if (i === 0) {
-        out.set(node.id, { node, x: cx, y: cy });
-        return;
-      }
-      const ring = Math.floor(Math.sqrt(i));
-      const inRingStart = ring * ring;
-      const inRingCount = Math.max(1, (ring + 1) * (ring + 1) - inRingStart);
-      const pos = i - inRingStart;
-      const angle = -Math.PI / 2 + (pos / inRingCount) * Math.PI * 2;
-      const radius = 120 + ring * 105;
-      out.set(node.id, {
-        node,
-        x: cx + Math.cos(angle) * radius,
-        y: cy + Math.sin(angle) * radius,
-      });
-    });
-    return out;
-  }
-
-  function placeDocRadial(graph: DocGraph): Map<string, { node: DocNode; x: number; y: number }> {
-    const out = new Map<string, { node: DocNode; x: number; y: number }>();
-    const root =
-      graph.nodes.find((n) => /^readme\.md$/i.test(n.rel)) ??
-      [...graph.nodes].sort((a, b) => b.outbound + b.inbound - (a.outbound + a.inbound))[0];
-    out.set(root.id, { node: root, x: 700, y: 450 });
-    const linked = new Set(graph.edges.filter((e) => e.from === root.id).map((e) => e.to));
-    const rings = [
-      graph.nodes.filter((n) => linked.has(n.id)),
-      graph.nodes.filter((n) => n.id !== root.id && !linked.has(n.id) && !n.orphan),
-      graph.nodes.filter((n) => n.id !== root.id && n.orphan),
-    ];
-    rings.forEach((ringNodes, ringIdx) => {
-      const radius = 150 + ringIdx * 180;
-      ringNodes
-        .sort((a, b) => a.rel.localeCompare(b.rel))
-        .forEach((node, i) => {
-          const angle = -Math.PI / 2 + (i / Math.max(1, ringNodes.length)) * Math.PI * 2;
-          out.set(node.id, {
-            node,
-            x: 700 + Math.cos(angle) * radius,
-            y: 450 + Math.sin(angle) * radius,
-          });
-        });
-    });
-    return out;
-  }
-
-  function placeDocOrphans(graph: DocGraph): Map<string, { node: DocNode; x: number; y: number }> {
-    const out = new Map<string, { node: DocNode; x: number; y: number }>();
-    const columns = [
-      graph.nodes.filter((n) => n.orphan).sort((a, b) => a.rel.localeCompare(b.rel)),
-      graph.nodes.filter((n) => !n.orphan).sort((a, b) => b.inbound - a.inbound || a.rel.localeCompare(b.rel)),
-    ];
-    columns.forEach((nodes, col) => {
-      const x = col === 0 ? 360 : 980;
-      const gap = Math.min(92, Math.max(44, 780 / Math.max(1, nodes.length)));
-      nodes.forEach((node, i) => {
-        out.set(node.id, { node, x, y: 80 + i * gap });
-      });
-    });
-    return out;
-  }
-
-  function docNodeRadius(n: DocNode): number {
-    return Math.min(46, 16 + Math.sqrt(n.inbound + n.outbound + n.external + 1) * 5);
-  }
-
-  function emptyDocGraphSvg(): string {
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520">
-      <rect width="100%" height="100%" fill="#090d14"/>
-      <text x="450" y="260" text-anchor="middle" fill="#94a3b8" font-size="18" font-family="ui-sans-serif,system-ui">No markdown documents found</text>
-    </svg>`;
-  }
-
   function openDoc(path: string) {
     // The user is taking an explicit action; if we were mirroring an MCP
     // intent, stop doing so or applyState will clobber the view shortly.
@@ -1087,515 +623,6 @@
     selectedDocId = docId;
     const target = docGraph?.nodes.find((n) => n.id === docId);
     if (target) openDoc(target.abs);
-  }
-
-  function groupByParent(nodes: FolderMapNode[]): Map<string, FolderMapNode[]> {
-    const out = new Map<string, FolderMapNode[]>();
-    for (const n of nodes) {
-      if (!n.parent) continue;
-      const arr = out.get(n.parent) ?? [];
-      arr.push(n);
-      out.set(n.parent, arr);
-    }
-    for (const arr of out.values()) {
-      arr.sort((a, b) => folderRank(a) - folderRank(b) || a.label.localeCompare(b.label));
-    }
-    return out;
-  }
-
-  function folderRank(n: FolderMapNode): number {
-    return n.kind === 'root' ? 0 : n.kind === 'folder' ? 1 : 2;
-  }
-
-  function nodeRadius(n: FolderMapNode): number {
-    const base = n.kind === 'root' ? 30 : n.kind === 'folder' ? 18 : 7;
-    return Math.min(base + Math.sqrt(n.weight) * 2.5, n.kind === 'file' ? 13 : 46);
-  }
-
-  function folderSvg(width: number, height: number, body: string, map: FolderMap): string {
-    const note = map.truncated
-      ? `<text x="24" y="${height - 24}" class="caption">truncated at ${map.nodes.length} nodes / depth ${map.max_depth}</text>`
-      : '';
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">
-      <style>
-        .edge{stroke:#3d4657;stroke-width:1.4;fill:none;opacity:.75}
-        .orbit{stroke:#2a3344;stroke-width:1;fill:none;stroke-dasharray:6 10}
-        .node circle{stroke-width:2;filter:drop-shadow(0 8px 14px rgba(0,0,0,.28))}
-        .node{cursor:default}
-        .node.file{cursor:pointer}
-        .node.root circle{fill:#4f46e5;stroke:#c4b5fd}
-        .node.folder circle{fill:#0f766e;stroke:#5eead4}
-        .node.file circle{fill:#334155;stroke:#94a3b8}
-        text{fill:#dce3f0;font:13px ui-sans-serif,system-ui,sans-serif}
-        .meta,.caption{fill:#8b98aa;font-size:11px}
-      </style>
-      <rect width="100%" height="100%" fill="#090d14"/>
-      ${body}
-      ${note}
-    </svg>`;
-  }
-
-  function shortLabel(label: string, max: number): string {
-    return label.length <= max ? label : `${label.slice(0, max - 1)}…`;
-  }
-
-  // ----- language-stats renderer ------------------------------------------
-  // Renders a horizontal-bar chart with the file count per language. Bars
-  // sorted by file count desc (already done server-side); the "Other"
-  // bucket sticks to the bottom. Bar width is proportional to file count
-  // relative to the largest bucket.
-  function renderLanguageStats(stats: LanguageStats): string {
-    if (stats.buckets.length === 0) {
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 480">
-        <rect width="100%" height="100%" fill="#090d14"/>
-        <text x="450" y="240" text-anchor="middle" fill="#94a3b8" font-size="18" font-family="ui-sans-serif,system-ui">No files found</text>
-      </svg>`;
-    }
-    const PALETTE = [
-      '#3b82f6',
-      '#10b981',
-      '#f59e0b',
-      '#ef4444',
-      '#8b5cf6',
-      '#ec4899',
-      '#14b8a6',
-      '#f97316',
-      '#22d3ee',
-      '#a3e635',
-      '#eab308',
-      '#6366f1',
-    ];
-    const buckets = stats.buckets;
-    const maxFiles = Math.max(1, ...buckets.map((b) => b.files));
-    const totalFiles = Math.max(1, stats.total_files);
-    const ROW = 28;
-    const TOP = 60;
-    const LEFT_LABEL = 200;
-    const BAR_LEFT = LEFT_LABEL + 12;
-    const RIGHT_PADDING = 160;
-    const width = 960;
-    const barTrack = width - BAR_LEFT - RIGHT_PADDING;
-    const height = TOP + buckets.length * ROW + 40;
-    const truncatedNote = stats.truncated
-      ? `<text x="24" y="${height - 18}" class="caption">truncated at ${stats.total_files} files</text>`
-      : '';
-    const totalLine = formatBytes(stats.total_bytes);
-    const rows = buckets
-      .map((b, i) => {
-        const w = Math.max(2, Math.round((b.files / maxFiles) * barTrack));
-        const y = TOP + i * ROW;
-        const color = PALETTE[i % PALETTE.length];
-        const pct = ((b.files / totalFiles) * 100).toFixed(1);
-        const extLabel = b.extension ? `.${b.extension}` : '—';
-        return `<g class="row">
-          <text x="${LEFT_LABEL}" y="${y + 14}" class="lang" text-anchor="end">${esc(b.language)}</text>
-          <text x="${LEFT_LABEL - 8}" y="${y + 14}" class="ext" text-anchor="end" dx="-44">${esc(extLabel)}</text>
-          <rect x="${BAR_LEFT}" y="${y + 4}" width="${w}" height="${ROW - 10}" rx="3" fill="${color}" opacity="0.85"/>
-          <text x="${BAR_LEFT + w + 8}" y="${y + 14}" class="value">${b.files} · ${pct}% · ${formatBytes(b.bytes)}</text>
-        </g>`;
-      })
-      .join('');
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">
-      <style>
-        text{fill:#dce3f0;font:13px ui-sans-serif,system-ui,sans-serif}
-        .title{font-size:18px;font-weight:600}
-        .caption{font-size:11px;fill:#94a3b8}
-        .lang{font-weight:600}
-        .ext{font-family:ui-monospace,monospace;font-size:11px;fill:#94a3b8}
-        .value{font-family:ui-monospace,monospace;font-size:11px;fill:#cbd5e1}
-        .ruler{stroke:#1f2937;stroke-width:1}
-      </style>
-      <rect width="100%" height="100%" fill="#090d14"/>
-      <text x="24" y="32" class="title">Sprachenverteilung</text>
-      <text x="24" y="50" class="caption">${stats.total_files} Dateien · ${totalLine} · ${buckets.length} Buckets</text>
-      <line x1="${BAR_LEFT}" y1="${TOP - 4}" x2="${BAR_LEFT}" y2="${TOP + buckets.length * ROW}" class="ruler"/>
-      ${rows}
-      ${truncatedNote}
-    </svg>`;
-  }
-
-  // ----- architecture-flow renderer ---------------------------------------
-  // Horizontal layer bands stacked top→bottom. Each band shows its name,
-  // class chips coloured by stereotype, a stereotype histogram, and an
-  // overall class count. Aggregated cross-layer edges become inter-band
-  // arrows whose stroke width encodes the underlying relation count.
-  function renderArchitectureFlow(flow: ArchitectureFlow): string {
-    const W = 1100;
-    const PAD_X = 40;
-    const PAD_TOP = 80;
-    const PAD_BETWEEN = 20;
-    const BAND_H = 150;
-    const CHIP_H = 26;
-    const CHIP_W = 132;
-    const CHIPS_PER_ROW = Math.max(1, Math.floor((W - 2 * PAD_X - 16) / (CHIP_W + 8)));
-
-    if (flow.total_classes === 0) {
-      const H = 320;
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
-        <rect width="100%" height="100%" fill="#090d14"/>
-        <text x="${W / 2}" y="${H / 2}" text-anchor="middle" fill="#94a3b8" font-size="18" font-family="ui-sans-serif,system-ui">Keine Klassen erkannt — Architektur-Schichten benötigen geparsten Code.</text>
-      </svg>`;
-    }
-
-    type Band = { layer: FlowLayer; y: number; h: number; rows: number };
-    const bands: Band[] = [];
-    let cursor = PAD_TOP;
-    for (const layer of flow.layers) {
-      const rows = layer.classes.length === 0 ? 1 : Math.ceil(layer.classes.length / CHIPS_PER_ROW);
-      const h = Math.max(BAND_H, 56 + rows * (CHIP_H + 8));
-      bands.push({ layer, y: cursor, h, rows });
-      cursor += h + PAD_BETWEEN;
-    }
-    const H = cursor + 40;
-
-    const bandSvg = bands
-      .map(({ layer, y, h }) => {
-        const total = layer.classes.length;
-        const stripe = `<rect x="${PAD_X}" y="${y}" width="${W - 2 * PAD_X}" height="${h}" rx="14" ry="14" fill="${layer.color}" fill-opacity="0.08" stroke="${layer.color}" stroke-width="1.4"/>`;
-        const accent = `<rect x="${PAD_X}" y="${y}" width="6" height="${h}" rx="3" fill="${layer.color}"/>`;
-        const head = `
-          <text x="${PAD_X + 22}" y="${y + 28}" class="band-title" fill="${layer.color}">${esc(layer.label)}</text>
-          <text x="${PAD_X + 22}" y="${y + 48}" class="band-desc">${esc(layer.description)}</text>
-          <text x="${W - PAD_X - 16}" y="${y + 28}" text-anchor="end" class="band-count" fill="${layer.color}">${total} ${total === 1 ? 'Klasse' : 'Klassen'}</text>`;
-
-        const stereoEntries = Object.entries(layer.stereotypes).sort((a, b) => b[1] - a[1]);
-        const stereoBadges = stereoEntries
-          .slice(0, 4)
-          .map(([s, n], i) => {
-            const bx = W - PAD_X - 16 - (stereoEntries.length > 4 ? 110 : 0) - i * 86;
-            return `<g><rect x="${bx - 78}" y="${y + 36}" width="78" height="18" rx="9" fill="${layer.color}" fill-opacity="0.18" stroke="${layer.color}" stroke-opacity="0.5"/><text x="${bx - 39}" y="${y + 49}" text-anchor="middle" class="stereo">${esc(s)} · ${n}</text></g>`;
-          })
-          .join('');
-
-        const chips = layer.classes
-          .map((c, i) => {
-            const col = i % CHIPS_PER_ROW;
-            const row = Math.floor(i / CHIPS_PER_ROW);
-            const cx = PAD_X + 22 + col * (CHIP_W + 8);
-            const cy = y + 60 + row * (CHIP_H + 8);
-            const label = shortChipLabel(c.name);
-            return `<g class="chip"><rect x="${cx}" y="${cy}" width="${CHIP_W}" height="${CHIP_H}" rx="6" fill="${layer.color}" fill-opacity="0.18" stroke="${layer.color}" stroke-opacity="0.55"/><text x="${cx + 10}" y="${cy + 17}" class="chip-text">${esc(label)}</text><title>${esc(c.fqn)}\n${esc(c.module)}${c.stereotype ? `\n@${esc(c.stereotype)}` : ''}</title></g>`;
-          })
-          .join('');
-
-        const empty =
-          total === 0
-            ? `<text x="${PAD_X + 22}" y="${y + 80}" class="empty">— keine Klassen in dieser Schicht —</text>`
-            : '';
-
-        return `${stripe}${accent}${head}${stereoBadges}${chips}${empty}`;
-      })
-      .join('');
-
-    // Edges between bands. Stroke width scales with count, capped at 8px.
-    const layerY = new Map(bands.map((b) => [b.layer.id, b.y + b.h / 2]));
-    const layerColor = new Map(bands.map((b) => [b.layer.id, b.layer.color]));
-    const maxEdge = Math.max(1, ...flow.edges.map((e) => e.count));
-    const xCenter = W / 2;
-    const edgeSvg = flow.edges
-      .map((edge, i) => {
-        const yFrom = layerY.get(edge.from);
-        const yTo = layerY.get(edge.to);
-        if (yFrom === undefined || yTo === undefined) return '';
-        const width = Math.max(1.4, Math.min(8, (edge.count / maxEdge) * 7 + 1.4));
-        // Curve sideways so multiple edges don't overlap.
-        const offset = (i - flow.edges.length / 2) * 26;
-        const xMid = xCenter + offset;
-        const midY = (yFrom + yTo) / 2;
-        const arrow = yFrom < yTo ? '▼' : '▲';
-        const color = layerColor.get(edge.from) ?? '#9ca3af';
-        const path = `M ${xCenter} ${yFrom} C ${xMid} ${(yFrom + midY) / 2}, ${xMid} ${(midY + yTo) / 2}, ${xCenter} ${yTo}`;
-        return `<g class="edge"><path d="${path}" stroke="${color}" stroke-width="${width}" stroke-opacity="0.55" fill="none"/><text x="${xMid}" y="${midY + 4}" text-anchor="middle" class="edge-label">${arrow} ${edge.count}</text></g>`;
-      })
-      .join('');
-
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
-      <style>
-        text{fill:#dce3f0;font:13px ui-sans-serif,system-ui,sans-serif}
-        .title{font-size:20px;font-weight:600}
-        .subtitle{font-size:12px;fill:#94a3b8}
-        .band-title{font-size:16px;font-weight:700}
-        .band-desc{font-size:12px;fill:#94a3b8}
-        .band-count{font-size:12px;font-weight:600}
-        .stereo{font-size:10px;font-family:ui-monospace,monospace;fill:#cbd5e1}
-        .chip{cursor:default}
-        .chip-text{font-size:11px;font-family:ui-monospace,monospace}
-        .empty{font-size:12px;fill:#64748b;font-style:italic}
-        .edge-label{font-size:10px;fill:#cbd5e1;font-family:ui-monospace,monospace}
-      </style>
-      <rect width="100%" height="100%" fill="#090d14"/>
-      <text x="${PAD_X}" y="40" class="title">Architektur-Schichten</text>
-      <text x="${PAD_X}" y="60" class="subtitle">${flow.total_classes} Klassen · ${flow.total_modules} Module · ${flow.cross_module_edges} Cross-Module-Edges</text>
-      ${edgeSvg}
-      ${bandSvg}
-    </svg>`;
-  }
-
-  function shortChipLabel(name: string): string {
-    return name.length <= 16 ? name : `${name.slice(0, 15)}…`;
-  }
-
-  // ----- module-chord renderer --------------------------------------------
-  // Modules as arcs on a circle, edges as Bezier chords through the centre.
-  // Width of each chord encodes the underlying relation count. Self-edges
-  // are not drawn (the module's `internal` count is shown on the label).
-  function renderModuleChord(chord: ModuleChord): string {
-    const W = 900;
-    const H = 700;
-    const cx = W / 2;
-    const cy = H / 2 + 12;
-    const R = 270;
-    const innerR = R - 18;
-    const labelR = R + 28;
-
-    if (chord.modules.length === 0) {
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
-        <rect width="100%" height="100%" fill="#090d14"/>
-        <text x="${cx}" y="${cy}" text-anchor="middle" fill="#94a3b8" font-size="18" font-family="ui-sans-serif,system-ui">Keine Module erkannt.</text>
-      </svg>`;
-    }
-
-    const PALETTE = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#22d3ee', '#a3e635', '#eab308', '#6366f1'];
-
-    // Position each module on the rim with weight proportional to its
-    // class count (so big modules get a wider arc).
-    const totalWeight = chord.modules.reduce((s, m) => s + Math.max(1, m.classes), 0);
-    const arcs = new Map<string, { start: number; end: number; mid: number; color: string }>();
-    let theta = -Math.PI / 2; // start at top
-    chord.modules.forEach((m, i) => {
-      const w = Math.max(1, m.classes) / totalWeight;
-      const span = w * 2 * Math.PI * 0.94; // leave 6% gap total
-      const start = theta + 0.03 * (2 * Math.PI) / chord.modules.length;
-      const end = start + span;
-      arcs.set(m.id, { start, end, mid: (start + end) / 2, color: PALETTE[i % PALETTE.length] });
-      theta = end + 0.03 * (2 * Math.PI) / chord.modules.length;
-    });
-
-    const arcSvg = chord.modules
-      .map((m) => {
-        const a = arcs.get(m.id)!;
-        const x1 = cx + R * Math.cos(a.start);
-        const y1 = cy + R * Math.sin(a.start);
-        const x2 = cx + R * Math.cos(a.end);
-        const y2 = cy + R * Math.sin(a.end);
-        const x3 = cx + innerR * Math.cos(a.end);
-        const y3 = cy + innerR * Math.sin(a.end);
-        const x4 = cx + innerR * Math.cos(a.start);
-        const y4 = cy + innerR * Math.sin(a.start);
-        const large = a.end - a.start > Math.PI ? 1 : 0;
-        const path = `M ${x1} ${y1} A ${R} ${R} 0 ${large} 1 ${x2} ${y2} L ${x3} ${y3} A ${innerR} ${innerR} 0 ${large} 0 ${x4} ${y4} Z`;
-        const lx = cx + labelR * Math.cos(a.mid);
-        const ly = cy + labelR * Math.sin(a.mid);
-        const anchor = Math.cos(a.mid) > 0 ? 'start' : 'end';
-        const rotation = (a.mid * 180) / Math.PI;
-        const niceRot = rotation > 90 || rotation < -90 ? rotation + 180 : rotation;
-        const labelText = `${esc(m.label)} · ${m.classes}`;
-        return `<g class="rim"><path d="${path}" fill="${a.color}" fill-opacity="0.85" stroke="${a.color}" stroke-width="1"/><text x="${lx}" y="${ly}" text-anchor="${anchor}" transform="rotate(${niceRot.toFixed(1)} ${lx} ${ly})" class="rim-label">${labelText}</text><title>${esc(m.id)}\n${m.classes} Klassen · ↗ ${m.outgoing} · ↘ ${m.incoming} · ⤾ ${m.internal}</title></g>`;
-      })
-      .join('');
-
-    const maxEdge = Math.max(1, ...chord.edges.map((e) => e.count));
-    const chordSvg = chord.edges
-      .map((edge) => {
-        const a1 = arcs.get(edge.from);
-        const a2 = arcs.get(edge.to);
-        if (!a1 || !a2) return '';
-        // Tap each chord into a sub-portion of the arc proportional to
-        // edge weight relative to the module's total outgoing.
-        const x1 = cx + innerR * Math.cos(a1.mid);
-        const y1 = cy + innerR * Math.sin(a1.mid);
-        const x2 = cx + innerR * Math.cos(a2.mid);
-        const y2 = cy + innerR * Math.sin(a2.mid);
-        const w = Math.max(1, Math.min(6, (edge.count / maxEdge) * 5 + 1));
-        return `<path d="M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}" stroke="${a1.color}" stroke-width="${w}" stroke-opacity="0.45" fill="none"><title>${esc(edge.from)} → ${esc(edge.to)}: ${edge.count}</title></path>`;
-      })
-      .join('');
-
-    const top = chord.edges.slice(0, 6);
-    const topList = top
-      .map(
-        (e, i) =>
-          `<text x="24" y="${600 + i * 16}" class="top-line">${i + 1}. ${esc(e.from)} → ${esc(e.to)} · ${e.count}</text>`,
-      )
-      .join('');
-
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
-      <style>
-        text{fill:#dce3f0;font:13px ui-sans-serif,system-ui,sans-serif}
-        .title{font-size:20px;font-weight:600}
-        .subtitle{font-size:12px;fill:#94a3b8}
-        .rim-label{font-size:11px;font-family:ui-monospace,monospace}
-        .top-title{font-size:12px;font-weight:600;fill:#cbd5e1}
-        .top-line{font-size:11px;font-family:ui-monospace,monospace;fill:#94a3b8}
-      </style>
-      <rect width="100%" height="100%" fill="#090d14"/>
-      <text x="24" y="34" class="title">Modul-Kopplung</text>
-      <text x="24" y="52" class="subtitle">${chord.modules.length} Module · ${chord.edges.length} Cross-Module-Edges · ${chord.total_relations} Beziehungen gesamt</text>
-      ${chordSvg}
-      ${arcSvg}
-      ${top.length > 0 ? `<text x="24" y="584" class="top-title">Top Cross-Module-Kanten</text>${topList}` : ''}
-    </svg>`;
-  }
-
-  // ----- activity-heatmap renderer ----------------------------------------
-  // GitHub-style 7×N calendar grid. Each column is one week, each row a
-  // weekday (Mo top). Colour ramps linearly with commits-per-day relative
-  // to the busiest day. The side panel lists totals + top-10 authors.
-  function renderActivityHeatmap(heat: ActivityHeatmap): string {
-    const CELL = 13;
-    const GAP = 3;
-    const LEFT = 60;
-    const TOP = 90;
-    const PANEL = 240;
-
-    // Layout: bucket days into 7-row columns starting on the first
-    // ISO-Monday at or before the start_date.
-    const days = heat.days;
-    if (days.length === 0) {
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 360">
-        <rect width="100%" height="100%" fill="#090d14"/>
-        <text x="550" y="180" text-anchor="middle" fill="#94a3b8" font-size="18">Keine Aktivität verfügbar.</text>
-      </svg>`;
-    }
-
-    // weekday(0=Mo … 6=So) for each day, derived from the date string.
-    function weekdayMondayBased(iso: string): number {
-      const d = new Date(iso + 'T00:00:00Z');
-      const w = d.getUTCDay(); // 0=Sun..6=Sat
-      return (w + 6) % 7; // 0=Mon..6=Sun
-    }
-
-    const first = days[0];
-    const firstW = weekdayMondayBased(first.date);
-    // Number of leading empty cells in column 0.
-    const totalCells = firstW + days.length;
-    const columns = Math.ceil(totalCells / 7);
-    const W = LEFT + columns * (CELL + GAP) + 16 + PANEL + 24;
-    const H = TOP + 7 * (CELL + GAP) + 80;
-
-    const max = Math.max(1, heat.max_commits_per_day);
-    const ramp = (n: number): string => {
-      if (n === 0) return '#1f2937';
-      const t = Math.min(1, n / max);
-      // 5 buckets, dark → bright green
-      if (t < 0.2) return '#0e3b27';
-      if (t < 0.45) return '#1c6c45';
-      if (t < 0.7) return '#2ea264';
-      if (t < 0.9) return '#3fcf83';
-      return '#7ee787';
-    };
-
-    const cells = days
-      .map((d, i) => {
-        const idx = firstW + i;
-        const col = Math.floor(idx / 7);
-        const row = idx % 7;
-        const x = LEFT + col * (CELL + GAP);
-        const y = TOP + row * (CELL + GAP);
-        const top = d.top_authors
-          .map((a) => `${a.name} · ${a.commits}`)
-          .join('\n');
-        const tip = `${d.date} — ${d.commits} ${d.commits === 1 ? 'Commit' : 'Commits'}${top ? `\n${top}` : ''}`;
-        return `<rect x="${x}" y="${y}" width="${CELL}" height="${CELL}" rx="2" fill="${ramp(d.commits)}"><title>${esc(tip)}</title></rect>`;
-      })
-      .join('');
-
-    // Weekday labels (Mo, Mi, Fr).
-    const weekdayLabels = ['Mo', '', 'Mi', '', 'Fr', '', 'So']
-      .map((lbl, i) => `<text x="${LEFT - 8}" y="${TOP + i * (CELL + GAP) + 11}" text-anchor="end" class="wd">${lbl}</text>`)
-      .join('');
-
-    // Month labels: one per first-Monday-of-month visible.
-    const monthLabels: string[] = [];
-    let lastMonth = '';
-    for (let i = 0; i < days.length; i += 1) {
-      const month = days[i].date.slice(0, 7);
-      if (month !== lastMonth) {
-        const idx = firstW + i;
-        const col = Math.floor(idx / 7);
-        const x = LEFT + col * (CELL + GAP);
-        const m = days[i].date.slice(5, 7);
-        const names = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
-        monthLabels.push(`<text x="${x}" y="${TOP - 8}" class="mlbl">${names[parseInt(m, 10) - 1] ?? m}</text>`);
-        lastMonth = month;
-      }
-    }
-
-    // Side panel: stats + top authors.
-    const panelX = LEFT + columns * (CELL + GAP) + 24;
-    const noGit = heat.no_git
-      ? `<text x="${panelX}" y="${TOP + 16}" class="warn">Keine Git-Historie verfügbar.</text>`
-      : '';
-    const stats = !heat.no_git
-      ? `
-        <text x="${panelX}" y="${TOP}" class="panel-title">Übersicht</text>
-        <text x="${panelX}" y="${TOP + 22}" class="panel-line">Zeitraum: ${heat.start_date} – ${heat.end_date}</text>
-        <text x="${panelX}" y="${TOP + 40}" class="panel-line">Commits gesamt: ${heat.total_commits}</text>
-        <text x="${panelX}" y="${TOP + 58}" class="panel-line">Aktivste Tage: max. ${heat.max_commits_per_day}</text>
-        <text x="${panelX}" y="${TOP + 76}" class="panel-line">Längste Streak: ${heat.longest_streak_days} Tage</text>
-        <text x="${panelX}" y="${TOP + 94}" class="panel-line">Distincte Autoren: ${heat.distinct_authors}</text>
-        ${heat.truncated ? `<text x="${panelX}" y="${TOP + 112}" class="panel-warn">Walk bei ${heat.total_commits} Commits gestoppt.</text>` : ''}`
-      : '';
-    const authors = heat.top_authors
-      .map((a, i) => `<text x="${panelX}" y="${TOP + 140 + i * 16}" class="panel-line">${i + 1}. ${esc(a.name)} — ${a.commits}</text>`)
-      .join('');
-    const authorTitle = heat.top_authors.length > 0
-      ? `<text x="${panelX}" y="${TOP + 124}" class="panel-title">Top-Autoren</text>`
-      : '';
-
-    // Legend strip beneath the grid.
-    const legendY = TOP + 7 * (CELL + GAP) + 28;
-    const legend = ['#1f2937', '#0e3b27', '#1c6c45', '#2ea264', '#3fcf83', '#7ee787']
-      .map((c, i) => `<rect x="${LEFT + i * (CELL + GAP)}" y="${legendY}" width="${CELL}" height="${CELL}" rx="2" fill="${c}"/>`)
-      .join('');
-
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
-      <style>
-        text{fill:#dce3f0;font:13px ui-sans-serif,system-ui,sans-serif}
-        .title{font-size:20px;font-weight:600}
-        .subtitle{font-size:12px;fill:#94a3b8}
-        .wd{font-size:10px;font-family:ui-monospace,monospace;fill:#94a3b8}
-        .mlbl{font-size:10px;font-family:ui-monospace,monospace;fill:#94a3b8}
-        .panel-title{font-size:13px;font-weight:600;fill:#cbd5e1}
-        .panel-line{font-size:11px;font-family:ui-monospace,monospace;fill:#94a3b8}
-        .panel-warn{font-size:10px;font-family:ui-monospace,monospace;fill:#fbbf24}
-        .warn{font-size:13px;fill:#fbbf24}
-        .legend{font-size:10px;font-family:ui-monospace,monospace;fill:#94a3b8}
-      </style>
-      <rect width="100%" height="100%" fill="#090d14"/>
-      <text x="24" y="40" class="title">Commit-Aktivität</text>
-      <text x="24" y="60" class="subtitle">Letzte 12 Monate · ${heat.total_commits} Commits · ${heat.distinct_authors} Autoren</text>
-      ${monthLabels.join('')}
-      ${weekdayLabels}
-      ${cells}
-      <text x="${LEFT - 8}" y="${legendY + 11}" text-anchor="end" class="legend">weniger</text>
-      ${legend}
-      <text x="${LEFT + 6 * (CELL + GAP) + CELL + 8}" y="${legendY + 11}" class="legend">mehr</text>
-      ${noGit}
-      ${stats}
-      ${authorTitle}
-      ${authors}
-    </svg>`;
-  }
-
-  function formatBytes(n: number): string {
-    if (n < 1024) return `${n} B`;
-    if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
-    if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-  }
-
-  function esc(s: string): string {
-    return s.replace(/[&<>"']/g, (ch) => {
-      const map: Record<string, string> = {
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#39;',
-      };
-    return map[ch] ?? ch;
-    });
   }
 
   function onClick(e: MouseEvent) {
@@ -1631,12 +658,16 @@
   function applyBaseSize() {
     // Stamp the SVG at scale=1 once per render so it fills the stage; live
     // zoom then happens via `diagramTransform`. Safe to call multiple times
-    // — idempotent for a given baseW/baseH and current SVG node.
-    if (!stage || !baseW || !baseH) return;
+    // — idempotent for a given baseW/baseH and current SVG node. Reads the
+    // base size straight from the store (`get`) rather than the reactive
+    // `$:` locals, since this runs synchronously right after
+    // `viewport.setBaseSize()` — before Svelte flushes the reactive update.
+    const { baseW: bw, baseH: bh } = get(viewport);
+    if (!stage || !bw || !bh) return;
     const node = stage.querySelector('svg');
     if (!node) return;
-    node.setAttribute('width', String(baseW));
-    node.setAttribute('height', String(baseH));
+    node.setAttribute('width', String(bw));
+    node.setAttribute('height', String(bh));
   }
 
   function onWheel(e: WheelEvent) {
@@ -1655,13 +686,11 @@
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;
     const factor = Math.exp(-delta * 0.0015);
-    const nextScale = Math.min(8, Math.max(0.2, scale * factor));
-    // Zoom toward cursor: keep the world-point under the cursor stable.
-    tx = cx - (cx - tx) * (nextScale / scale);
-    ty = cy - (cy - ty) * (nextScale / scale);
-    scale = nextScale;
-    // The `diagramTransform` reactive picks scale + tx + ty up in a single
+    // Zoom toward cursor: the store reducer keeps the world-point under the
+    // cursor stable and clamps scale to [MIN_SCALE, MAX_SCALE]. The
+    // `diagramTransform` reactive picks scale + tx + ty up in a single
     // transform string applied via inline style — no querySelector needed.
+    viewport.zoomAround(factor, cx, cy);
   }
 
   // Svelte's `on:wheel` registers a passive listener on browsers that
@@ -1697,8 +726,10 @@
 
   function onMouseMove(e: MouseEvent) {
     if (!dragging) return;
-    tx = dragStartTx + (e.clientX - dragStartX);
-    ty = dragStartTy + (e.clientY - dragStartY);
+    viewport.panTo(
+      dragStartTx + (e.clientX - dragStartX),
+      dragStartTy + (e.clientY - dragStartY),
+    );
   }
 
   function endDrag() {
@@ -1708,12 +739,8 @@
   function zoomBy(factor: number) {
     if (!stage) return;
     const rect = stage.getBoundingClientRect();
-    const cx = rect.width / 2;
-    const cy = rect.height / 2;
-    const nextScale = Math.min(8, Math.max(0.2, scale * factor));
-    tx = cx - (cx - tx) * (nextScale / scale);
-    ty = cy - (cy - ty) * (nextScale / scale);
-    scale = nextScale;
+    // Toolbar zoom anchors on the stage centre.
+    viewport.zoomAround(factor, rect.width / 2, rect.height / 2);
   }
 </script>
 
