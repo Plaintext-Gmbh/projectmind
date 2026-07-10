@@ -478,6 +478,7 @@ fn target_locator(
         }
         WalkthroughTarget::Risk { fqn, .. } => (Some(fqn.clone()), None, None),
         WalkthroughTarget::Diff { .. }
+        | WalkthroughTarget::DiagramDiff { .. }
         | WalkthroughTarget::Artifact { .. }
         | WalkthroughTarget::Pattern { .. }
         | WalkthroughTarget::Atlas { .. }

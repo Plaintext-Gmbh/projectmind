@@ -208,6 +208,13 @@ fn build_render_step(step: &WalkthroughStep, repo: Option<&Repository>) -> Rende
                 None => format!("diff {reference} → working tree"),
             };
         }
+        WalkthroughTarget::DiagramDiff { diagram, from, to } => {
+            let kind = diagram.as_deref().unwrap_or("diagram");
+            out.target = match to {
+                Some(t) => format!("{kind} diff {from}..{t}"),
+                None => format!("{kind} diff {from} → working tree"),
+            };
+        }
         WalkthroughTarget::Pattern { pattern, scope, .. } => {
             out.target = match scope {
                 Some(s) => format!("pattern {pattern} · {s}"),
