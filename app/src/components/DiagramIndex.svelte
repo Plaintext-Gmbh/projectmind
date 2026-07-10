@@ -37,13 +37,13 @@
       case 'architecture-layers':
         return $t('diagram.architectureLayers');
       case 'language-stats':
-        return $t('diagram.languageStats') || 'Sprachenverteilung';
+        return $t('diagram.languageStats');
       case 'architecture-flow':
-        return $t('diagram.architectureFlow') || 'Architektur-Schichten';
+        return $t('diagram.architectureFlow');
       case 'module-chord':
-        return $t('diagram.moduleChord') || 'Modul-Abhängigkeiten';
+        return $t('diagram.moduleChord');
       case 'activity-heatmap':
-        return $t('diagram.activityHeatmap') || 'Commit-Heatmap';
+        return $t('diagram.activityHeatmap');
       default:
         return kind;
     }
@@ -66,25 +66,13 @@
       case 'architecture-layers':
         return $t('diagram.description.architectureLayers');
       case 'language-stats':
-        return (
-          $t('diagram.description.languageStats') ||
-          'Dateienverteilung nach Sprache — Anzahl + Bytes je Bucket.'
-        );
+        return $t('diagram.description.languageStats');
       case 'architecture-flow':
-        return (
-          $t('diagram.description.architectureFlow') ||
-          'Spring-Schichten als horizontale Bänder mit Fluss-Pfeilen — Controller → Service → Repository → Entity, mit Bean-Histogramm.'
-        );
+        return $t('diagram.description.architectureFlow');
       case 'module-chord':
-        return (
-          $t('diagram.description.moduleChord') ||
-          'Module als Kreis-Segmente, Cross-Module-Abhängigkeiten als Sehnen. Dicke = Anzahl Edges.'
-        );
+        return $t('diagram.description.moduleChord');
       case 'activity-heatmap':
-        return (
-          $t('diagram.description.activityHeatmap') ||
-          'GitHub-Style Kalender-Heatmap der letzten 12 Monate. Hover zeigt Commit-Anzahl + Top-Autoren.'
-        );
+        return $t('diagram.description.activityHeatmap');
       default:
         return '';
     }
