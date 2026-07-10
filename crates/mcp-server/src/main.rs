@@ -11,11 +11,14 @@
 
 mod handler;
 mod launch;
+mod record;
 mod tools;
 
 use std::io::{self, BufRead, Write};
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -28,8 +31,73 @@ const PROTOCOL_VERSION: &str = "2024-11-05";
 const SERVER_NAME: &str = env!("CARGO_PKG_NAME");
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// `projectmind-mcp` CLI.
+///
+/// With no subcommand the binary runs the stdio MCP server (its original,
+/// default behaviour — MCP clients spawn it with no arguments). Subcommands
+/// add out-of-band utilities like `record` (Cockpit 2.6, #162).
+#[derive(Debug, Parser)]
+#[command(
+    name = "projectmind",
+    version,
+    about = "ProjectMind MCP server + tools"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Export a walk-through tour to a self-contained file (PDF by default).
+    ///
+    /// `.pdf` renders each step as a structured page (title, `file:line`,
+    /// code snippet, narration, risk / pattern annotations) with no `FFmpeg`
+    /// dependency. `.mp4` needs the `record-mp4` cargo feature.
+    Record {
+        /// Tour id to export. Pass `active` (or `-`) to record whatever tour
+        /// is currently live.
+        tour_id: String,
+        /// Output file. The extension picks the format: `.pdf` (default
+        /// deliverable) or `.mp4` (needs the `record-mp4` feature).
+        #[arg(short, long, default_value = "tour.pdf")]
+        output: PathBuf,
+        /// Repository root for source / risk / pattern resolution. Falls back
+        /// to the repo recorded in the statefile when omitted.
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        /// Embed narration as an audio track (MP4 only; ignored for PDF).
+        #[arg(long)]
+        narrate: bool,
+    },
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    match cli.command {
+        Some(Command::Record {
+            tour_id,
+            output,
+            repo,
+            narrate,
+        }) => {
+            init_tracing();
+            let args = record::RecordArgs {
+                tour_id,
+                output,
+                repo,
+                narrate,
+            };
+            let message = record::run(&args)?;
+            println!("{message}");
+            Ok(())
+        }
+        None => run_server(),
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<()> {
+async fn run_server() -> Result<()> {
     init_tracing();
     info!(version = SERVER_VERSION, "projectmind MCP server starting");
 

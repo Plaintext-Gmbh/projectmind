@@ -38,6 +38,8 @@ pub mod risk;
 pub mod state;
 pub mod tour_embed;
 pub mod tour_index;
+pub mod tour_pdf;
+pub mod tts;
 pub mod walkthrough;
 
 pub use cargo::CargoCrate;

@@ -41,6 +41,14 @@ export interface WalkthroughCursor {
 }
 export const walkthroughCursor = writable<WalkthroughCursor | null>(null);
 
+/// Presenter Mode (Cockpit 2.6, #162). When `true` the active tour is shown
+/// as a full-screen slide deck (bigger fonts, sidebar hidden, single-key
+/// navigation) layered over the normal shell. Toggled by the header
+/// `Present` button or the `P` shortcut; only meaningful while a tour is
+/// active. Kept as a plain flag — the deck's own state (step / scale /
+/// overlays) lives inside `PresenterView.svelte` via `lib/presenter.ts`.
+export const presenterActive = writable<boolean>(false);
+
 export interface ArtifactCursor {
   id: string;
   /// Bumped on every applied artifact intent so the view re-fetches even when

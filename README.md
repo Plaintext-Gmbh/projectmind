@@ -281,6 +281,52 @@ can build them. New releases are produced by the **Auto-Release** workflow
 from the Actions tab; it bumps the version, opens a PR, merges, tags, and
 publishes in one shot.
 
+## Presenter mode & tour recording
+
+A walk-through isn't just for one screen. Two Cockpit 2.6 features turn a tour
+into a shareable architecture presentation:
+
+**Presenter mode** — press **`P`** (or the header *Present* button) while a tour
+is active to drop into a full-screen slide deck: sidebar hidden, larger fonts,
+a `3 / 12` step counter, and single-key navigation.
+
+| Key | Action |
+|---|---|
+| `←` / `→` | previous / next step |
+| `n` | toggle the TTS narrator (reads the step narration aloud) |
+| `r` | overlay the risk-atlas badges for the current class |
+| `p` | overlay the pattern-compliance check for the current class |
+| `+` / `-` / `0` | font scale up / down / reset (1.0 · 1.25 · 1.5) |
+| `Esc` | leave presenter mode |
+
+The narrator uses the OS speech engine — `say` on macOS, `espeak` on Linux
+(install it for the narrator; without it the toggle is a silent no-op with a
+hint). In the browser build (`open_browser_repo`) it uses the Web Speech API on
+the client device instead. An MCP client that generates richer narration than
+the authored step text can pass that string to the narrator directly — the
+presenter just speaks whatever it is handed.
+
+**Recording** — export the active tour to a self-contained file that reads
+without ProjectMind installed:
+
+```bash
+# Structured PDF (the default deliverable): one page per step with title,
+# file:line, the highlighted code snippet, narration, and any risk / pattern
+# annotations. Pure Rust — no headless browser, no FFmpeg.
+projectmind-mcp record <tour-id> --output tour.pdf     # or `active` for the live tour
+projectmind-mcp record active --output tour.pdf --repo /path/to/repo
+
+# MP4 export is gated behind the `record-mp4` cargo feature (needs system
+# FFmpeg). Without it, an .mp4 output fails with a clear "enable record-mp4
+# feature" message and the encoder never compiles into the default build.
+cargo build --release --bin projectmind-mcp --features record-mp4
+```
+
+`record` resolves the active tour on disk (the one `walkthrough_start` wrote).
+Pass `--repo` (or rely on the repo recorded in the statefile) so `class` /
+`risk` steps embed real source lines plus risk-atlas badges and `pattern` steps
+embed the drift violations; without a repo it still exports titles + narration.
+
 ## Tests / development
 
 For day-to-day work, use the small `./build` helper:

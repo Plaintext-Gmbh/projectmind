@@ -11,6 +11,7 @@
   "nav.walkthroughTitle": "Resume the active walk-through",
   "nav.artifact": "Artifact",
   "nav.artifactTitle": "Open the AI-generated artifact",
+  "nav.present": "Present",
   "nav.diff": "Diff",
   "nav.compare": "Compare",
   "nav.compareTitle": "Compare two git refs",
@@ -285,5 +286,15 @@
   "walkthrough.feedback.send": "Send",
   "walkthrough.understood": "✓ Understood",
   "walkthrough.understoodEnd": "✓ Understood — end tour",
-  "walkthrough.askMore": "? Please describe in more detail"
+  "walkthrough.askMore": "? Please describe in more detail",
+  "presenter.aria": "Presenter mode — full-screen tour deck",
+  "presenter.counterAria": "Current step of total",
+  "presenter.exit": "Exit presenter mode (Esc)",
+  "presenter.scale": "Font scale (+/-)",
+  "presenter.narrator.toggle": "Toggle narrator (n)",
+  "presenter.narrator.unavailable": "No OS speech engine found (install say/espeak). Narrator is off.",
+  "presenter.overlay.risk": "Toggle risk badges for this class (r)",
+  "presenter.overlay.pattern": "Toggle pattern compliance for this class (p)",
+  "presenter.loading": "Loading step…",
+  "presenter.empty": "This tour has no steps."
 }

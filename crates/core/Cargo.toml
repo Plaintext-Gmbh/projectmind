@@ -32,6 +32,7 @@ toml        = { workspace = true }
 # Optional: real local embedder for `walkthrough_query`. Behind the `embed`
 # feature so the default build never pulls the ONNX runtime.
 fastembed   = { workspace = true, optional = true }
+printpdf = { version = "0.7", default-features = false }
 
 [features]
 # `embed` swaps the tour index onto a real local embedding model

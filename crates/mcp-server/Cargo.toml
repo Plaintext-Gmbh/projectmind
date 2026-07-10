@@ -15,6 +15,16 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
+[features]
+# `record-mp4` swaps the `projectmind record --output x.mp4` path onto a
+# real MP4 encoder (`ffmpeg-next`, which links the system FFmpeg libraries).
+# OFF by default: FFmpeg is a heavy native dependency and the PDF export is
+# the default deliverable (per #162). Without this feature, requesting an
+# `.mp4` output fails with a clear "enable record-mp4 feature" error and the
+# encoder code is `#[cfg]`-ed out entirely, so the default build never needs
+# FFmpeg headers. CI verifies the feature compiles separately.
+record-mp4 = ["dep:ffmpeg-next"]
+
 [dependencies]
 projectmind-plugin-api = { workspace = true }
 projectmind-core       = { workspace = true }
@@ -36,3 +46,8 @@ thiserror   = { workspace = true }
 tokio       = { workspace = true }
 tracing     = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+# Optional MP4 encoder — only compiled when the `record-mp4` feature is on
+# (see [features] above). Left out of the default build so `cargo build`
+# never needs the system FFmpeg libraries.
+ffmpeg-next = { version = "7", optional = true }
