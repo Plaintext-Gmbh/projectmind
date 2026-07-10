@@ -75,6 +75,15 @@ describe('compassFor', () => {
     expect(compassFor({ kind: 'atlas' })).toEqual(['atlas · repo']);
   });
 
+  it('shows the ref range for a diagram-diff target (#125)', () => {
+    expect(compassFor({ kind: 'diagram-diff', from: 'main', to: 'HEAD' })).toEqual([
+      'main..HEAD',
+    ]);
+    expect(compassFor({ kind: 'diagram-diff', from: 'HEAD~3' })).toEqual([
+      'HEAD~3 → working tree',
+    ]);
+  });
+
   it('returns no crumbs for an undefined target', () => {
     expect(compassFor(undefined)).toEqual([]);
   });
@@ -88,6 +97,7 @@ describe('compassIconFor', () => {
     ['risk', 'R'],
     ['pattern', 'P'],
     ['atlas', '▦'],
+    ['diagram-diff', 'Δ'],
     ['note', '·'],
   ])('maps %s to %s', (kind, expected) => {
     expect(compassIconFor({ kind } as WalkthroughStep['target'])).toBe(expected);

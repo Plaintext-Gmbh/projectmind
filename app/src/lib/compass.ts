@@ -47,6 +47,11 @@ export function compassFor(t: WalkthroughStep['target'] | undefined): string[] {
   if (t.kind === 'atlas') {
     return [t.module ? `atlas · ${t.module}` : 'atlas · repo'];
   }
+  // #125: before/after diagram snapshot — crumb is the ref range.
+  if (t.kind === 'diagram-diff') {
+    const range = t.to ? `${t.from}..${t.to}` : `${t.from} → working tree`;
+    return [range];
+  }
   return [];
 }
 
@@ -169,6 +174,8 @@ export function compassIconFor(t: WalkthroughStep['target'] | undefined): string
       return 'P';
     case 'atlas':
       return '▦';
+    case 'diagram-diff':
+      return 'Δ';
     case 'note':
       return '·';
     default:

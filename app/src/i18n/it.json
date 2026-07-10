@@ -116,6 +116,8 @@
   "diff.computing": "Calcolo diff...",
   "diff.noChanges": "Nessuna modifica.",
   "diff.rail.aria": "Navigazione diff — vai a un file o blocco modificato",
+  "walkthrough.diagramDiff.modes.aria": "Modalità istantanea — prima, dopo o solo modifiche",
+  "walkthrough.diagramDiff.legend.aria": "Legenda delle modifiche",
   "keyboard.title": "Scorciatoie da tastiera",
   "keyboard.section.navigation": "Navigazione",
   "keyboard.section.zoom": "Zoom",

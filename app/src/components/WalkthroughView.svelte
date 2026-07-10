@@ -25,6 +25,7 @@
   import RiskStep from './walkthrough/RiskStep.svelte';
   import PatternStep from './walkthrough/PatternStep.svelte';
   import AtlasStep from './walkthrough/AtlasStep.svelte';
+  import DiagramDiffStep from './walkthrough/DiagramDiffStep.svelte';
   import { riskBadges, type RiskBadge } from '../lib/riskBadges';
   import {
     errorMessage,
@@ -169,6 +170,11 @@
       if (s.target.kind === 'diff') {
         return { reference: s.target.reference, to: s.target.to ?? undefined };
       }
+      // #125: a `diagram-diff` step also anchors the tour's change context —
+      // its `from`..`to` maps onto the compass baseline just like a diff step.
+      if (s.target.kind === 'diagram-diff') {
+        return { reference: s.target.from, to: s.target.to ?? undefined };
+      }
     }
     return null;
   }
@@ -307,6 +313,10 @@
         case 'atlas':
           // Cockpit 2.4 kinds: the dedicated step component self-loads on
           // mount (class source + atlas / pattern data). Nothing to preload.
+          break;
+        case 'diagram-diff':
+          // #125: DiagramDiffStep self-loads the folder-map payload + the
+          // change set on mount. Nothing to preload here.
           break;
         case 'note':
           break;
@@ -986,6 +996,13 @@
               {:else if step.target.kind === 'atlas'}
                 {$t('walkthrough.target.atlas')}
                 <code>{step.target.module ?? 'repo'}</code>
+              {:else if step.target.kind === 'diagram-diff'}
+                {$t('walkthrough.target.diagramDiff')}
+                <code
+                  >{step.target.diagram ?? 'folder-map'} · {step.target.from}{step.target.to
+                    ? `..${step.target.to}`
+                    : ' → working tree'}</code
+                >
               {/if}
             </div>
           {/if}
@@ -1104,6 +1121,12 @@
             <AtlasStep
               module={step.target.module ?? null}
               highlightFqns={step.target.highlight_fqns ?? []}
+            />
+          {:else if step.target.kind === 'diagram-diff'}
+            <DiagramDiffStep
+              diagram={step.target.diagram ?? 'folder-map'}
+              from={step.target.from}
+              to={step.target.to ?? null}
             />
           {:else if step.target.kind === 'file' && isMarkdown(step.target.path)}
             <FileView path={step.target.path} anchor={step.target.anchor ?? null} {nonce} />

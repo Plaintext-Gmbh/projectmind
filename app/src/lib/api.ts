@@ -495,6 +495,19 @@ export type WalkthroughTarget =
   | { kind: 'pattern'; pattern: string; scope?: string | null; view?: string | null }
   // Cockpit 2.4 (#160): Risk Atlas treemap with named hotspots ringed.
   | { kind: 'atlas'; module?: string | null; highlight_fqns?: string[] }
+  // #125: before/after architecture snapshot for one diagram kind. Renders the
+  // current diagram overlaid with the file-level change set between two refs
+  // (`from`..`to`); the user toggles before / after / changed-only. Only
+  // `folder-map` is supported today. NOTE: the Rust `WalkthroughTarget` enum
+  // does not yet carry this variant — see the PR follow-up. Old tours never
+  // emit it, so the union stays backward-compatible (the `note` default and
+  // every other kind render exactly as before).
+  | {
+      kind: 'diagram-diff';
+      diagram?: 'folder-map';
+      from: string;
+      to?: string | null;
+    }
   | { kind: 'note' };
 
 export interface WalkthroughStep {
