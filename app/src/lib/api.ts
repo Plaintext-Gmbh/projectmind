@@ -855,3 +855,64 @@ export async function patternCheck(opts: PatternCheckOptions = {}): Promise<Patt
   }
   return invoke<PatternResult[]>('pattern_check', { pattern, module });
 }
+
+/** One step in a {@link WalkthroughQueryResult} (Cockpit 2.5, #161). */
+export interface WalkthroughQueryStep {
+  title: string;
+  fqn?: string;
+  file?: string;
+  /** 1-based inclusive `[from, to]` line span, when known. */
+  lines?: [number, number];
+  narration: string;
+  /** Similarity of this step to the question, 0..1. */
+  score: number;
+}
+
+/** Answer of a semantic tour lookup ({@link walkthroughQuery}). */
+export interface WalkthroughQueryResult {
+  /** Winning tour id, or absent when nothing matched. */
+  tour_id?: string;
+  steps: WalkthroughQueryStep[];
+  /** Max similarity found, 0..1. */
+  confidence: number;
+  /**
+   * `"grep"` when no tour answered well (weak match, nothing indexed, or the
+   * server was built without the `embed` feature) — the caller should fall
+   * back to normal search. Absent when the answer is good.
+   */
+  fallback?: 'grep';
+}
+
+export interface WalkthroughQueryOptions {
+  /** Tour ids to bias the match toward (a nudge, not an override). */
+  preferTours?: string[];
+  /** Max steps to return for the best tour. */
+  topK?: number;
+}
+
+/**
+ * Semantic tour lookup (Cockpit 2.5, #161): match a natural-language
+ * question against the curated walk-through tours and return the best tour's
+ * steps. Dual-mode (Tauri invoke / browser-host HTTP), like every other read.
+ * Without the `embed` feature the backend answers `fallback: "grep"`.
+ */
+export async function walkthroughQuery(
+  question: string,
+  opts: WalkthroughQueryOptions = {},
+): Promise<WalkthroughQueryResult> {
+  const { preferTours, topK } = opts;
+  if (!isTauriRuntime()) {
+    return api<WalkthroughQueryResult>(
+      `/api/walkthrough_query${query({
+        question,
+        prefer_tours: preferTours?.join(','),
+        top_k: topK,
+      })}`,
+    );
+  }
+  return invoke<WalkthroughQueryResult>('walkthrough_query', {
+    question,
+    preferTours,
+    topK,
+  });
+}

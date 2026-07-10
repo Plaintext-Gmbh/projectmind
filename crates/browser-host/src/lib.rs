@@ -431,6 +431,9 @@ fn route_api(
         ("GET", "/api/pattern_check") => {
             Ok(serde_json::to_value(pattern_check_locked(&guard, query)?)?)
         }
+        ("GET", "/api/walkthrough_query") => Ok(serde_json::to_value(walkthrough_query_locked(
+            &guard, query,
+        )?)?),
         ("GET", "/api/show_class") => {
             let fqn = required(query, "fqn")?;
             Ok(serde_json::to_value(show_class_locked(&guard, fqn)?)?)
@@ -913,6 +916,12 @@ fn open_repository_locked(
     if let Err(err) = artifact::clear_on_repo_change(&repo.root) {
         tracing::warn!(error = %err, "failed to clear artifacts on repo change");
     }
+    // Build the semantic tour index (Cockpit 2.5, #161) for
+    // `walkthrough_query`. Best-effort, no-op without the `embed` feature;
+    // never blocks opening the repo — same policy as the MCP server.
+    if let Err(err) = projectmind_core::tour_index::build_index_on_open(&repo.root) {
+        tracing::warn!(error = %err, "failed to build tour index");
+    }
     state.repo_root = Some(repo.root.clone());
     // (Re-)open the persistence stores per `.projectmind/config.toml`
     // (defaults: JSON annotations, no code-graph cache). Failures are
@@ -1106,6 +1115,51 @@ fn pattern_check_locked(
         let results = patterns::check_all(repo, &scope, &config);
         Ok(serde_json::to_value(results)?)
     }
+}
+
+/// Semantic tour lookup (Cockpit 2.5, #161) im Browser-Host. Query-Parameter:
+/// `question` (required), `prefer_tours` (kommagetrennte Tour-Ids) und `top_k`.
+/// Spiegelt das `walkthrough_query`-MCP-Tool: ohne `embed`-Feature bzw. ohne
+/// verfügbares Modell liefert der Kern `fallback: "grep"`, nie ein Crash.
+/// `class`-Schritte werden — wie im MCP-Tool — mit `file`/`lines` aus dem
+/// offenen Repo angereichert.
+fn walkthrough_query_locked(
+    state: &HostState,
+    query: &BTreeMap<String, String>,
+) -> anyhow::Result<projectmind_core::tour_index::QueryResult> {
+    let repo = repo(state)?;
+    let question = required(query, "question")?;
+    let prefer_tours: Vec<String> = query
+        .get("prefer_tours")
+        .map(|s| {
+            s.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default();
+    let top_k = query
+        .get("top_k")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(8)
+        .max(1);
+    let mut result =
+        projectmind_core::tour_index::query_repo(&repo.root, question, &prefer_tours, top_k)?;
+    for step in &mut result.steps {
+        if step.file.is_some() {
+            continue;
+        }
+        if let Some(fqn) = &step.fqn {
+            if let Some((module, class)) = repo.find_class(fqn) {
+                step.file = Some(module.root.join(&class.file).to_string_lossy().into_owned());
+                if step.lines.is_none() {
+                    step.lines = Some([class.line_start, class.line_end]);
+                }
+            }
+        }
+    }
+    Ok(result)
 }
 
 fn show_class_locked(state: &HostState, fqn: &str) -> anyhow::Result<ClassDetails> {

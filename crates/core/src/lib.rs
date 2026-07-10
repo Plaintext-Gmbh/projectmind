@@ -36,6 +36,8 @@ pub mod persistence;
 pub mod repository;
 pub mod risk;
 pub mod state;
+pub mod tour_embed;
+pub mod tour_index;
 pub mod walkthrough;
 
 pub use cargo::CargoCrate;

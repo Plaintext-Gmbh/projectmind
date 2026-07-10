@@ -302,6 +302,12 @@ fn open_repository(
             tracing::warn!(error = %err, "failed to clear artifacts on repo change");
         }
     }
+    // Build the semantic tour index (Cockpit 2.5, #161) for
+    // `walkthrough_query`. Best-effort, no-op without the `embed` feature;
+    // never blocks opening the repo — same policy as the MCP server.
+    if let Err(err) = projectmind_core::tour_index::build_index_on_open(persistence_root) {
+        tracing::warn!(error = %err, "failed to build tour index");
+    }
     publish_state(UiState {
         repo_root: Some(root),
         view: if same_repo { prev.view } else { new_view },
@@ -485,6 +491,42 @@ fn pattern_check(
         }
         None => Ok(patterns::check_all(repo, &scope, &config)),
     }
+}
+
+/// Semantic tour lookup (Cockpit 2.5, #161): Frage gegen die kuratierten
+/// Walkthrough-Touren matchen. Spiegelt das `walkthrough_query`-MCP-Tool und
+/// die Browser-Host-Route. Ohne `embed`-Feature (bzw. ohne verfügbares Modell)
+/// liefert der Kern `fallback: "grep"`, nie einen Fehler. `class`-Schritte
+/// werden mit `file`/`lines` aus dem offenen Repo angereichert.
+#[tauri::command]
+fn walkthrough_query(
+    question: String,
+    prefer_tours: Option<Vec<String>>,
+    top_k: Option<u32>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<projectmind_core::tour_index::QueryResult, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    let prefer = prefer_tours.unwrap_or_default();
+    let k = top_k.map_or(8, |v| v as usize).max(1);
+    let mut result = projectmind_core::tour_index::query_repo(&repo.root, &question, &prefer, k)
+        .map_err(|e| e.to_string())?;
+    for step in &mut result.steps {
+        if step.file.is_some() {
+            continue;
+        }
+        if let Some(fqn) = &step.fqn {
+            if let Some((module, class)) = repo.find_class(fqn) {
+                step.file = Some(module.root.join(&class.file).to_string_lossy().into_owned());
+                if step.lines.is_none() {
+                    step.lines = Some([class.line_start, class.line_end]);
+                }
+            }
+        }
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -1225,6 +1267,7 @@ pub fn run() {
             list_modules,
             risk_atlas,
             pattern_check,
+            walkthrough_query,
             show_class,
             class_outline,
             list_changes_since,

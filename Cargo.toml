@@ -86,6 +86,20 @@ toml     = "0.9"
 # Fuzzy matching (markdown / class / snippet search)
 nucleo-matcher = "0.3"
 
+# Local embeddings for semantic tour lookup (Cockpit 2.5, #161). Optional,
+# pulled in only by projectmind-core's `embed` feature so the default MCP
+# server build stays slim (no ~30MB ONNX runtime). Text-only: no image
+# models. `rustls` TLS everywhere (no system OpenSSL / pkg-config needed to
+# build). `hf-hub` fetches the `all-MiniLM-L6-v2` model once; `ort`
+# downloads the ONNX runtime binary at build time — that build-time fetch
+# needs network, which is why the feature is off by default and verified in
+# CI rather than in every offline dev sandbox.
+fastembed = { version = "5", default-features = false, features = [
+    "hf-hub",
+    "hf-hub-rustls-tls",
+    "ort-download-binaries-rustls-tls",
+] }
+
 # Filesystem
 dirs        = "6"
 include_dir = "0.7"
