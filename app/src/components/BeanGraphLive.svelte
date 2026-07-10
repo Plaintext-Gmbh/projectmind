@@ -18,14 +18,16 @@
   // and keeps cytoscape lazy. Used to cast the fcose layout options, which
   // the base cytoscape typings don't know about.
   import type { LayoutOptions } from 'cytoscape';
-  import { beanGraphData, listChangesSince } from '../lib/api';
-  import type { ClassEntry } from '../lib/api';
+  import { beanGraphData, commitActivity, listChangesSince } from '../lib/api';
+  import type { ClassEntry, CommitActivity } from '../lib/api';
   import { beanGraphElements } from '../lib/diagrams/beanGraphElements';
   import type { BeanGraphElements } from '../lib/diagrams/beanGraphElements';
   import { classifyBeanGraphDiff } from '../lib/diagrams/beanGraphDiff';
   import { resolveOverlayMode, planBeanGraphMorph } from '../lib/diagrams/beanGraphMorph';
   import { planBeanGraphFlow } from '../lib/diagrams/beanGraphFlow';
   import type { FlowPlan } from '../lib/diagrams/beanGraphFlow';
+  import { planActivityPulse } from '../lib/diagrams/activityPulse';
+  import type { ActivityPulsePlan } from '../lib/diagrams/activityPulse';
   import { classes, selectedClass, viewMode } from '../lib/store';
   import { t } from '../lib/i18n';
 
@@ -86,6 +88,29 @@
   // it is mutually exclusive with the diff/morph overlay — turning one on clears
   // the other.
   let flowActive = false;
+
+  // --- Activity pulse (V4.2 / #66) --------------------------------------------
+  // The second "living" layer, and unlike the flow it is DATA-driven: real
+  // `commit_activity` (24-month HEAD walk) joined onto the graph's modules.
+  // Nodes of modules with fresh commits carry a halo and "beat" — hot
+  // (freshest commit <7 d) fast + bright, warm (<30 d) slower + dimmer. It
+  // answers "which parts of the system are alive IN THE REPO right now".
+  //
+  // The pulse is NOT a since-ref overlay either, so it gets its own bool. It
+  // may coexist with the flow and with diff/morph: the activity classes only
+  // set border props and are defined LAST in the stylesheet, so on conflict
+  // (`.changed`, `.pulse`) the freshness halo wins the border while the
+  // opacity dims (`.faded` / `.flow-visited`) still apply — a documented
+  // choice: freshness is the top-most layer, fading still composes under it.
+  let pulseActive = false;
+  let pulseLoading = false;
+  let pulseError: string | null = null;
+  let pulsePlan: ActivityPulsePlan | null = null;
+  /// `commit_activity` fetched lazily on first pulse activation and cached for
+  /// the component's lifetime (re-toggling replans from the cache, no refetch).
+  let activityCache: CommitActivity | null = null;
+  $: pulseHotCount = pulsePlan?.pulses.find((p) => p.intensity === 'hot')?.nodeIds.length ?? 0;
+  $: pulseWarmCount = pulsePlan?.pulses.find((p) => p.intensity === 'warm')?.nodeIds.length ?? 0;
 
   // Stereotype fill/stroke/text — byte-parity with the Rust STEREOTYPE_STYLES
   // so the interactive graph reads like the Mermaid one.
@@ -248,6 +273,32 @@
           // Already-travelled nodes/edges hold a slightly dimmed accent so the
           // path the wave took stays legible behind the live frontier.
           { selector: '.flow-visited', style: { opacity: 0.85 } },
+          // --- Activity pulse (V4.2 / #66) ------------------------------------
+          // Real repo data: modules with fresh commits carry a halo (border
+          // accent) whose beat the timer loop drives by toggling
+          // `.activity-beat` — the base node `transition-property` (border,
+          // 300 ms) eases each beat in and out. Hot = red, brighter, beats
+          // every tick; warm = orange, dimmer, beats every second tick.
+          // Deliberately defined AFTER the diff/flow classes: when overlays
+          // coexist the freshness halo wins border conflicts, while
+          // opacity-based fades still compose underneath (see the pulse
+          // state block above).
+          {
+            selector: 'node.activity-hot',
+            style: { 'border-color': '#ff7b72', 'border-width': 3 },
+          },
+          {
+            selector: 'node.activity-warm',
+            style: { 'border-color': '#ffa657', 'border-width': 2 },
+          },
+          {
+            selector: 'node.activity-hot.activity-beat',
+            style: { 'border-color': '#ffb3ad', 'border-width': 8 },
+          },
+          {
+            selector: 'node.activity-warm.activity-beat',
+            style: { 'border-color': '#ffd9b0', 'border-width': 5 },
+          },
         ],
         // fcose-specific options aren't in the base cytoscape LayoutOptions
         // union (the extension ships no types), so cast through unknown.
@@ -546,6 +597,104 @@
     cy?.elements().removeClass('flow-active flow-visited pulse faded');
   }
 
+  // --- Activity-pulse playback (V4.2 / #66) ------------------------------------
+  // A recursive setTimeout heartbeat (pattern: the flow's wave timer): every
+  // PULSE_BEAT_MS the hot nodes get `.activity-beat` for PULSE_BEAT_HOLD_MS,
+  // then the class is stripped and the 300 ms border transition eases the halo
+  // back down. Warm nodes join only every second tick, so "fresher = faster"
+  // is literal: hot beats at ~900 ms, warm at ~1.8 s.
+  const PULSE_BEAT_MS = 900;
+  const PULSE_BEAT_HOLD_MS = 350;
+  let pulseBeatTimer: ReturnType<typeof setTimeout> | null = null;
+  let pulseBeatOffTimer: ReturnType<typeof setTimeout> | null = null;
+  let pulseBeatTick = 0;
+
+  /// Toggle the activity pulse. Turning it on lazily fetches `commit_activity`
+  /// (once — cached for the component's lifetime), joins it onto the graph and
+  /// starts the heartbeat; turning it off stops the timers and strips every
+  /// activity class back to the plain graph. Coexists with flow/diff/morph
+  /// (see the state block for the documented class-precedence choice).
+  async function togglePulse() {
+    if (pulseActive) {
+      stopPulse();
+    } else {
+      await startPulse();
+    }
+  }
+
+  async function startPulse() {
+    if (!cy || !els) return;
+    pulseActive = true;
+    pulseError = null;
+    if (!activityCache) {
+      pulseLoading = true;
+      try {
+        activityCache = await commitActivity();
+      } catch (err) {
+        pulseError = String(err);
+        pulseActive = false;
+        return;
+      } finally {
+        pulseLoading = false;
+      }
+      // The user may have toggled off (or the component unmounted) while the
+      // fetch was in flight — the cache is kept, but nothing is painted.
+      if (!pulseActive || !cy || !els) return;
+    }
+    pulsePlan = planActivityPulse(els, activityCache);
+    if (!pulsePlan.animate) {
+      // Honest empty state: no module fresh enough (or no join) — the toggle
+      // stays pressed and the summary reads 0 · 0, but nothing beats.
+      return;
+    }
+    const plan = pulsePlan;
+    cy.batch(() => {
+      cy.elements().removeClass('activity-hot activity-warm activity-beat');
+      for (const pulse of plan.pulses) {
+        const ids = new Set(pulse.nodeIds);
+        const cls = pulse.intensity === 'hot' ? 'activity-hot' : 'activity-warm';
+        cy.nodes()
+          .filter((n: { id: () => string }) => ids.has(n.id()))
+          .addClass(cls);
+      }
+    });
+    pulseBeatTick = 0;
+    playBeat();
+  }
+
+  /// One heartbeat: raise the beat class on this tick's cohort, ease it back
+  /// after the hold, schedule the next tick. Hot nodes beat every tick, warm
+  /// nodes every second tick.
+  function playBeat() {
+    if (!cy || !pulseActive) return;
+    const selector =
+      pulseBeatTick % 2 === 0 ? 'node.activity-hot, node.activity-warm' : 'node.activity-hot';
+    cy.nodes(selector).addClass('activity-beat');
+    pulseBeatOffTimer = setTimeout(() => {
+      pulseBeatOffTimer = null;
+      cy?.nodes('.activity-beat').removeClass('activity-beat');
+    }, PULSE_BEAT_HOLD_MS);
+    pulseBeatTick += 1;
+    pulseBeatTimer = setTimeout(playBeat, PULSE_BEAT_MS);
+  }
+
+  /// Stop the pulse: cancel both beat timers and strip every activity class so
+  /// the plain graph is restored (mirror of `stopFlow`'s cleanup role). The
+  /// fetched activity stays cached for the next activation.
+  function stopPulse() {
+    pulseActive = false;
+    pulsePlan = null;
+    if (pulseBeatTimer !== null) {
+      clearTimeout(pulseBeatTimer);
+      pulseBeatTimer = null;
+    }
+    if (pulseBeatOffTimer !== null) {
+      clearTimeout(pulseBeatOffTimer);
+      pulseBeatOffTimer = null;
+    }
+    cy?.elements().removeClass('activity-hot activity-warm activity-beat');
+  }
+
   /// Toggle the `changed` / `faded` classes and fire a one-shot pulse on the
   /// changed nodes. Everything not changed fades; when nothing changed we leave
   /// the graph plain rather than dim the whole thing.
@@ -616,6 +765,7 @@
     if (pulseTimer) clearTimeout(pulseTimer);
     clearMorphTimers();
     stopFlow();
+    stopPulse();
     cy?.destroy();
     cy = null;
   });
@@ -683,6 +833,24 @@
         on:click={toggleFlow}
         title={$t('diagram.beanGraphLive.flowTitle')}
       >{$t('diagram.beanGraphLive.flow')}</button>
+      <!-- Activity-pulse toggle (V4.2): the data-driven "living" layer. Like
+           the flow it is visible even embedded, default off; unlike the flow
+           it renders REAL commit_activity, so the tooltip says so. -->
+      <button
+        type="button"
+        class="pulse-toggle"
+        class:active={pulseActive}
+        aria-pressed={pulseActive}
+        on:click={togglePulse}
+        disabled={pulseLoading}
+        title={$t('diagram.beanGraphLive.pulseTitle')}
+      >{pulseLoading ? '…' : $t('diagram.beanGraphLive.pulse')}</button>
+      {#if pulseActive && pulsePlan}
+        <span class="pulse-summary">{$t('diagram.beanGraphLive.pulseSummary', { hot: pulseHotCount, warm: pulseWarmCount })}</span>
+      {/if}
+      {#if pulseError}
+        <span class="diff-error" title={pulseError}>⚠</span>
+      {/if}
     {/if}
     <span class="hint">{$t('diagram.drillHint')}</span>
   </div>
@@ -788,6 +956,24 @@
   .toolbar button.flow-toggle.active {
     border-color: #79c0ff;
     color: #79c0ff;
+  }
+  /* Pulse toggle: text button that lights up (hot-halo red) while the
+     activity heartbeat is running. */
+  .toolbar button.pulse-toggle {
+    width: auto;
+    padding: 0 8px;
+  }
+  .toolbar button.pulse-toggle.active {
+    border-color: #ff7b72;
+    color: #ff7b72;
+  }
+  .toolbar button.pulse-toggle:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .pulse-summary {
+    font-size: 11px;
+    color: #ff7b72;
   }
   .diff-summary {
     font-size: 11px;
