@@ -31,6 +31,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Claude Code local session state / worktrees — never committed
+.claude/
+
 # plaintext-ide runtime
 .plaintext-ide/cache/
 

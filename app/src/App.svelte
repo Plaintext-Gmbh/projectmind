@@ -26,6 +26,7 @@
     followingMcp,
     moduleSidebarVisible,
     classSidebarVisible,
+    presenterActive,
   } from './lib/store';
   import {
     openRepo,
@@ -84,6 +85,8 @@
     loadComponent('WalkthroughView', () => import('./components/WalkthroughView.svelte'));
   const lazyArtifactView = () =>
     loadComponent('ArtifactView', () => import('./components/ArtifactView.svelte'));
+  const lazyPresenterView = () =>
+    loadComponent('PresenterView', () => import('./components/PresenterView.svelte'));
 
   type Theme = 'dark' | 'light';
   const BROWSER_STATE_POLL_MS = 500;
@@ -301,7 +304,28 @@
       // from firing while the user is typing inside an input or textarea.
       ev.preventDefault();
       kbdHelpOpen = true;
+    } else if (
+      (ev.key === 'p' || ev.key === 'P') &&
+      !ev.metaKey &&
+      !ev.ctrlKey &&
+      !ev.altKey &&
+      get(walkthroughCursor) &&
+      !get(presenterActive)
+    ) {
+      // Bare `P` enters Presenter Mode for the active tour (Cockpit 2.6,
+      // #162). Once inside, PresenterView owns the keyboard (it captures on
+      // the window in the capture phase), so this only fires from the shell.
+      ev.preventDefault();
+      enterPresenter();
     }
+  }
+
+  /// Enter Presenter Mode. Requires an active tour; also switches the shell to
+  /// the walkthrough tab so exiting the deck lands somewhere sensible.
+  function enterPresenter() {
+    if (!get(walkthroughCursor)) return;
+    viewMode.set('walkthrough');
+    presenterActive.set(true);
   }
   // Reactive auto-push: any time a navigation-relevant store / local var
   // changes, snapshot it and hand it to nav.push. nav.push de-dupes against
@@ -1085,6 +1109,14 @@
         >
           ▶ {$t('nav.walkthrough')}
         </button>
+        <button
+          class:active={$presenterActive}
+          class="walkthrough-btn"
+          on:click={enterPresenter}
+          title="{$t('nav.present')} (P)"
+        >
+          ⛶ {$t('nav.present')}
+        </button>
       {/if}
       {#if $artifactCursor}
         <button
@@ -1518,6 +1550,15 @@
   <McpToast />
   <UpdateToast />
   <StatusBar />
+
+  <!-- Presenter Mode (Cockpit 2.6, #162): a full-screen slide deck layered
+       over the shell for the active tour. Lazy-loaded so it never touches the
+       normal-navigation bundle. -->
+  {#if $presenterActive && $walkthroughCursor}
+    {#await lazyPresenterView() then mod}
+      <svelte:component this={mod.default} cursorStep={$walkthroughCursor.step} />
+    {/await}
+  {/if}
 </main>
 
 <style>

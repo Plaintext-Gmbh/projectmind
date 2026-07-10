@@ -11,6 +11,7 @@
   "nav.walkthroughTitle": "Aktive Tour fortsetzen",
   "nav.artifact": "Artefakt",
   "nav.artifactTitle": "Das KI-generierte Artefakt öffnen",
+  "nav.present": "Präsentieren",
   "nav.diff": "Diff",
   "nav.compare": "Vergleich",
   "nav.compareTitle": "Zwei Git-Refs vergleichen",
@@ -285,5 +286,15 @@
   "walkthrough.feedback.send": "Senden",
   "walkthrough.understood": "✓ Verstanden",
   "walkthrough.understoodEnd": "✓ Verstanden — Tour beenden",
-  "walkthrough.askMore": "? Bitte genauer beschreiben"
+  "walkthrough.askMore": "? Bitte genauer beschreiben",
+  "presenter.aria": "Präsentationsmodus — Vollbild-Tour",
+  "presenter.counterAria": "Aktueller Schritt von gesamt",
+  "presenter.exit": "Präsentationsmodus verlassen (Esc)",
+  "presenter.scale": "Schriftgröße (+/-)",
+  "presenter.narrator.toggle": "Vorleser umschalten (n)",
+  "presenter.narrator.unavailable": "Keine OS-Sprachausgabe gefunden (say/espeak installieren). Vorleser ist aus.",
+  "presenter.overlay.risk": "Risiko-Badges für diese Klasse ein-/ausblenden (r)",
+  "presenter.overlay.pattern": "Pattern-Konformität für diese Klasse ein-/ausblenden (p)",
+  "presenter.loading": "Schritt wird geladen…",
+  "presenter.empty": "Diese Tour hat keine Schritte."
 }

@@ -28,7 +28,7 @@ use projectmind_core::state::{self, UiState, ViewIntent};
 use projectmind_core::walkthrough::{
     self as wt, FeedbackEvent, FeedbackKind, FeedbackLog, Walkthrough,
 };
-use projectmind_core::{diagram, risk, Engine, Repository};
+use projectmind_core::{diagram, risk, tts, Engine, Repository};
 use projectmind_framework_lombok::LombokPlugin;
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_lang_java::JavaPlugin;
@@ -804,6 +804,20 @@ fn end_walkthrough() -> Result<(), String> {
     Ok(())
 }
 
+/// Speak `text` aloud through the OS synthesiser for the presenter narrator
+/// (Cockpit 2.6, #162). Fire-and-forget: returns a short status string
+/// (`spoken` / `empty` / a hint when no engine is installed) so the desktop
+/// narrator degrades gracefully on machines without `say` / `espeak`. The
+/// browser build uses the Web Speech API instead and never calls this.
+#[tauri::command]
+fn speak(text: String) -> Result<String, String> {
+    match tts::speak(&text).map_err(|e| e.to_string())? {
+        tts::SpeakOutcome::Spoken => Ok("spoken".to_string()),
+        tts::SpeakOutcome::Empty => Ok("empty".to_string()),
+        tts::SpeakOutcome::Unavailable(hint) => Ok(hint),
+    }
+}
+
 /// Reveal a file or folder in the OS file manager (Finder on macOS,
 /// Explorer on Windows, default file manager on Linux). Used by the
 /// folder-map info popover so a click can lead the user back to the
@@ -1293,6 +1307,7 @@ pub fn run() {
             walkthrough_request_more,
             set_walkthrough_step,
             end_walkthrough,
+            speak,
             open_external,
             reveal_in_file_manager,
             get_build_integrity,
