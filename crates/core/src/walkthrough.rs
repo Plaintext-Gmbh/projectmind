@@ -146,6 +146,22 @@ pub enum WalkthroughTarget {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         highlight_fqns: Vec<String>,
     },
+    /// A before/after snapshot of one diagram between two refs (#125).
+    /// The GUI renders the `from` and `to` states of `diagram` with
+    /// before / after / changed-only toggles; changed nodes pulse once.
+    /// Old tours never emit this variant, so their rendering is unchanged.
+    DiagramDiff {
+        /// Which diagram kind to snapshot (e.g. `folder-map`). Omitted
+        /// means the GUI's currently selected diagram.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        diagram: Option<String>,
+        /// Base ref for the "before" state (e.g. `HEAD~5`, a branch name).
+        from: String,
+        /// Optional target ref for the "after" state. `None` means the
+        /// current working tree.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to: Option<String>,
+    },
     /// Pure narration; nothing rendered in the target pane.
     Note,
 }
@@ -534,6 +550,35 @@ mod tests {
         let target: WalkthroughTarget = serde_json::from_str(json).unwrap();
         match target {
             WalkthroughTarget::Artifact { id } => assert_eq!(id, "my-report"),
+            other => panic!("wrong target: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn diagram_diff_target_parses_diagram_from_and_to() {
+        let json = r#"{"kind":"diagram-diff","diagram":"folder-map","from":"HEAD~5","to":"HEAD"}"#;
+        let target: WalkthroughTarget = serde_json::from_str(json).unwrap();
+        match target {
+            WalkthroughTarget::DiagramDiff { diagram, from, to } => {
+                assert_eq!(diagram.as_deref(), Some("folder-map"));
+                assert_eq!(from, "HEAD~5");
+                assert_eq!(to.as_deref(), Some("HEAD"));
+            }
+            other => panic!("wrong target: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn diagram_diff_target_defaults_diagram_and_to() {
+        // A minimal `diagram-diff` step: only `from`. diagram/to default to None.
+        let json = r#"{"kind":"diagram-diff","from":"main"}"#;
+        let target: WalkthroughTarget = serde_json::from_str(json).unwrap();
+        match target {
+            WalkthroughTarget::DiagramDiff { diagram, from, to } => {
+                assert!(diagram.is_none());
+                assert_eq!(from, "main");
+                assert!(to.is_none());
+            }
             other => panic!("wrong target: {other:?}"),
         }
     }
