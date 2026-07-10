@@ -195,6 +195,13 @@ impl PersistenceConfig {
                     });
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                // A path component being a file (ENOTDIR) is "missing"
+                // too — hit when a virtual repo's root is a markdown
+                // *file* and `<root>/.projectmind/…` can't exist. The
+                // `exists()` probe covers it without relying on
+                // `ErrorKind::NotADirectory` (stable only since 1.83,
+                // workspace MSRV is 1.80).
+                Err(_) if !candidate.exists() => {}
                 Err(e) => {
                     return Err(ConfigError::Io {
                         path: candidate.to_path_buf(),
@@ -488,6 +495,22 @@ mod tests {
     }
 
     // ---- discovery ---------------------------------------------------
+
+    #[test]
+    fn file_root_behaves_like_missing_config() {
+        // Virtual repos rooted at a markdown *file*: `<file>/.projectmind/…`
+        // can't exist (ENOTDIR) — must resolve to defaults, not an error.
+        let tmp = TempDir::new();
+        let file_root = tmp.path().join("note.md");
+        std::fs::write(&file_root, "# note").unwrap();
+        let loaded = PersistenceConfig::load_with_fallback(
+            &PersistenceConfig::config_path(&file_root),
+            None,
+        )
+        .unwrap();
+        assert_eq!(loaded.config, PersistenceConfig::default());
+        assert_eq!(loaded.source, None);
+    }
 
     #[test]
     fn missing_files_yield_builtin_defaults() {
