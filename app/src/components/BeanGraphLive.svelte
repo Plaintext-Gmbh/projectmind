@@ -24,6 +24,8 @@
   import type { BeanGraphElements } from '../lib/diagrams/beanGraphElements';
   import { classifyBeanGraphDiff } from '../lib/diagrams/beanGraphDiff';
   import { resolveOverlayMode, planBeanGraphMorph } from '../lib/diagrams/beanGraphMorph';
+  import { planBeanGraphFlow } from '../lib/diagrams/beanGraphFlow';
+  import type { FlowPlan } from '../lib/diagrams/beanGraphFlow';
   import { classes, selectedClass, viewMode } from '../lib/store';
   import { t } from '../lib/i18n';
 
@@ -69,6 +71,21 @@
   // turns it + `diffRef` into the active overlay state (off / diff / morph).
   let morphRequested = autoMorphRef !== '';
   $: overlayMode = resolveOverlayMode(!!diffRef, morphRequested);
+
+  // --- Flow mode (V4.1 / #200 fourth toolbar mode) ---------------------------
+  // A *simulated* request wave: BFS from the controller entry stereotypes along
+  // the directed edges towards the repositories. Frontier edges become
+  // marching-ants (`.flow-active`, an animated `line-dash-offset`), frontier
+  // nodes reuse the existing `.pulse`, already-travelled elements dim to
+  // `.flow-visited`; the plan loops until toggled off. It answers "how does a
+  // request topologically travel through this system" — the tooltip is explicit
+  // that this is topology order, not runtime traffic (honesty rule #61).
+  //
+  // Flow is NOT a since-ref overlay, so it lives in its own `flowActive` bool
+  // beside the off/diff/morph `overlayMode` (resolveOverlayMode stays untouched);
+  // it is mutually exclusive with the diff/morph overlay — turning one on clears
+  // the other.
+  let flowActive = false;
 
   // Stereotype fill/stroke/text — byte-parity with the Rust STEREOTYPE_STYLES
   // so the interactive graph reads like the Mermaid one.
@@ -213,6 +230,24 @@
             style: { opacity: 0.15, 'border-width': 0.5 },
           },
           { selector: 'edge.morph-enter', style: { opacity: 0.1, width: 0.5 } },
+          // --- Flow mode (V4.1 / #200) --------------------------------------
+          // Frontier edges: dashed marching-ants. The dash pattern is static;
+          // the rAF loop scrolls `line-dash-offset` to make the ants march. The
+          // accent blue matches the controller stereotype so the wave reads as
+          // "a request travelling out of the entry points".
+          {
+            selector: 'edge.flow-active',
+            style: {
+              'line-style': 'dashed',
+              'line-dash-pattern': [8, 4],
+              width: 3,
+              'line-color': '#79c0ff',
+              'target-arrow-color': '#79c0ff',
+            },
+          },
+          // Already-travelled nodes/edges hold a slightly dimmed accent so the
+          // path the wave took stays legible behind the live frontier.
+          { selector: '.flow-visited', style: { opacity: 0.85 } },
         ],
         // fcose-specific options aren't in the base cytoscape LayoutOptions
         // union (the extension ships no types), so cast through unknown.
@@ -274,6 +309,8 @@
       return;
     }
     if (!cy || !els) return;
+    // Diff/morph and flow are mutually exclusive — applying a ref stops the flow.
+    if (flowActive) stopFlow();
     diffLoading = true;
     try {
       const changes = await listChangesSince(ref);
@@ -369,9 +406,144 @@
 
   /// Toggle the morph mode on/off. Flipping it while a ref is applied re-applies
   /// the overlay in the newly selected style (morph animates, plain diff snaps).
+  /// Turning morph on while the flow runs stops the flow (mutually exclusive).
   function toggleMorph() {
+    if (!morphRequested && flowActive) stopFlow();
     morphRequested = !morphRequested;
     if (diffRef) void applyDiff();
+  }
+
+  // --- Flow playback (V4.1 / #200) -------------------------------------------
+  // The wave plan is built once per activation; a recursive setTimeout advances
+  // the frontier every FLOW_WAVE_MS, and a single rAF loop scrolls the
+  // marching-ants offset on the active edges. When the last wave settles we hold
+  // for FLOW_LOOP_PAUSE_MS, reset every flow class, and replay from wave 0.
+  const FLOW_WAVE_MS = 450;
+  const FLOW_LOOP_PAUSE_MS = 1000;
+  let flowPlan: FlowPlan | null = null;
+  let flowWaveTimer: ReturnType<typeof setTimeout> | null = null;
+  let flowRaf: ReturnType<typeof requestAnimationFrame> | null = null;
+  let flowStart = 0;
+
+  /// Toggle the flow mode. Turning it on clears any diff/morph overlay first
+  /// (mutually exclusive), builds the plan, and starts the loop; turning it off
+  /// stops the loop and strips every flow class back to the plain graph.
+  function toggleFlow() {
+    if (flowActive) {
+      stopFlow();
+    } else {
+      startFlow();
+    }
+  }
+
+  function startFlow() {
+    if (!cy || !els) return;
+    // Flow and the since-ref overlay are exclusive — drop diff/morph first.
+    if (diffRef || morphRequested) {
+      morphRequested = false;
+      clearDiff();
+    }
+    flowActive = true;
+    flowPlan = planBeanGraphFlow(els);
+    if (!flowPlan.animate) {
+      // Empty graph — nothing to travel; leave flowActive so the toggle reads
+      // pressed, but there is no wave to play.
+      return;
+    }
+    startFlowRaf();
+    playWave(0);
+  }
+
+  /// The rAF loop: scroll `line-dash-offset` on the active edges so the dashes
+  /// march. One batched `.style()` call per frame over the (small) active set.
+  /// The pattern repeats every 12 px (8+4), so wrapping the offset there keeps
+  /// the number bounded while staying visually continuous.
+  function startFlowRaf() {
+    flowStart = performance.now();
+    const tick = () => {
+      if (!cy || !flowActive) {
+        flowRaf = null;
+        return;
+      }
+      const elapsed = performance.now() - flowStart;
+      cy.edges('.flow-active').style('line-dash-offset', -(elapsed / 16) % 12);
+      flowRaf = requestAnimationFrame(tick);
+    };
+    flowRaf = requestAnimationFrame(tick);
+  }
+
+  /// Play wave `k`: promote the previous frontier to `.flow-visited`, light the
+  /// new frontier's edges (`.flow-active`) + pulse its nodes, and fade every
+  /// node/edge the wave hasn't reached yet. Recurses via setTimeout until the
+  /// last wave, then pauses and loops.
+  function playWave(k: number) {
+    if (!cy || !flowActive || !flowPlan) return;
+    const plan = flowPlan;
+
+    if (k === 0) {
+      // Fresh pass: fade everything, then reveal the entry frontier.
+      cy.batch(() => {
+        cy.elements().removeClass('flow-active flow-visited pulse');
+        cy.elements().addClass('faded');
+        const entry = cy.nodes().filter((n: { id: () => string }) => plan.waves[0].nodeIds.includes(n.id()));
+        entry.removeClass('faded').addClass('flow-visited');
+      });
+      pulseNodes(cy.nodes().filter((n: { id: () => string }) => plan.waves[0].nodeIds.includes(n.id())));
+    } else {
+      const wave = plan.waves[k];
+      const nodeSet = new Set(wave.nodeIds);
+      const edgeSet = new Set(wave.edgeIds);
+      cy.batch(() => {
+        // Previous frontier's edges settle from active → visited.
+        cy.edges('.flow-active').removeClass('flow-active').addClass('flow-visited');
+        // This wave's carrying edges march; its nodes arrive.
+        cy.edges().forEach((e: { id: () => string; removeClass: (c: string) => void; addClass: (c: string) => void }) => {
+          if (edgeSet.has(e.id())) {
+            e.removeClass('faded');
+            e.addClass('flow-active');
+          }
+        });
+        cy.nodes().forEach((n: { id: () => string; removeClass: (c: string) => void; addClass: (c: string) => void }) => {
+          if (nodeSet.has(n.id())) {
+            n.removeClass('faded');
+            n.addClass('flow-visited');
+          }
+        });
+      });
+      pulseNodes(cy.nodes().filter((n: { id: () => string }) => nodeSet.has(n.id())));
+    }
+
+    const next = k + 1;
+    if (next < plan.waves.length) {
+      flowWaveTimer = setTimeout(() => playWave(next), FLOW_WAVE_MS);
+    } else {
+      // Last wave settled: hold, then replay from the top.
+      flowWaveTimer = setTimeout(() => {
+        if (!cy || !flowActive) return;
+        cy.batch(() => cy.elements().removeClass('flow-active flow-visited pulse faded'));
+        playWave(0);
+      }, FLOW_LOOP_PAUSE_MS);
+    }
+  }
+
+  /// Stop the flow: cancel the wave timer + rAF and strip every flow class so
+  /// the plain graph is restored (mirror of `clearMorphTimers`' cleanup role).
+  function stopFlow() {
+    flowActive = false;
+    flowPlan = null;
+    if (flowWaveTimer !== null) {
+      clearTimeout(flowWaveTimer);
+      flowWaveTimer = null;
+    }
+    if (flowRaf !== null) {
+      cancelAnimationFrame(flowRaf);
+      flowRaf = null;
+    }
+    if (pulseTimer) {
+      clearTimeout(pulseTimer);
+      pulseTimer = null;
+    }
+    cy?.elements().removeClass('flow-active flow-visited pulse faded');
   }
 
   /// Toggle the `changed` / `faded` classes and fire a one-shot pulse on the
@@ -392,17 +564,26 @@
     pulseChanged();
   }
 
-  /// One-shot pulse: add the `pulse` class to changed nodes, then strip it after
-  /// the transition settles so it plays once and never flickers.
+  /// One-shot pulse over a Cytoscape node collection: add the `pulse` class,
+  /// then strip it after the transition settles so it plays once and never
+  /// flickers. Shared by the morph (changed nodes) and the flow (each wave's
+  /// frontier nodes).
   let pulseTimer: ReturnType<typeof setTimeout> | null = null;
-  function pulseChanged() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function pulseNodes(nodes: any) {
     if (!cy) return;
     if (pulseTimer) clearTimeout(pulseTimer);
-    cy.nodes('.changed').addClass('pulse');
+    nodes.addClass('pulse');
     pulseTimer = setTimeout(() => {
       cy?.nodes('.pulse').removeClass('pulse');
       pulseTimer = null;
     }, 700);
+  }
+
+  /// One-shot pulse on the diff's changed nodes (morph accent).
+  function pulseChanged() {
+    if (!cy) return;
+    pulseNodes(cy.nodes('.changed'));
   }
 
   /// Remove the overlay: strip all diff classes, reset state.
@@ -434,6 +615,7 @@
   onDestroy(() => {
     if (pulseTimer) clearTimeout(pulseTimer);
     clearMorphTimers();
+    stopFlow();
     cy?.destroy();
     cy = null;
   });
@@ -487,6 +669,20 @@
       {#if diffError}
         <span class="diff-error" title={diffError}>⚠</span>
       {/if}
+    {/if}
+    <!-- Flow toggle (V4.1): a simulated request wave. Visible even when
+         embedded (a tour step can play the flow), default off. Not a since-ref
+         overlay, so it lives beside the off/diff/morph controls. -->
+    {#if !empty}
+      {#if embedded}<span class="divider"></span>{/if}
+      <button
+        type="button"
+        class="flow-toggle"
+        class:active={flowActive}
+        aria-pressed={flowActive}
+        on:click={toggleFlow}
+        title={$t('diagram.beanGraphLive.flowTitle')}
+      >{$t('diagram.beanGraphLive.flow')}</button>
     {/if}
     <span class="hint">{$t('diagram.drillHint')}</span>
   </div>
@@ -582,6 +778,16 @@
   .toolbar button.morph-toggle.active {
     border-color: #f0b429;
     color: #f0b429;
+  }
+  /* Flow toggle: text button that lights up (accent blue = the flow edge
+     colour) while the simulated request wave is running. */
+  .toolbar button.flow-toggle {
+    width: auto;
+    padding: 0 8px;
+  }
+  .toolbar button.flow-toggle.active {
+    border-color: #79c0ff;
+    color: #79c0ff;
   }
   .diff-summary {
     font-size: 11px;

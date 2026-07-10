@@ -64,6 +64,8 @@
   "diagram.beanGraphLive.changedCount": "{count} geändert",
   "diagram.beanGraphLive.morph": "Morph",
   "diagram.beanGraphLive.morphTitle": "Die Änderung animiert einblenden: Die geänderten Klassen fahren ein und pulsen, während sich das Layout sanft neu ordnet — statt dass die Änderung einfach anspringt.",
+  "diagram.beanGraphLive.flow": "▶ Fluss",
+  "diagram.beanGraphLive.flowTitle": "Eine simulierte Anfrage-Welle abspielen: Von den Controllern läuft eine BFS entlang der gerichteten Kanten zu den Repositories, mit marschierenden Kanten und pulsierenden Knoten, in Schleife bis zum Ausschalten. Simulierter Fluss — Topologie-Reihenfolge, kein Laufzeit-Verkehr.",
   "diagram.packageTree": "Paketbaum",
   "diagram.folderMap": "Ordner-Karte",
   "diagram.inheritanceTree": "Vererbungsbaum",

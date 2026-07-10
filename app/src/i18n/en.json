@@ -64,6 +64,8 @@
   "diagram.beanGraphLive.changedCount": "{count} changed",
   "diagram.beanGraphLive.morph": "Morph",
   "diagram.beanGraphLive.morphTitle": "Animate the change in: the changed classes ease in and pulse while the layout settles, instead of the change snapping on.",
+  "diagram.beanGraphLive.flow": "▶ Flow",
+  "diagram.beanGraphLive.flowTitle": "Play a simulated request wave: from the controllers a BFS travels along the directed edges towards the repositories, with marching-ants edges and pulsing nodes, looping until turned off. Simulated flow — topology order, not runtime traffic.",
   "diagram.packageTree": "Package tree",
   "diagram.folderMap": "Folder map",
   "diagram.inheritanceTree": "Inheritance tree",

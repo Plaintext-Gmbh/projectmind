@@ -44,6 +44,8 @@
   "diagram.beanGraphLive.applyDiff": "Diff",
   "diagram.beanGraphLive.clearDiff": "Quitar la superposición de diff",
   "diagram.beanGraphLive.changedCount": "{count} cambiadas",
+  "diagram.beanGraphLive.flow": "▶ Flujo",
+  "diagram.beanGraphLive.flowTitle": "Reproduce una oleada de solicitudes simulada: desde los controladores, un BFS recorre las aristas dirigidas hacia los repositorios, con aristas de puntos animadas y nodos que laten, en bucle hasta apagarlo. Flujo simulado — orden topológico, no tráfico en tiempo de ejecución.",
   "diagram.packageTree": "Arbol de paquetes",
   "diagram.folderMap": "Mapa de carpetas",
   "diagram.inheritanceTree": "Arbol de herencia",
