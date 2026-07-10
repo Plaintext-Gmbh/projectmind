@@ -40,6 +40,7 @@ pub mod state;
 pub mod tour_embed;
 pub mod tour_index;
 pub mod tour_pdf;
+pub mod tour_suggest;
 pub mod tts;
 pub mod walkthrough;
 

@@ -15,7 +15,10 @@ use projectmind_core::patterns::{self as core_patterns, Pattern, Scope as Patter
 use projectmind_core::risk::{self, Options as RiskOptions, Weights as RiskWeights};
 use projectmind_core::session::{self, Since};
 use projectmind_core::state::{self, UiState, ViewIntent};
-use projectmind_core::walkthrough::{self as wt, QuizQuestion, Walkthrough, WalkthroughStep};
+use projectmind_core::tour_suggest::{self, Persona, StepTarget, SuggestedStep, TourScaffold};
+use projectmind_core::walkthrough::{
+    self as wt, QuizQuestion, Walkthrough, WalkthroughStep, WalkthroughTarget,
+};
 use projectmind_core::{diagram, git, html};
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_plugin_api::FrameworkPlugin;
@@ -360,6 +363,31 @@ fn architect_briefing_schema() -> Value {
     })
 }
 
+fn tour_scaffold_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "top": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 5,
+                "description": "How many modules to rank (and turn into per-module steps). Clamped to at least 1."
+            },
+            "persona": {
+                "type": "string",
+                "enum": ["new-dev", "architect"],
+                "default": "new-dev",
+                "description": "Who the tour is pitched at. Only tweaks the Overview framing text — the ranking is identical (and deterministic) either way. Unknown values fall back to `new-dev`."
+            },
+            "materialize": {
+                "type": "boolean",
+                "default": false,
+                "description": "When false (default) the tool returns ONLY the scaffold — you write `narration` for each step in your own words and call `walkthrough_start` yourself. When true the server persists a walkthrough right away with template narration built from the facts bullets (EN), and returns its `walkthrough_id`; use this for an offline / TTS demo without a client LLM. The materialized steps are still editable via walkthrough_append / _set_step."
+            }
+        }
+    })
+}
+
 fn open_browser_repo_schema() -> Value {
     json!({
         "type": "object",
@@ -560,6 +588,11 @@ pub(crate) fn list() -> Value {
                 "inputSchema": architect_briefing_schema()
             },
             {
+                "name": "tour_scaffold",
+                "description": "Auto-narrated tour scaffold (#201) — the machine skeleton for a \"welcome to this repo\" walkthrough. ProjectMind is the MCP server and YOU are the narrator: this returns a ranked list of the modules worth touring plus ready-made step targets, and you turn the `facts` bullets into prose and call `walkthrough_start`. Ranking blends three signals normalised across modules: cross-module coupling (incoming+outgoing edges, weight 0.4), class count (0.3), and 90-day commit activity (0.3); each module's `top_class` is its highest-fan-in class from the risk atlas. Returns `repo` (title/modules_total/classes_total), `ranking` (top-N modules with score/classes/fan_in/fan_out/commits_90d/top_class/facts), and `suggested_steps` (an Overview note, one Class step per module pointing at its top class, and a closing \"Where change happens\" atlas step ringing the hotspots). Set `materialize: true` to have the server persist the walkthrough immediately with template narration from the facts (for an offline / TTS demo without a client LLM) — the response then also carries `walkthrough_id`. Call this FIRST when the user says \"walk me through this repo\" / \"give me a tour\" and you have no curated tour yet.",
+                "inputSchema": tour_scaffold_schema()
+            },
+            {
                 "name": "open_browser_repo",
                 "description": "Start the in-process browser host that serves the ProjectMind webapp at a tokenized URL, then surface that URL to the user verbatim — they will open it themselves; you cannot. Use after `open in browser` / `im Browser zeigen` / `show me on my iPad / phone / laptop`. Pass `lan: true` whenever the user mentions a remote device (iPad, phone, second machine on the same WLAN) — otherwise the URL is `http://127.0.0.1:...` and unreachable from anything but this machine. The bearer token in the URL fragment gates every API call regardless of bind address. Idempotent: calling again with a different `path` reopens the host on the existing port; call `browser_status` first to avoid restarting the host. Once the user has opened the URL, every subsequent `view_*` / `walkthrough_*` push will mirror to that browser tab in addition to the Desktop GUI.",
                 "inputSchema": open_browser_repo_schema()
@@ -621,6 +654,7 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "risk_atlas" => risk_atlas(state, parsed.arguments).await,
         "pattern_check" => pattern_check(state, parsed.arguments).await,
         "architect_briefing" => architect_briefing(state, parsed.arguments).await,
+        "tour_scaffold" => tour_scaffold(state, parsed.arguments).await,
         "open_browser_repo" => open_browser_repo(state, parsed.arguments).await,
         "browser_status" => browser_status(),
         "stop_browser" => stop_browser(),
@@ -1756,6 +1790,136 @@ async fn architect_briefing(state: &Mutex<ServerState>, args: Value) -> Dispatch
     })
 }
 
+#[derive(Deserialize, Default)]
+struct TourScaffoldArgs {
+    #[serde(default)]
+    top: Option<u32>,
+    #[serde(default)]
+    persona: Option<String>,
+    #[serde(default)]
+    materialize: bool,
+}
+
+/// `tour_scaffold` (V4.4, #201): compose the importance heuristics into a
+/// ranked, ready-to-narrate tour skeleton.
+///
+/// `materialize: false` (default) returns only the scaffold — the client
+/// narrates and calls `walkthrough_start`. `materialize: true` persists a
+/// walkthrough right away with template narration built from the facts and
+/// returns its `walkthrough_id`, mirroring the `walkthrough_start` persistence
+/// path so an offline / TTS demo works without a client LLM.
+async fn tour_scaffold(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
+    let args: TourScaffoldArgs = if args.is_null() {
+        TourScaffoldArgs::default()
+    } else {
+        serde_json::from_value(args)
+            .map_err(|e| DispatchError::invalid_params(format!("tour_scaffold: {e}")))?
+    };
+    let top = args.top.map_or(5, |v| v as usize).max(1);
+    let persona = args
+        .persona
+        .as_deref()
+        .map_or(Persona::NewDev, Persona::parse);
+    let materialize = args.materialize;
+
+    let state = state.lock().await;
+    with_repo(&state, |repo| {
+        let spring = SpringPlugin::new();
+        let scaffold = tour_suggest::suggest_tour(repo, &spring, top, persona);
+
+        if !materialize {
+            let body = serde_json::to_string_pretty(&scaffold).unwrap_or_else(|_| "{}".into());
+            return Ok(text_result(body));
+        }
+
+        // Build + persist a walkthrough from the scaffold, then point the
+        // viewers at step 0 — same path walkthrough_start takes.
+        let walkthrough = materialize_walkthrough(&scaffold);
+        let id = walkthrough.id.clone();
+        let step_count = walkthrough.steps.len();
+        if let Err(err) = wt::clear() {
+            tracing::warn!(error = %err, "tour_scaffold: failed to clear previous tour");
+        }
+        let written = wt::write_body(walkthrough)
+            .map_err(|e| DispatchError::internal(format!("tour_scaffold: {e}")))?;
+        let prev = state::read().ok().flatten().unwrap_or_default();
+        publish_state(UiState {
+            repo_root: prev.repo_root,
+            view: ViewIntent::Walkthrough {
+                id: id.clone(),
+                step: 0,
+            },
+            ..UiState::default()
+        });
+        let scaffold_json =
+            serde_json::to_value(&scaffold).unwrap_or_else(|_| json!({"error": "serialise"}));
+        let body = serde_json::to_string_pretty(&json!({
+            "materialized": true,
+            "walkthrough_id": written.id,
+            "total": step_count,
+            "scaffold": scaffold_json,
+        }))
+        .unwrap_or_else(|_| "{}".into());
+        Ok(text_result(body))
+    })
+}
+
+/// Turn a scaffold into a persistable [`Walkthrough`] with template narration
+/// built from each step's facts. English-only; steps stay editable via the
+/// walkthrough tools afterwards.
+fn materialize_walkthrough(scaffold: &TourScaffold) -> Walkthrough {
+    let title = format!("Tour: {}", scaffold.repo.title);
+    let summary = format!(
+        "Auto-generated tour of {} — {} module(s), {} class(es). \
+         Narration is template-generated; edit any step to refine it.",
+        scaffold.repo.title, scaffold.repo.modules_total, scaffold.repo.classes_total
+    );
+    let steps: Vec<WalkthroughStep> = scaffold
+        .suggested_steps
+        .iter()
+        .map(materialize_step)
+        .collect();
+    Walkthrough {
+        schema_version: wt::CURRENT_SCHEMA_VERSION,
+        id: wt::slugify_id(&title),
+        title,
+        summary,
+        steps,
+        quiz: Vec::new(),
+        updated_at: 0,
+    }
+}
+
+/// Map one [`SuggestedStep`] onto a [`WalkthroughStep`], joining its facts
+/// into a plain-markdown bullet list as the template narration.
+fn materialize_step(step: &SuggestedStep) -> WalkthroughStep {
+    let narration = if step.facts.is_empty() {
+        String::new()
+    } else {
+        step.facts
+            .iter()
+            .map(|f| format!("- {f}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let target = match &step.target {
+        StepTarget::Note => WalkthroughTarget::Note,
+        StepTarget::Class { fqn } => WalkthroughTarget::Class {
+            fqn: fqn.clone(),
+            highlight: Vec::new(),
+        },
+        StepTarget::Atlas { highlight } => WalkthroughTarget::Atlas {
+            module: None,
+            highlight_fqns: highlight.clone(),
+        },
+    };
+    WalkthroughStep {
+        title: step.title.clone(),
+        narration,
+        target,
+    }
+}
+
 /// Web frontend embedded into the MCP binary at compile time.
 ///
 /// The `app/dist` directory must exist at build time — the workspace CI
@@ -1862,8 +2026,77 @@ mod tests {
         assert!(names.contains(&"risk_atlas"));
         assert!(names.contains(&"pattern_check"));
         assert!(names.contains(&"architect_briefing"));
+        assert!(names.contains(&"tour_scaffold"));
         assert!(names.contains(&"present_artifact"));
         assert!(names.contains(&"list_artifacts"));
+    }
+
+    #[test]
+    fn tour_scaffold_schema_documents_top_persona_materialize() {
+        let v = list();
+        let tools = v["tools"].as_array().unwrap();
+        let ts = tools
+            .iter()
+            .find(|t| t["name"] == "tour_scaffold")
+            .expect("tour_scaffold tool registered");
+        let schema = &ts["inputSchema"];
+        assert_eq!(schema["type"], "object");
+        let props = &schema["properties"];
+        assert!(props.get("top").is_some(), "top documented");
+        assert!(props.get("persona").is_some(), "persona documented");
+        assert!(props.get("materialize").is_some(), "materialize documented");
+        // Persona enum lists both audiences.
+        let enum_vals = props["persona"]["enum"].as_array().unwrap();
+        assert!(enum_vals.iter().any(|v| v == "new-dev"));
+        assert!(enum_vals.iter().any(|v| v == "architect"));
+        // Everything is optional.
+        assert!(schema.get("required").is_none());
+    }
+
+    #[test]
+    fn materialize_step_maps_targets_and_narration() {
+        // Class step → Class target with facts joined as a bullet list.
+        let class_step = SuggestedStep {
+            title: "core".into(),
+            target: StepTarget::Class {
+                fqn: "a.Hub".into(),
+            },
+            facts: vec!["fact one".into(), "fact two".into()],
+        };
+        let ws = materialize_step(&class_step);
+        assert_eq!(ws.title, "core");
+        assert!(matches!(ws.target, WalkthroughTarget::Class { .. }));
+        assert!(ws.narration.contains("- fact one"));
+        assert!(ws.narration.contains("- fact two"));
+
+        // Atlas step carries the hotspot fqns.
+        let atlas_step = SuggestedStep {
+            title: "Where change happens".into(),
+            target: StepTarget::Atlas {
+                highlight: vec!["a.Hub".into()],
+            },
+            facts: vec![],
+        };
+        let ws = materialize_step(&atlas_step);
+        match ws.target {
+            WalkthroughTarget::Atlas { highlight_fqns, .. } => {
+                assert_eq!(highlight_fqns, vec!["a.Hub".to_string()]);
+            }
+            other => panic!("expected atlas target, got {other:?}"),
+        }
+        // No facts → empty narration.
+        assert!(ws.narration.is_empty());
+
+        // Note step round-trips to a Note target.
+        let note_step = SuggestedStep {
+            title: "Overview".into(),
+            target: StepTarget::Note,
+            facts: vec!["orient first".into()],
+        };
+        assert!(matches!(
+            materialize_step(&note_step).target,
+            WalkthroughTarget::Note
+        ));
     }
 
     #[test]
