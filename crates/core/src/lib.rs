@@ -35,6 +35,7 @@ pub mod patterns;
 pub mod persistence;
 pub mod repository;
 pub mod risk;
+pub mod session;
 pub mod state;
 pub mod tour_embed;
 pub mod tour_index;

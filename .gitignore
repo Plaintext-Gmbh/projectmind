@@ -37,6 +37,13 @@ Thumbs.db
 # plaintext-ide runtime
 .plaintext-ide/cache/
 
+# ProjectMind per-repo runtime state written into a target repo when it is
+# opened: the Cockpit 2.7 session log (.projectmind/state/sessions.jsonl) and
+# the Cockpit 2.5 semantic tour cache (.projectmind/cache/). Never committed —
+# they are machine-local, regenerated on the next open_repo.
+.projectmind/state/
+.projectmind/cache/
+
 # Local release/updater staging (left behind by local `./build dist` runs;
 # CI produces and uploads these as release assets instead)
 /artifacts/

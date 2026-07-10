@@ -13,6 +13,7 @@ use projectmind_core::file_access;
 use projectmind_core::files;
 use projectmind_core::patterns::{self as core_patterns, Pattern, Scope as PatternScope};
 use projectmind_core::risk::{self, Options as RiskOptions, Weights as RiskWeights};
+use projectmind_core::session::{self, Since};
 use projectmind_core::state::{self, UiState, ViewIntent};
 use projectmind_core::walkthrough::{self as wt, QuizQuestion, Walkthrough, WalkthroughStep};
 use projectmind_core::{diagram, git, html};
@@ -345,6 +346,18 @@ fn walkthrough_query_schema() -> Value {
     })
 }
 
+fn architect_briefing_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "since": {
+                "type": "string",
+                "description": "Baseline to diff against. `last_session` (default) uses the most recent prior `open_repo`; `1d` / `7d` reach back N days; an ISO-8601 timestamp (e.g. `2026-07-01T00:00:00Z`) or bare Unix seconds pick an absolute point. Falls back to the oldest recorded session when nothing that old exists."
+            }
+        }
+    })
+}
+
 fn open_browser_repo_schema() -> Value {
     json!({
         "type": "object",
@@ -535,6 +548,11 @@ pub(crate) fn list() -> Value {
                 "inputSchema": walkthrough_query_schema()
             },
             {
+                "name": "architect_briefing",
+                "description": "Morning briefing (Cockpit 2.7) — what got WORSE in the open repo since you last looked. Diffs the latest `open_repo` health snapshot against a baseline session (default the previous open; `since` can reach back N days or to an ISO-8601 timestamp) and reports: `new_hotspots` (classes that crossed into the high-risk band, with score_now/score_then/delta/reason), `pattern_drift` (detectors with MORE violations than before), `risk_delta.up`/`.down` (classes whose composite risk rose/fell), and the `session_window`. Snapshots are logged automatically on every `open_repo` to `.projectmind/state/sessions.jsonl` (top-50 scored classes + per-detector violation counts, trimmed to 90 days). Coverage-driven moves are only comparable when tests ran in both sessions (`coverage_comparable`). Call this FIRST in a session to decide what to worry about — it is the proactive version of `risk_atlas`. Returns both the JSON payload and a ready-to-paste Markdown summary.",
+                "inputSchema": architect_briefing_schema()
+            },
+            {
                 "name": "open_browser_repo",
                 "description": "Start the in-process browser host that serves the ProjectMind webapp at a tokenized URL, then surface that URL to the user verbatim — they will open it themselves; you cannot. Use after `open in browser` / `im Browser zeigen` / `show me on my iPad / phone / laptop`. Pass `lan: true` whenever the user mentions a remote device (iPad, phone, second machine on the same WLAN) — otherwise the URL is `http://127.0.0.1:...` and unreachable from anything but this machine. The bearer token in the URL fragment gates every API call regardless of bind address. Idempotent: calling again with a different `path` reopens the host on the existing port; call `browser_status` first to avoid restarting the host. Once the user has opened the URL, every subsequent `view_*` / `walkthrough_*` push will mirror to that browser tab in addition to the Desktop GUI.",
                 "inputSchema": open_browser_repo_schema()
@@ -594,6 +612,7 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "walkthrough_query" => walkthrough_query(state, parsed.arguments).await,
         "risk_atlas" => risk_atlas(state, parsed.arguments).await,
         "pattern_check" => pattern_check(state, parsed.arguments).await,
+        "architect_briefing" => architect_briefing(state, parsed.arguments).await,
         "open_browser_repo" => open_browser_repo(state, parsed.arguments).await,
         "browser_status" => browser_status(),
         "stop_browser" => stop_browser(),
@@ -639,6 +658,16 @@ async fn open_repo(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
         "modules": repo.modules.len(),
         "classes": repo.class_count(),
     });
+
+    // Append a health snapshot to `.projectmind/state/sessions.jsonl` so
+    // `architect_briefing` (Cockpit 2.7, #163) can diff this open against the
+    // last one. Best-effort: a read-only home or a non-git repo must never
+    // block opening the repo. Runs while we still hold the parsed repo.
+    let relations = server_state.engine.relations(&repo);
+    if let Err(err) = projectmind_core::session::snapshot_and_log(&repo, &relations) {
+        tracing::warn!(error = %err, "open_repo: failed to write session log");
+    }
+
     server_state.repo = Some(repo);
 
     // Opening a *different* repo drops any AI-generated artifacts from the
@@ -1661,6 +1690,53 @@ async fn pattern_check(state: &Mutex<ServerState>, args: Value) -> DispatchResul
     })
 }
 
+#[derive(Deserialize, Default)]
+struct ArchitectBriefingArgs {
+    #[serde(default)]
+    since: Option<String>,
+}
+
+/// `architect_briefing` (Cockpit 2.7, #163): diff the current session's health
+/// snapshot against a baseline and report what got worse.
+///
+/// Reads the session history recorded on every `open_repo` from
+/// `.projectmind/state/sessions.jsonl`. The current `open_repo` already wrote
+/// the latest snapshot, so the history's last entry is "now" and the delta is
+/// computed against the baseline chosen by `since` (default `last_session`).
+async fn architect_briefing(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
+    let args: ArchitectBriefingArgs = if args.is_null() {
+        ArchitectBriefingArgs::default()
+    } else {
+        serde_json::from_value(args)
+            .map_err(|e| DispatchError::invalid_params(format!("architect_briefing: {e}")))?
+    };
+    let since = match args.since.as_deref() {
+        None => Since::LastSession,
+        Some(raw) => Since::parse(raw).ok_or_else(|| {
+            DispatchError::invalid_params(format!(
+                "architect_briefing: unrecognised `since` value `{raw}` (expected last_session | Nd | ISO-8601 | unix-seconds)"
+            ))
+        })?,
+    };
+
+    let state = state.lock().await;
+    with_repo(&state, |repo| {
+        let history = session::load_history(&repo.root)
+            .map_err(|e| DispatchError::internal(format!("architect_briefing: {e}")))?;
+        let briefing = session::briefing(&history, since);
+        let markdown = session::to_markdown(&briefing);
+        let payload = serde_json::to_value(&briefing)
+            .unwrap_or_else(|_| json!({"error": "serialise briefing"}));
+        let body = serde_json::to_string_pretty(&json!({
+            "briefing": payload,
+            "markdown": markdown,
+            "sessions_recorded": history.len(),
+        }))
+        .unwrap_or_else(|_| "{}".into());
+        Ok(text_result(body))
+    })
+}
+
 /// Web frontend embedded into the MCP binary at compile time.
 ///
 /// The `app/dist` directory must exist at build time — the workspace CI
@@ -1766,8 +1842,27 @@ mod tests {
         assert!(names.contains(&"list_changes_since"));
         assert!(names.contains(&"risk_atlas"));
         assert!(names.contains(&"pattern_check"));
+        assert!(names.contains(&"architect_briefing"));
         assert!(names.contains(&"present_artifact"));
         assert!(names.contains(&"list_artifacts"));
+    }
+
+    #[test]
+    fn architect_briefing_schema_documents_since() {
+        let v = list();
+        let tools = v["tools"].as_array().unwrap();
+        let ab = tools
+            .iter()
+            .find(|t| t["name"] == "architect_briefing")
+            .expect("architect_briefing tool registered");
+        let schema = &ab["inputSchema"];
+        assert_eq!(schema["type"], "object");
+        assert!(
+            schema["properties"].get("since").is_some(),
+            "since property documented"
+        );
+        // `since` is optional — no required fields.
+        assert!(schema.get("required").is_none());
     }
 
     #[test]

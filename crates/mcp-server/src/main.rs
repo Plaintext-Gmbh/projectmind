@@ -9,6 +9,7 @@
 
 #![warn(clippy::pedantic)]
 
+mod briefing;
 mod handler;
 mod launch;
 mod record;
@@ -70,6 +71,31 @@ enum Command {
         #[arg(long)]
         narrate: bool,
     },
+
+    /// Print a morning briefing of what got worse since the last session.
+    ///
+    /// The CLI face of the `architect_briefing` MCP tool (Cockpit 2.7, #163):
+    /// opens the repo (which appends a fresh health snapshot to
+    /// `.projectmind/state/sessions.jsonl`), diffs it against the baseline
+    /// chosen by `--since`, and prints new hotspots, pattern drift, and the
+    /// risk delta as plain text (default), Markdown, or JSON. Built for cron
+    /// jobs and Slack bots.
+    Briefing {
+        /// Repository root. Falls back to the repo recorded in the statefile.
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        /// Baseline to diff against: `last_session` (default), `1d` / `7d`,
+        /// an ISO-8601 timestamp, or bare Unix seconds.
+        #[arg(long, default_value = "last_session")]
+        since: String,
+        /// Output format: `text` (default), `markdown`, or `json`.
+        #[arg(long, default_value = "text")]
+        format: String,
+        /// Don't append a fresh snapshot before diffing — a read-only peek at
+        /// the history as it already stands.
+        #[arg(long)]
+        no_record: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -90,6 +116,26 @@ fn main() -> Result<()> {
             };
             let message = record::run(&args)?;
             println!("{message}");
+            Ok(())
+        }
+        Some(Command::Briefing {
+            repo,
+            since,
+            format,
+            no_record,
+        }) => {
+            init_tracing();
+            let format = briefing::Format::parse(&format).with_context(|| {
+                format!("unknown --format `{format}` (expected text | markdown | json)")
+            })?;
+            let args = briefing::BriefingArgs {
+                repo,
+                since,
+                format,
+                no_record,
+            };
+            let output = briefing::run(&args)?;
+            print!("{output}");
             Ok(())
         }
         None => run_server(),

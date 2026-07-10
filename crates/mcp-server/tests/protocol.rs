@@ -576,6 +576,149 @@ fn walkthrough_query_returns_grep_fallback_without_embed_feature() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+#[test]
+fn tools_list_includes_architect_briefing() {
+    let mut s = Server::spawn();
+    let resp = s.call(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#);
+    let tools = resp["result"]["tools"].as_array().unwrap();
+    let ab = tools
+        .iter()
+        .find(|t| t["name"] == "architect_briefing")
+        .expect("architect_briefing tool registered");
+    assert!(ab["inputSchema"]["properties"].get("since").is_some());
+}
+
+#[test]
+fn architect_briefing_requires_open_repo() {
+    // Repo-scoped like the rest: no open repo → invalid params.
+    let (mut s, dir) = spawn_isolated();
+    s.call(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#);
+    let resp = s.call(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"architect_briefing","arguments":{}}}"#,
+    );
+    assert_eq!(
+        resp["error"]["code"], -32602,
+        "expected invalid params without an open repo: {resp}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn architect_briefing_rejects_bad_since() {
+    let tmp = TempRepo::create_git_repo_with_class();
+    let (mut s, dir) = spawn_isolated();
+    s.call(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#);
+    let path = tmp.root.to_string_lossy().into_owned();
+    s.call(&format!(
+        r#"{{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{{"name":"open_repo","arguments":{{"path":"{path}"}}}}}}"#
+    ));
+    let resp = s.call(
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"architect_briefing","arguments":{"since":"not-a-date!!"}}}"#,
+    );
+    assert_eq!(resp["error"]["code"], -32602, "unexpected: {resp}");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn open_repo_writes_session_log_and_briefing_diffs_it() {
+    // open_repo must append to `.projectmind/state/sessions.jsonl`, and the
+    // briefing must read that history and return a well-formed envelope.
+    let tmp = TempRepo::create_git_repo_with_class();
+    let (mut s, dir) = spawn_isolated();
+    s.call(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#);
+    let path = tmp.root.to_string_lossy().into_owned();
+    s.call(&format!(
+        r#"{{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{{"name":"open_repo","arguments":{{"path":"{path}"}}}}}}"#
+    ));
+
+    // The session log now exists with at least one JSON line.
+    let log = tmp.root.join(".projectmind/state/sessions.jsonl");
+    assert!(log.is_file(), "sessions.jsonl not written on open_repo");
+    let contents = std::fs::read_to_string(&log).unwrap();
+    let lines: Vec<&str> = contents.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(lines.len(), 1, "one snapshot per open_repo");
+    let rec: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+    assert!(rec["ts"].is_number());
+    assert!(rec["top_classes"].is_array());
+    assert!(rec["pattern_violations"].is_object());
+
+    // Re-opening the same repo appends a second snapshot so the briefing has a
+    // baseline to compare against.
+    s.call(&format!(
+        r#"{{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{{"name":"open_repo","arguments":{{"path":"{path}"}}}}}}"#
+    ));
+    let contents = std::fs::read_to_string(&log).unwrap();
+    let lines: Vec<&str> = contents.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(lines.len(), 2, "second open_repo appends a snapshot");
+
+    // architect_briefing returns the envelope with markdown + a session window.
+    let resp = s.call(
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"architect_briefing","arguments":{}}}"#,
+    );
+    assert!(resp["error"].is_null(), "unexpected error: {resp}");
+    let body: serde_json::Value =
+        serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(body["sessions_recorded"], 2);
+    let briefing = &body["briefing"];
+    assert!(briefing["new_hotspots"].is_array());
+    assert!(briefing["pattern_drift"].is_array());
+    assert!(briefing["risk_delta"]["up"].is_array());
+    assert!(briefing["risk_delta"]["down"].is_array());
+    assert!(briefing["session_window"]["from"].is_number());
+    assert!(briefing["session_window"]["to"].is_number());
+    assert!(
+        body["markdown"]
+            .as_str()
+            .unwrap()
+            .contains("Architect Briefing"),
+        "markdown embed present: {body}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn cli_briefing_subcommand_prints_and_records() {
+    // The `projectmind briefing --repo <path>` CLI face records a snapshot and
+    // prints a plain-text briefing. Running it twice yields a session window.
+    let tmp = TempRepo::create_git_repo_with_class();
+    let path = tmp.root.to_string_lossy().into_owned();
+
+    let run = || {
+        let out = Command::new(binary_path())
+            .args(["briefing", "--repo", &path])
+            .env("PROJECTMIND_LOG", "error")
+            .output()
+            .expect("run briefing subcommand");
+        assert!(
+            out.status.success(),
+            "briefing exited non-zero: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+
+    // First run: only one session → the "no baseline" note.
+    let first = run();
+    assert!(
+        first.contains("Architect briefing"),
+        "unexpected first output: {first}"
+    );
+
+    // Second run: now there is a baseline → a window line.
+    let second = run();
+    assert!(
+        second.contains("Window:") || second.contains("Nothing got worse"),
+        "unexpected second output: {second}"
+    );
+
+    // The session log recorded both runs.
+    let log = tmp.root.join(".projectmind/state/sessions.jsonl");
+    let contents = std::fs::read_to_string(&log).unwrap();
+    let count = contents.lines().filter(|l| !l.trim().is_empty()).count();
+    assert_eq!(count, 2, "each CLI run appends one snapshot");
+}
+
 // ----- helpers -----
 
 /// Spawn a server against an isolated statefile directory, pre-seeding a fresh

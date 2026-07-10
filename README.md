@@ -373,6 +373,7 @@ Phase 1 plugins are **statically registered**. Phase 2 will add dynamic loading 
 ## Reference docs (in the repo)
 
 - [`docs/architecture.md`](docs/architecture.md) — workspace layout, plugin API, MCP tool schemas. Living reference, kept in sync with the code.
+- [`docs/architect-briefing.md`](docs/architect-briefing.md) — the Cockpit 2.7 morning briefing: session log, `architect_briefing` MCP tool, and the `projectmind briefing` CLI.
 - [`docs/SYNC.md`](docs/SYNC.md) — how the MCP server and the Tauri GUI stay in sync (statefile + view intents).
 - [`docs/branding.md`](docs/branding.md) — colour, typography, logo specs.
 - [`docs/reviews/`](docs/reviews/) — historical architecture reviews.

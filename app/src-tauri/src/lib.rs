@@ -288,6 +288,16 @@ fn open_repository(
         tabs,
         code_graph_backend,
     };
+    // Append a health snapshot to `.projectmind/state/sessions.jsonl` so
+    // `architect_briefing` (Cockpit 2.7, #163) can diff opens. Best-effort;
+    // never blocks — mirrors the MCP server / browser host. Skipped for the
+    // single-markdown-file "repo" case where the root is a file, not a dir.
+    if !repo.root.is_file() {
+        let relations = state.engine.relations(&repo);
+        if let Err(err) = projectmind_core::session::snapshot_and_log(&repo, &relations) {
+            tracing::warn!(error = %err, "failed to write session log");
+        }
+    }
     *state.repo.write() = Some(repo);
     // Publish so the MCP server (and any other consumer) sees what we just opened.
     // Preserve the existing view intent when the repo path is unchanged — this

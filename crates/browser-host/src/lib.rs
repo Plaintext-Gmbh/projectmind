@@ -922,6 +922,13 @@ fn open_repository_locked(
     if let Err(err) = projectmind_core::tour_index::build_index_on_open(&repo.root) {
         tracing::warn!(error = %err, "failed to build tour index");
     }
+    // Append a health snapshot to `.projectmind/state/sessions.jsonl` so
+    // `architect_briefing` (Cockpit 2.7, #163) can diff opens. Best-effort;
+    // never blocks — same policy as the MCP server / Tauri shell.
+    let relations = state.engine.relations(&repo);
+    if let Err(err) = projectmind_core::session::snapshot_and_log(&repo, &relations) {
+        tracing::warn!(error = %err, "failed to write session log");
+    }
     state.repo_root = Some(repo.root.clone());
     // (Re-)open the persistence stores per `.projectmind/config.toml`
     // (defaults: JSON annotations, no code-graph cache). Failures are
