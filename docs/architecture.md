@@ -13,15 +13,19 @@ projectmind/
 ├── crates/
 │   ├── plugin-api/           # public traits + types (no impl)
 │   ├── core/                 # repo loading, file walking, plugin registry
-│   └── mcp-server/           # MCP server binary (stdio JSON-RPC)
+│   ├── mcp-server/           # MCP server binary (stdio JSON-RPC)
+│   └── browser-host/         # in-process HTTP host serving the webapp to any browser
 ├── plugins/
 │   ├── lang-java/            # Tree-sitter Java + entity extraction
-│   └── framework-spring/     # Spring annotation detection + bean graph
-├── app/                      # Tauri shell (later)
+│   ├── lang-rust/            # Tree-sitter Rust + entity extraction
+│   ├── framework-spring/     # Spring annotation detection + bean graph
+│   └── framework-lombok/     # Lombok annotation recognition
+├── app/                      # Tauri shell + Svelte frontend
 │   ├── src-tauri/
-│   └── frontend/
+│   └── src/
 ├── docs/
-│   └── plan/
+│   ├── sketches/             # design sketches (status headers mark what shipped)
+│   └── reviews/              # historical architecture reviews
 └── .github/
     └── workflows/
 ```
@@ -35,7 +39,7 @@ Pure trait + type crate. **No implementations**, **no heavy dependencies**. Stab
 - `LanguagePlugin` — file-extension to AST to entities
 - `FrameworkPlugin` — recognise patterns on top of language entities
 - `VisualizerPlugin` — render an input shape into a UI component (web component)
-- `AnnotationStore`, `CodeGraphStore` — persistence (see `02-persistence.md`)
+- `AnnotationStore`, `CodeGraphStore` — persistence (see [`persistence.md`](persistence.md))
 - Domain types: `Class`, `Method`, `Field`, `Annotation`, `Module`, `RelationKind`, `EntityId`
 
 ### `core`
@@ -47,7 +51,7 @@ The runtime that wires everything together.
 - **File walker** — `ignore`-respecting walk
 - **Pipeline** — `walk → parse (lang plugin) → enrich (framework plugin) → store`
 - **Diff service** — uses `git2` to get changes vs a ref
-- **Config** — reads `~/.config/projectmind/config.toml` and `<repo>/.projectmind/config.toml`
+- **Config** — reads `<repo>/.projectmind/config.toml`, with `$XDG_CONFIG_HOME/projectmind/defaults.toml` as machine-wide fallback
 
 ### `mcp-server`
 
@@ -58,11 +62,22 @@ Binary that:
 - Wraps `core` operations into MCP tools
 - Used by Claude Code via `.mcp.json`
 
+### `browser-host`
+
+- In-process HTTP host that serves the same Svelte webapp to any browser — started via the `open_browser_repo` MCP tool
+- Tokenized URL (bearer token in the fragment) gates every API call; loopback by default, `lan: true` binds on `0.0.0.0` for other devices on the WLAN
+- Mirrors the same statefile-driven view intents as the desktop GUI
+
 ### `plugins/lang-java`
 
 - Wraps `tree-sitter-java`
 - Extracts: class, interface, enum, record; method, field; annotation values; imports; Javadoc
 - Outputs `core::Module` populated with `Class`/`Method`
+
+### `plugins/lang-rust`
+
+- Wraps `tree-sitter-rust`
+- Extracts top-level `struct` / `enum` / `trait` / `union` items as classes, attaches methods from matching `impl` blocks, lifts `#[derive(...)]` and other outer attributes to annotations
 
 ### `plugins/framework-spring`
 
@@ -109,22 +124,30 @@ pub trait VisualizerPlugin: Send + Sync {
 
 For Phase 1, all plugins are **statically registered** in `core::registry` via a build-time list of crate references. Phase 2 adds dynamic `cdylib` loading from `./plugins/` next to the binary.
 
-## MCP Tools (initial set)
+## MCP Tools
 
-| Tool | Input | Output | Notes |
-|---|---|---|---|
-| `open_repo` | `{ "path": "/abs/path" }` | `{ "repo_id": "...", "modules": [...] }` | Opens a repo; subsequent calls are scoped to it |
-| `list_files` | `{ "filter"?: "glob" }` | `{ "files": [...] }` | Files known to active language plugins |
-| `list_classes` | `{ "module"?: "..." }` | `{ "classes": [{ "fqn", "file", "stereotype", … }] }` | Stereotype = `service`, `controller`, etc. (when Spring plugin enabled) |
-| `show_class` | `{ "fqn": "...", "highlight"?: [{ "from": 42, "to": 58 }] }` | `{ "file", "source", "highlights" }` | For LLM to "show this class" with optional highlight |
-| `list_changes_since` | `{ "ref": "HEAD~1" }` | `{ "files": [{ "path", "status" }] }` | Files changed since a git ref |
-| `show_diff` | `{ "from": "HEAD~1", "to"?: "HEAD" }` | `{ "diff": [...] }` | Unified diff per file |
-| `show_diagram` | `{ "type": "bean-graph" \| "package-tree" \| "pom-deps", "scope"?: "..." }` | `{ "format": "mermaid" \| "cytoscape", "data": {...} }` | Polymorphic — visualizer plugins can register new diagram types |
-| `get_user_selection` | `{}` | `{ "file", "from", "to", "text" }` or empty | Last code region selected in the UI |
-| `annotate` | `{ "file", "from", "to", "label", "link"? }` | `{ "id" }` | Sets a marker the UI surfaces above the code |
-| `list_changes_summary` | `{ "ref": "HEAD~5" }` | `{ "by_module": [...], "stats": {...} }` | High-level summary for "show me the change" |
-| `present_artifact` | `{ "title", "format": "html"\|"markdown", "content", "id"? }` | `{ "ok", "id", "format", "size" }` | Pushes an inline AI-generated artifact and shows it live. HTML renders in a sandboxed CSP-locked iframe; Markdown via the file-viewer pipeline. Re-using `id` replaces the body. ~2 MB cap. |
-| `list_artifacts` | `{}` | `[{ "id", "title", "format", "size", "created_at", "updated_at" }]` | Metadata for stored artifacts (no bodies). |
+38 tools as of v0.11 — the full name/parameter reference lives in the
+[README tool table](../README.md); this section only maps them onto the
+architecture. Grouped by concern:
+
+- **Repo & structure** — `open_repo`, `repo_info`, `module_summary`,
+  `list_module_files`, `list_classes`, `find_class`, `class_outline`,
+  `show_class`, `relations`, `plugin_info`
+- **Git-derived signals** — `list_changes_since`, `list_refs`, `show_diff`,
+  `file_recency`, `commit_activity`
+- **Diagrams** — `show_diagram` (returns Mermaid/JSON payloads to the client),
+  `view_diagram` (pushes a diagram into the open viewers; live/3D kinds such
+  as `bean-graph-live`, `timeline-river`, `code-city` render from their own
+  endpoints)
+- **Viewer pushes (statefile intents)** — `view_class`, `view_file`,
+  `view_diff`, `start_gui`
+- **Browser host** — `open_browser_repo`, `browser_status`, `stop_browser`
+- **Walkthroughs & cockpit** — `walkthrough_start`, `walkthrough_append`,
+  `walkthrough_set_step`, `walkthrough_clear`, `walkthrough_feedback`,
+  `walkthrough_query` (semantic tour search), `tour_scaffold` (auto-narrated
+  tour skeleton), `risk_atlas`, `pattern_check`, `architect_briefing`
+- **Docs & artifacts** — `list_html`, `list_html_snippets`,
+  `present_artifact`, `list_artifacts`
 
 The MCP server is the bus between the LLM and the IDE: every operation in the UI is, ultimately, one of these tools (so anything the user does is reproducible by the LLM, and vice versa).
 
@@ -186,5 +209,3 @@ cd app && pnpm install && pnpm tauri dev
 - **Plugin sandboxing** — Phase 1 trusts in-tree plugins. Phase 3 with third-party plugins must reconsider (WASM sandbox, capability tokens).
 
 ## Open Items
-
-See [`01-brainstorming-vision.md` §10](01-brainstorming-vision.md) for the running list of open questions.
