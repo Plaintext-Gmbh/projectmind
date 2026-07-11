@@ -10,7 +10,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { marked } from 'marked';
   import { currentWalkthrough, setWalkthroughStep, showClass, readFileText } from '../lib/api';
-  import type { Walkthrough, WalkthroughStep, LineRange, ClassEntry } from '../lib/api';
+  import type { Walkthrough, LineRange, ClassEntry } from '../lib/api';
   import { presenterActive, walkthroughCursor, errorMessage } from '../lib/store';
   import {
     initPresenter,

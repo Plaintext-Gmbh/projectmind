@@ -370,9 +370,6 @@
   let browserDropHint: string | null = null;
   let browserDropHintTimer: ReturnType<typeof setTimeout> | null = null;
   let unlistenDragDrop: (() => void) | null = null;
-  /// True while we're applying an MCP-driven state change. Prevents the
-  /// resulting load() from re-publishing and triggering an event loop.
-  let applyingExternal = false;
 
   // Whenever selectedClass changes (from sidebar click *or* a diagram drilldown)
   // load the source for the right-hand viewer.
@@ -675,7 +672,6 @@
   async function applyState(s: UiState) {
     if (s.seq <= lastSeq) return;
     lastSeq = s.seq;
-    applyingExternal = true;
     try {
       // Switch repos if needed. Swallow open errors silently — a stale
       // statefile (e.g. a test run that left behind a tmp path) shouldn't
@@ -751,8 +747,6 @@
       }
     } catch (err) {
       errorMessage.set(String(err));
-    } finally {
-      applyingExternal = false;
     }
   }
 

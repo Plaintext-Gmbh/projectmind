@@ -152,7 +152,6 @@ export function renderFolderTopDown(map: FolderMap, fillFor: FillFor = noFill): 
 
 export function renderFolderSolar(map: FolderMap, fillFor: FillFor = noFill): string {
   const nodes = map.nodes;
-  const byParent = groupByParent(nodes);
   const width = 1400;
   const height = 900;
   const cx = width / 2;

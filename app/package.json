@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
-    "lint": "eslint . --ext .ts,.svelte",
+    "lint": "eslint .",
     "format": "prettier --write 'src/**/*.{ts,svelte,html,css}'",
     "tauri": "tauri",
     "test": "vitest run",

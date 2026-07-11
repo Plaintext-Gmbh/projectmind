@@ -5,7 +5,6 @@
     currentWalkthrough,
     showClass,
     readFileText,
-    showDiff,
     ackWalkthrough,
     currentWalkthroughFeedback,
     requestMoreWalkthrough,
@@ -69,7 +68,6 @@
   let classMeta: { file: string; line_start: number; line_end: number } | null = null;
   let plainSource = '';
   let plainHighlight: LineRange[] = [];
-  let diffText = '';
   let targetLoading = false;
   let targetError: string | null = null;
   // Auto-annotation (Cockpit 2.4, #160): risk badges for the current `class`
@@ -280,7 +278,6 @@
     classMeta = null;
     plainSource = '';
     plainHighlight = [];
-    diffText = '';
     classBadges = [];
     targetError = null;
 
@@ -303,7 +300,8 @@
           // Markdown: FileView handles its own loading.
           break;
         case 'diff':
-          diffText = await showDiff(t.reference, t.to ?? undefined);
+          // DiffView self-loads the unified diff for the step — nothing to
+          // preload here (the old eager showDiff() fetch was never read).
           break;
         case 'artifact':
           // ArtifactView fetches its own body by id — nothing to preload.
