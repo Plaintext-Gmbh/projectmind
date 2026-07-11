@@ -142,6 +142,19 @@ architecture. Grouped by concern:
   `commit_activity` + cumulative `list_changes_since` data frontend-only —
   buildings first added within the activity window grow in step by step,
   everything older stands as the base city)
+- **Editable C4 model** ([#142](https://github.com/Plaintext-Gmbh/projectmind/issues/142))
+  — `scaffold_c4_model` writes `docs/architecture.dsl` (a Structurizr-DSL
+  subset) generated from the same data as the `c4-container` diagram, then
+  the `c4-model` diagram kind parses that (possibly hand-edited) file back to
+  Mermaid via `core::c4_dsl` (`generate_c4_dsl` → `parse_c4_dsl` →
+  `c4_model_to_mermaid`). Round-trip without a JVM / Structurizr CLI. The
+  scaffold generates once and **never clobbers** the file, so after the first
+  scaffold the `.dsl` is the source of truth and ProjectMind never rewrites it
+  (no semantic merge — a deliberate follow-up). The `c4-model` handler returns
+  a `C4_MODEL_ABSENT` sentinel when the file is missing, which the frontend
+  renders as a "scaffold it" empty state. Exposed across the same four surfaces
+  as every other action (MCP tool, Tauri command, browser-host route, `api.ts`
+  wrapper), all calling one `core::c4_dsl::scaffold_c4_model`.
 - **Viewer pushes (statefile intents)** — `view_class`, `view_file`,
   `view_diff`, `start_gui`
 - **Browser host** — `open_browser_repo`, `browser_status`, `stop_browser`

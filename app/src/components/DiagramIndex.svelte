@@ -83,6 +83,8 @@
         return $t('diagram.docGraph');
       case 'c4-container':
         return $t('diagram.c4Container');
+      case 'c4-model':
+        return $t('diagram.c4Model');
       case 'architecture-layers':
         return $t('diagram.architectureLayers');
       case 'language-stats':
@@ -118,6 +120,8 @@
         return $t('diagram.description.docGraph');
       case 'c4-container':
         return $t('diagram.description.c4Container');
+      case 'c4-model':
+        return $t('diagram.description.c4Model');
       case 'architecture-layers':
         return $t('diagram.description.architectureLayers');
       case 'language-stats':

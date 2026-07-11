@@ -719,6 +719,7 @@
             v.diagram_kind === 'inheritance-tree' ||
             v.diagram_kind === 'doc-graph' ||
             v.diagram_kind === 'c4-container' ||
+            v.diagram_kind === 'c4-model' ||
             v.diagram_kind === 'architecture-layers' ||
             v.diagram_kind === 'architecture-flow' ||
             v.diagram_kind === 'module-chord' ||

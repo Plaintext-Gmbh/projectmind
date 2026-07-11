@@ -29,7 +29,7 @@ use projectmind_core::tour_suggest::{self, Persona};
 use projectmind_core::walkthrough::{
     self as wt, FeedbackEvent, FeedbackKind, FeedbackLog, Walkthrough,
 };
-use projectmind_core::{code_city, diagram, doc_mentions, risk, tts, Engine, Repository};
+use projectmind_core::{c4_dsl, code_city, diagram, doc_mentions, risk, tts, Engine, Repository};
 use projectmind_framework_lombok::LombokPlugin;
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_lang_java::JavaPlugin;
@@ -681,6 +681,9 @@ fn show_diagram(kind: String, state: State<'_, Arc<AppState>>) -> Result<String,
         "folder-map" => Ok(diagram::render_folder_map(repo)),
         "inheritance-tree" => Ok(diagram::render_inheritance_tree(repo)),
         "c4-container" => Ok(diagram::render_c4_container(repo, &spring)),
+        // c4-model (#142) renders the editable docs/architecture.dsl, not
+        // repo-derived data — the file is the source of truth.
+        "c4-model" => Ok(c4_dsl::render_c4_model(repo)),
         "architecture-layers" => Ok(diagram::render_architecture_layers_drawio(repo)),
         "doc-graph" => serde_json::to_string(&projectmind_core::doc_graph::build(&repo.root))
             .map_err(|e| e.to_string()),
@@ -965,6 +968,22 @@ fn self_demo(
     let persona = persona.as_deref().map_or(Persona::NewDev, Persona::parse);
     let spring = SpringPlugin::new();
     tour_suggest::self_demo(repo, &spring, top, persona).map_err(|e| e.to_string())
+}
+
+/// Scaffold the editable C4 model (`docs/architecture.dsl`) for the open repo
+/// (#142). Mirrors the `scaffold_c4_model` MCP tool and the browser-host
+/// `POST /api/scaffold_c4_model` route — all three call the same
+/// `c4_dsl::scaffold_c4_model` in core. Writes the generated Structurizr-DSL
+/// subset only when the file does not already exist (never clobbers user
+/// edits). Returns `{ path, created }`.
+#[tauri::command]
+fn scaffold_c4_model(state: State<'_, Arc<AppState>>) -> Result<c4_dsl::ScaffoldResult, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    let spring = SpringPlugin::new();
+    c4_dsl::scaffold_c4_model(repo, &spring).map_err(|e| e.to_string())
 }
 
 fn now_secs() -> u64 {
@@ -1408,6 +1427,7 @@ pub fn run() {
             walkthrough_request_more,
             set_walkthrough_step,
             self_demo,
+            scaffold_c4_model,
             end_walkthrough,
             speak,
             open_external,

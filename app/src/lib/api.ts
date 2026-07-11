@@ -510,6 +510,7 @@ export type DiagramKind =
   | 'inheritance-tree'
   | 'doc-graph'
   | 'c4-container'
+  | 'c4-model'
   | 'architecture-layers'
   | 'architecture-flow'
   | 'module-chord'
@@ -801,6 +802,22 @@ export interface SelfDemo {
 export async function selfDemo(persona?: string): Promise<SelfDemo> {
   if (!isTauriRuntime()) return post<SelfDemo>('/api/self_demo', persona ? { persona } : {});
   return invoke<SelfDemo>('self_demo', { persona });
+}
+
+/// Result of scaffolding the editable C4 model (#142): the absolute path of
+/// `docs/architecture.dsl` and whether this call created it. `created: false`
+/// means the file already existed and was left untouched (never clobbered).
+export interface ScaffoldResult {
+  path: string;
+  created: boolean;
+}
+
+/// Scaffold `docs/architecture.dsl` for the open repo (#142). Writes the
+/// generated Structurizr-DSL subset once; if the file already exists it is left
+/// untouched. Render the (editable) result with the `c4-model` diagram.
+export async function scaffoldC4Model(): Promise<ScaffoldResult> {
+  if (!isTauriRuntime()) return post<ScaffoldResult>('/api/scaffold_c4_model', {});
+  return invoke<ScaffoldResult>('scaffold_c4_model');
 }
 
 // ----- Artifacts -----------------------------------------------------------
