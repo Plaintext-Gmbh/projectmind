@@ -33,6 +33,7 @@
   import {
     cameraFlightTo,
     resolveTourTarget,
+    shouldRefetchTourBody,
     tweenPose,
     type CameraPose,
   } from '../lib/diagrams/cityTour';
@@ -40,6 +41,7 @@
     classes,
     fileView,
     followingMcp,
+    modules,
     repo,
     selectedClass,
     viewMode,
@@ -118,8 +120,13 @@
 
   /// Last cursor seen from the walkthrough store (null = no active tour).
   let tourCursor: WalkthroughCursor | null = null;
-  /// Tour body cache — fetched once per tour id, steps looked up locally.
+  /// Tour body cache — re-fetched when the tour id *or* the cursor nonce
+  /// changes (`shouldRefetchTourBody`), steps looked up locally.
   let tourBody: Walkthrough | null = null;
+  /// Cursor nonce the cached body was fetched under. A bumped nonce means
+  /// the body may have changed behind the same id (`walkthrough_append`,
+  /// step rewrite) — matching on id alone would keep flying the stale tour.
+  let tourBodyNonce = -1;
   /// Guards the async body fetch against out-of-order responses.
   let tourFetchSeq = 0;
   /// Resolved building of the active step (highlight + beacon + chip),
@@ -343,8 +350,10 @@
   // --- Tour waypoints (V4.6c) -------------------------------------------------
 
   /// Store subscription: every cursor move re-resolves the active step.
-  /// The body is fetched once per tour id; a stale response (tour switched
-  /// mid-fetch) is dropped via the sequence guard.
+  /// The body is re-fetched whenever the tour id or the cursor nonce moved
+  /// (`shouldRefetchTourBody` — the same nonce contract WalkthroughView
+  /// follows); a stale response (a newer cursor arrived mid-fetch) is
+  /// dropped via the sequence guard.
   const unsubscribeTour = walkthroughCursor.subscribe((cur) => {
     void onTourCursor(cur);
   });
@@ -352,16 +361,44 @@
   async function onTourCursor(cur: WalkthroughCursor | null) {
     tourCursor = cur;
     const seq = ++tourFetchSeq;
-    if (cur && (!tourBody || tourBody.id !== cur.id)) {
+    if (cur && shouldRefetchTourBody(cur, tourBody, tourBodyNonce)) {
       try {
         const body = await currentWalkthrough();
         if (seq !== tourFetchSeq) return; // superseded by a newer cursor
         tourBody = body;
+        tourBodyNonce = cur.nonce;
       } catch {
         tourBody = null; // no body → steps can't resolve; visuals clear below
       }
     }
     applyTour();
+  }
+
+  /// fqn → absolute source file, the ClassEntry join for
+  /// `resolveTourTarget`: `building.fqn` only knows the hottest class per
+  /// file (risk join) and knows nothing without git history — this index
+  /// resolves every parsed class via `module.root + class.file` instead.
+  /// Rebuilt lazily on store identity change (load() swaps the arrays
+  /// wholesale, so a reference check is a correct invalidation).
+  let classIndexCache: {
+    classesRef: ClassEntry[];
+    modulesRef: unknown;
+    map: Map<string, string>;
+  } | null = null;
+  function tourClassIndex(): Map<string, string> {
+    const cls = get(classes);
+    const mods = get(modules);
+    if (classIndexCache && classIndexCache.classesRef === cls && classIndexCache.modulesRef === mods) {
+      return classIndexCache.map;
+    }
+    const rootById = new Map(mods.map((m) => [m.id, m.root.replace(/\/+$/, '')]));
+    const map = new Map<string, string>();
+    for (const c of cls) {
+      const mroot = rootById.get(c.module);
+      if (mroot) map.set(c.fqn, `${mroot}/${c.file}`);
+    }
+    classIndexCache = { classesRef: cls, modulesRef: mods, map };
+    return map;
   }
 
   /// Resolve the active step onto a building and drive the visuals:
@@ -374,7 +411,9 @@
       tourCursor && tourBody && tourBody.id === tourCursor.id
         ? (tourBody.steps[tourCursor.step] ?? null)
         : null;
-    const hit = step ? resolveTourTarget(model, step.target, get(repo)?.root ?? null) : null;
+    const hit = step
+      ? resolveTourTarget(model, step.target, get(repo)?.root ?? null, tourClassIndex())
+      : null;
     const idx = hit ? model.buildings.findIndex((b) => b.id === hit.buildingId) : -1;
     setTourBuilding(idx);
     if (tourBuilding && !walkMode) startFlight(tourBuilding);

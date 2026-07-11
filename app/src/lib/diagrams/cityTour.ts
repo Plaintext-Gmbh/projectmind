@@ -12,7 +12,11 @@
 ///
 /// Mapping rules (see `resolveTourTarget`):
 /// - `class` / `risk` → the building whose `fqn` (the file's hottest class,
-///   from the risk join) equals the step's fqn.
+///   from the risk join) equals the step's fqn; on a miss the optional
+///   ClassEntry join (fqn → source file → building id) resolves the rest.
+///   The risk join only tags the *hottest* class per file and is entirely
+///   empty without git history — without the join fallback every other
+///   class would silently strand the camera.
 /// - `file` → the building whose repo-relative `id` equals the step path.
 ///   Step paths are absolute (the MCP schema wants them that way), building
 ///   ids are repo-relative — the repo root is stripped first, the exact
@@ -62,27 +66,49 @@ export function normalizeStepPath(path: string, repoRoot: string | null): string
   const slashed = path.replace(/\\/g, '/');
   if (repoRoot) {
     const root = repoRoot.replace(/\\/g, '/').replace(/\/+$/, '');
-    if (root && slashed.startsWith(root + '/')) {
+    if (root && foldDriveLetter(slashed).startsWith(foldDriveLetter(root) + '/')) {
       return slashed.slice(root.length + 1);
     }
   }
   return slashed.replace(/^\.\//, '');
 }
 
+/// Windows drive letters are case-insensitive (`c:\repo` and `C:\repo` are
+/// the same directory, and tools disagree on the casing they emit) — fold a
+/// leading drive letter to lower case so the root comparison above doesn't
+/// silently miss. Only the drive letter is folded: POSIX paths stay
+/// case-sensitive.
+function foldDriveLetter(p: string): string {
+  return /^[A-Za-z]:\//.test(p) ? p.charAt(0).toLowerCase() + p.slice(1) : p;
+}
+
 /// Map the active step's target onto a city building. Returns `null` for
 /// misses and for kinds without city geometry — the caller then holds the
 /// camera (stopover) instead of flying. See the module header for the
 /// per-kind rules.
+///
+/// `classIndex` (fqn → source file, any scale `normalizeStepPath` accepts)
+/// is the ClassEntry join: `building.fqn` comes exclusively from the risk
+/// join, which tags only the hottest class per file and yields nothing at
+/// all on repos without git history — the index resolves every parsed
+/// class via its file instead. The direct fqn match stays first so the
+/// exact building keeps winning when both know the class.
 export function resolveTourTarget(
   model: CityModel,
   target: WalkthroughTarget,
   repoRoot: string | null,
+  classIndex?: ReadonlyMap<string, string> | null,
 ): { buildingId: string } | null {
   switch (target.kind) {
     case 'class':
     case 'risk': {
       const hit = model.buildings.find((b) => b.fqn === target.fqn);
-      return hit ? { buildingId: hit.id } : null;
+      if (hit) return { buildingId: hit.id };
+      const file = classIndex?.get(target.fqn);
+      if (!file) return null;
+      const rel = normalizeStepPath(file, repoRoot);
+      const viaFile = model.buildings.find((b) => b.id === rel);
+      return viaFile ? { buildingId: viaFile.id } : null;
     }
     case 'file': {
       const rel = normalizeStepPath(target.path, repoRoot);
@@ -92,6 +118,23 @@ export function resolveTourTarget(
     default:
       return null;
   }
+}
+
+/// Fetch policy for the tour-body cache in `CodeCity.svelte`: refetch when
+/// the tour id changed (new tour), no body is cached (first cursor, or the
+/// previous fetch failed), or the cursor `nonce` moved. The store bumps the
+/// nonce on every applied intent precisely so views can re-fetch when
+/// `(id, step)` is unchanged but the body may not be —
+/// `walkthrough_append` / a step rewrite mid-tour. Matching on id alone
+/// (the old behaviour) served those a stale body: the city flew to the old
+/// step or, past the stale end, silently held the camera.
+export function shouldRefetchTourBody(
+  cursor: { id: string; nonce: number } | null,
+  cachedBody: { id: string } | null,
+  cachedNonce: number,
+): boolean {
+  if (!cursor) return false;
+  return !cachedBody || cachedBody.id !== cursor.id || cursor.nonce !== cachedNonce;
 }
 
 /// Destination pose for a flight to `building`: look at the building's

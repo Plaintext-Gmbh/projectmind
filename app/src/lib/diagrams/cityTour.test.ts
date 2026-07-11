@@ -9,6 +9,7 @@ import {
   cameraFlightTo,
   normalizeStepPath,
   resolveTourTarget,
+  shouldRefetchTourBody,
   smoothstep,
   TOUR_CAMERA_DEFAULTS,
   tweenPose,
@@ -126,6 +127,67 @@ describe('resolveTourTarget', () => {
     for (const t of targets) {
       expect(resolveTourTarget(model, t, ROOT)).toBeNull();
     }
+  });
+
+  // --- ClassEntry join fallback (R2 fix): the risk join only tags the
+  // hottest class per file (and nothing at all without git history) —
+  // the classIndex resolves every other class via its source file.
+  it('resolves a non-hottest class via the classIndex (fqn → file → building)', () => {
+    const idx = new Map([['app::App', `${ROOT}/app/src/App.svelte`]]);
+    const t: WalkthroughTarget = { kind: 'class', fqn: 'app::App' };
+    expect(resolveTourTarget(model, t, ROOT, idx)).toEqual({ buildingId: shed.id });
+  });
+
+  it('prefers the direct fqn match over the classIndex', () => {
+    // Index deliberately points the hottest class at the WRONG building —
+    // the direct building.fqn hit must keep winning.
+    const idx = new Map([['core::engine::Engine', `${ROOT}/app/src/App.svelte`]]);
+    const t: WalkthroughTarget = { kind: 'class', fqn: 'core::engine::Engine' };
+    expect(resolveTourTarget(model, t, ROOT, idx)).toEqual({ buildingId: tower.id });
+  });
+
+  it('still misses when the classIndex maps to a file outside the city', () => {
+    const idx = new Map([['app::Ghost', `${ROOT}/generated/Ghost.svelte`]]);
+    const t: WalkthroughTarget = { kind: 'class', fqn: 'app::Ghost' };
+    expect(resolveTourTarget(model, t, ROOT, idx)).toBeNull();
+  });
+
+  it('misses unknown fqns without an index exactly like before', () => {
+    const t: WalkthroughTarget = { kind: 'risk', fqn: 'app::App' };
+    expect(resolveTourTarget(model, t, ROOT, null)).toBeNull();
+  });
+
+  it('folds Windows drive-letter casing when stripping the root', () => {
+    const winModel: CityModel = {
+      ...model,
+      buildings: [building({ id: 'src/a.ts', x: 1, z: 1, w: 1, d: 1, h: 1 })],
+    };
+    const t: WalkthroughTarget = { kind: 'file', path: 'C:/repo/src/a.ts' };
+    expect(resolveTourTarget(winModel, t, 'c:/repo')).toEqual({ buildingId: 'src/a.ts' });
+  });
+});
+
+describe('shouldRefetchTourBody', () => {
+  const cursor = { id: 'tour-1', nonce: 3 };
+
+  it('never refetches without a cursor', () => {
+    expect(shouldRefetchTourBody(null, { id: 'tour-1' }, 3)).toBe(false);
+  });
+
+  it('fetches when nothing is cached (first cursor or failed fetch)', () => {
+    expect(shouldRefetchTourBody(cursor, null, -1)).toBe(true);
+  });
+
+  it('fetches when the tour id changed', () => {
+    expect(shouldRefetchTourBody(cursor, { id: 'tour-0' }, 3)).toBe(true);
+  });
+
+  it('fetches when the nonce moved behind the same id (append/rewrite)', () => {
+    expect(shouldRefetchTourBody(cursor, { id: 'tour-1' }, 2)).toBe(true);
+  });
+
+  it('keeps the cache when id and nonce both match', () => {
+    expect(shouldRefetchTourBody(cursor, { id: 'tour-1' }, 3)).toBe(false);
   });
 });
 
