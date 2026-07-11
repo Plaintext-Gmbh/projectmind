@@ -10,15 +10,19 @@
   /// `codeCityLayout.ts` — this component only maps the model onto
   /// InstancedMesh instances and wires orbit + picking.
   ///
-  /// Stage 2/3 of the #66 flythrough: orbit camera + click-drill, plus a
-  /// first-person walk mode (V4.6b) — PointerLockControls own the look,
+  /// Stage 3/3 of the #66 flythrough: orbit camera + click-drill (V4.6a),
+  /// a first-person walk mode (V4.6b) — PointerLockControls own the look,
   /// the pure `cityWalk.ts` owns movement/collision/terrain, and a
-  /// crosshair raycast reuses the exact same drill codepath as orbit.
-  /// Tour waypoints (V4.6c) come on top.
+  /// crosshair raycast reuses the exact same drill codepath as orbit —
+  /// plus tour waypoints (V4.6c): while a walkthrough runs, the active
+  /// step is mapped onto its building (pure `cityTour.ts`), the building
+  /// is highlighted, and the orbit camera flies to it. Deliberately no
+  /// view hijacking — the flight only happens while the city is the open
+  /// view; a step arriving while another view is up does nothing here.
   import { onDestroy, onMount } from 'svelte';
   import { get } from 'svelte/store';
-  import { codeCityData } from '../lib/api';
-  import type { ClassEntry } from '../lib/api';
+  import { codeCityData, currentWalkthrough } from '../lib/api';
+  import type { ClassEntry, Walkthrough } from '../lib/api';
   import {
     cameraFitFor,
     codeCityLayout,
@@ -26,7 +30,22 @@
     type CityModel,
   } from '../lib/diagrams/codeCityLayout';
   import { groundHeightAt, stepMovement, WALK_DEFAULTS } from '../lib/diagrams/cityWalk';
-  import { classes, fileView, followingMcp, repo, selectedClass, viewMode } from '../lib/store';
+  import {
+    cameraFlightTo,
+    resolveTourTarget,
+    tweenPose,
+    type CameraPose,
+  } from '../lib/diagrams/cityTour';
+  import {
+    classes,
+    fileView,
+    followingMcp,
+    repo,
+    selectedClass,
+    viewMode,
+    walkthroughCursor,
+    type WalkthroughCursor,
+  } from '../lib/store';
   import { t } from '../lib/i18n';
 
   let container: HTMLDivElement;
@@ -83,6 +102,33 @@
   /// red high-risk tower still reads red when freshly committed.
   const GLOW_MIX = 0.55;
 
+  // --- Tour waypoints (V4.6c) ------------------------------------------------
+  /// Cool accent the active tour step's building lerps towards — same
+  /// colour-lerp technique as the recency glow, but cold so the two reads
+  /// stay distinguishable. The mix is stronger than GLOW_MIX: the tour
+  /// target must pop even on a red high-risk tower.
+  const TOUR_COLOR = '#59c2ff';
+  const TOUR_MIX = 0.65;
+  /// Flight duration of the camera tween towards a step's building.
+  const FLIGHT_MS = 1200;
+
+  /// Last cursor seen from the walkthrough store (null = no active tour).
+  let tourCursor: WalkthroughCursor | null = null;
+  /// Tour body cache — fetched once per tour id, steps looked up locally.
+  let tourBody: Walkthrough | null = null;
+  /// Guards the async body fetch against out-of-order responses.
+  let tourFetchSeq = 0;
+  /// Resolved building of the active step (highlight + beacon + chip),
+  /// plus its instance index for the colour restore.
+  let tourBuilding: CityBuilding | null = null;
+  let tourIndex = -1;
+  /// In-progress camera flight (orbit mode only). `start` is set on the
+  /// first animation frame; any user interaction aborts the flight.
+  let flight: { from: CameraPose; to: CameraPose; start: number | null } | null = null;
+  /// Walk-mode beacon: a translucent light pillar over the target building
+  /// (flying the pointer-locked camera around would be disorienting).
+  let beacon: import('three').Mesh | null = null;
+
   async function mountCity() {
     loading = true;
     error = null;
@@ -110,6 +156,9 @@
       }
 
       buildScene(three, OrbitControls, model);
+      // A tour may already be running when the city opens — apply its
+      // active step now that model + scene exist (V4.6c).
+      applyTour();
       loading = false;
     } catch (err) {
       error = String(err);
@@ -198,6 +247,20 @@
     scene.add(buildingsMesh);
     disposables.push(buildingsMesh);
 
+    // Tour beacon (V4.6c): shares the unit cube, scaled per target into a
+    // translucent light pillar. Basic material — the beacon is light, not
+    // architecture, so it must not react to the sun.
+    const beaconMat = new T.MeshBasicMaterial({
+      color: TOUR_COLOR,
+      transparent: true,
+      opacity: 0.3,
+      depthWrite: false,
+    });
+    disposables.push(beaconMat);
+    beacon = new T.Mesh(box, beaconMat);
+    beacon.visible = false;
+    scene.add(beacon);
+
     raycaster = new T.Raycaster();
 
     resizeObserver = new ResizeObserver(() => {
@@ -214,12 +277,19 @@
     renderer.domElement.addEventListener('pointerdown', onPointerDown);
     renderer.domElement.addEventListener('pointerup', onPointerUp);
     renderer.domElement.addEventListener('pointerleave', onPointerLeave);
+    renderer.domElement.addEventListener('wheel', onWheel, { passive: true });
 
     // Continuous loop — damping needs per-frame control updates anyway;
-    // torn down via setAnimationLoop(null) in onDestroy.
+    // torn down via setAnimationLoop(null) in onDestroy. During a tour
+    // flight the tween writes the pose first; controls.update() is a
+    // no-op then (any user input cancels the flight before it applies).
     renderer.setAnimationLoop((time: number) => {
-      if (walkMode) stepWalkFrame(time);
-      else controls?.update();
+      if (walkMode) {
+        stepWalkFrame(time);
+      } else {
+        stepFlight(time);
+        controls?.update();
+      }
       if (renderer && scene && camera) renderer.render(scene, camera);
     });
   }
@@ -227,10 +297,124 @@
   /// Fly the orbit camera back to the establishing shot.
   export function resetCamera() {
     if (!camera || !controls || !model || walkMode) return;
+    flight = null; // user intent beats an in-progress tour flight
     const fit = cameraFitFor(model);
     camera.position.set(...fit.position);
     controls.target.set(...fit.target);
     controls.update();
+  }
+
+  // --- Tour waypoints (V4.6c) -------------------------------------------------
+
+  /// Store subscription: every cursor move re-resolves the active step.
+  /// The body is fetched once per tour id; a stale response (tour switched
+  /// mid-fetch) is dropped via the sequence guard.
+  const unsubscribeTour = walkthroughCursor.subscribe((cur) => {
+    void onTourCursor(cur);
+  });
+
+  async function onTourCursor(cur: WalkthroughCursor | null) {
+    tourCursor = cur;
+    const seq = ++tourFetchSeq;
+    if (cur && (!tourBody || tourBody.id !== cur.id)) {
+      try {
+        const body = await currentWalkthrough();
+        if (seq !== tourFetchSeq) return; // superseded by a newer cursor
+        tourBody = body;
+      } catch {
+        tourBody = null; // no body → steps can't resolve; visuals clear below
+      }
+    }
+    applyTour();
+  }
+
+  /// Resolve the active step onto a building and drive the visuals:
+  /// highlight (both modes), camera flight (orbit) or beacon (walk).
+  /// Steps without city geometry (diff/note/…) are stopovers — the camera
+  /// holds its position and no building is marked.
+  function applyTour() {
+    if (!model) return; // city still loading; mountCity re-applies
+    const step =
+      tourCursor && tourBody && tourBody.id === tourCursor.id
+        ? (tourBody.steps[tourCursor.step] ?? null)
+        : null;
+    const hit = step ? resolveTourTarget(model, step.target, get(repo)?.root ?? null) : null;
+    const idx = hit ? model.buildings.findIndex((b) => b.id === hit.buildingId) : -1;
+    setTourBuilding(idx);
+    if (tourBuilding && !walkMode) startFlight(tourBuilding);
+  }
+
+  /// Swap the highlighted building: restore the previous instance colour,
+  /// lerp the new one towards the tour accent (same technique as the glow).
+  /// The highlight persists until the next step replaces or clears it.
+  function setTourBuilding(idx: number) {
+    if (idx === tourIndex) {
+      tourBuilding = idx >= 0 ? (model?.buildings[idx] ?? null) : null;
+      updateBeacon();
+      return;
+    }
+    if (tourIndex >= 0) paintBuilding(tourIndex, false);
+    tourIndex = idx;
+    tourBuilding = idx >= 0 ? (model?.buildings[idx] ?? null) : null;
+    if (idx >= 0) paintBuilding(idx, true);
+    updateBeacon();
+  }
+
+  /// Recompute one instance colour from scratch (base risk colour + glow
+  /// lerp — mirrors buildScene), optionally lerped towards the tour accent.
+  function paintBuilding(i: number, highlighted: boolean) {
+    if (!three || !buildingsMesh || !model) return;
+    const b = model.buildings[i];
+    if (!b) return;
+    const color = new three.Color(b.color);
+    if (b.glow > 0) color.lerp(new three.Color(GLOW_COLOR), b.glow * GLOW_MIX);
+    if (highlighted) color.lerp(new three.Color(TOUR_COLOR), TOUR_MIX);
+    buildingsMesh.setColorAt(i, color);
+    if (buildingsMesh.instanceColor) buildingsMesh.instanceColor.needsUpdate = true;
+  }
+
+  /// Walk-mode beacon: a translucent pillar rising from the target's roof.
+  /// Orbit mode hides it — the flight + highlight already carry the read.
+  function updateBeacon() {
+    if (!beacon) return;
+    const b = tourBuilding;
+    if (!b || !walkMode) {
+      beacon.visible = false;
+      return;
+    }
+    const thickness = Math.max(Math.min(b.w, b.d) * 0.6, 0.6);
+    const pillar = 16;
+    beacon.scale.set(thickness, pillar, thickness);
+    beacon.position.set(b.x + b.w / 2, b.y + b.h + pillar / 2, b.z + b.d / 2);
+    beacon.visible = true;
+  }
+
+  /// Tween the orbit camera towards the building's waypoint pose. The
+  /// flight starts from wherever the camera currently is, so repeated
+  /// steps re-centre smoothly; any user input (drag/wheel/walk) aborts it.
+  function startFlight(b: CityBuilding) {
+    if (!camera || !controls || !model) return;
+    const from: CameraPose = {
+      position: camera.position.toArray() as [number, number, number],
+      target: controls.target.toArray() as [number, number, number],
+    };
+    flight = { from, to: cameraFlightTo(model, b, from), start: null };
+  }
+
+  /// One flight frame, driven by the shared animation loop (orbit branch).
+  function stepFlight(now: number) {
+    if (!flight || !camera || !controls) return;
+    if (flight.start === null) flight.start = now;
+    const t = (now - flight.start) / FLIGHT_MS;
+    const pose = tweenPose(flight.from, flight.to, t);
+    camera.position.set(...pose.position);
+    controls.target.set(...pose.target);
+    if (t >= 1) flight = null;
+  }
+
+  /// Wheel zoom is user intent — abort a running tour flight.
+  function onWheel() {
+    flight = null;
   }
 
   // --- First-person walk (V4.6b) ---------------------------------------------
@@ -266,6 +450,8 @@
     hover = null;
     walkTarget = null;
     walkMode = true;
+    flight = null; // walking takes over — no camera flights at street level
+    updateBeacon(); // …the beacon marks the tour target instead
     lastTick = 0;
     document.addEventListener('keydown', onWalkKeyDown);
     document.addEventListener('keyup', onWalkKeyUp);
@@ -299,6 +485,7 @@
       controls.enabled = true;
       controls.update();
     }
+    updateBeacon(); // beacon is walk-only; orbit shows highlight + flight
   }
 
   /// Pointer lock released (Esc or focus loss) → back to orbit.
@@ -407,6 +594,7 @@
   let downAt: { x: number; y: number } | null = null;
   function onPointerDown(e: PointerEvent) {
     if (walkMode) return; // walk clicks drill via onWalkMouseDown
+    flight = null; // any press (drag start) takes the camera back
     if (e.button === 0) downAt = { x: e.clientX, y: e.clientY };
   }
 
@@ -457,6 +645,10 @@
   });
 
   onDestroy(() => {
+    // Tour plumbing first: stop reacting to cursor moves, drop the flight.
+    unsubscribeTour();
+    tourFetchSeq++; // poison in-flight body fetches
+    flight = null;
     // A drill out of walk mode destroys this component while the pointer is
     // still locked — release it (and the key listeners) first.
     exitWalk();
@@ -468,6 +660,7 @@
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       renderer.domElement.removeEventListener('pointerup', onPointerUp);
       renderer.domElement.removeEventListener('pointerleave', onPointerLeave);
+      renderer.domElement.removeEventListener('wheel', onWheel);
       renderer.domElement.remove();
     }
     resizeObserver?.disconnect();
@@ -481,6 +674,7 @@
     controls = null;
     buildingsMesh = null;
     raycaster = null;
+    beacon = null;
     three = null;
   });
 </script>
@@ -516,6 +710,11 @@
     </span>
     {#if truncated}
       <span class="truncated" title={$t('diagram.codeCity.truncated')}>⚠ {$t('diagram.codeCity.truncated')}</span>
+    {/if}
+    {#if tourBuilding}
+      <span class="tour-chip" title={$t('diagram.codeCity.tourHint')}>
+        ▶ {$t('diagram.codeCity.tour')} · {tourBuilding.label}
+      </span>
     {/if}
     <span class="hint">{$t('diagram.drillHint')}</span>
   </div>
@@ -634,6 +833,18 @@
   .truncated {
     font-size: 11px;
     color: #f0b429;
+  }
+  /* --- Tour chip (V4.6c) — the accent matches TOUR_COLOR in the scene. --- */
+  .tour-chip {
+    font-size: 11px;
+    color: #59c2ff;
+    border: 1px solid color-mix(in srgb, #59c2ff 40%, transparent);
+    border-radius: 10px;
+    padding: 1px 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
   }
   .hint {
     margin-left: auto;

@@ -96,6 +96,8 @@
   "diagram.codeCity.legendGlow": "glow = commits < 7d",
   "diagram.codeCity.walk": "Walk",
   "diagram.codeCity.walkHud": "WASD move · mouse look · Shift run · Esc exit",
+  "diagram.codeCity.tour": "Tour",
+  "diagram.codeCity.tourHint": "Following the active tour step — in orbit the camera flies to its building, on foot a beacon marks it; drag to take over",
   "diagram.drillHint": "Click a node to drill into it",
   "diagram.colourBy": "colour by",
   "diagram.colourBy.structure": "Colour by node kind (default)",
