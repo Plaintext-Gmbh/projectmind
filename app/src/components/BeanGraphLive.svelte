@@ -104,6 +104,8 @@
   // (`.changed`, `.pulse`) the freshness halo wins the border while the
   // opacity dims (`.faded` / `.flow-visited`) still apply — a documented
   // choice: freshness is the top-most layer, fading still composes under it.
+  // Only the cinematics player is exclusive with the pulse (both directions —
+  // see the exclusivity matrix below).
   let pulseActive = false;
   let pulseLoading = false;
   let pulseError: string | null = null;
@@ -145,6 +147,24 @@
   /// Node ids painted `changed` at the previously shown step — the delta
   /// against the current step's cumulative set is what pulses ("newly touched").
   let cinePrevNodeIds = new Set<string>();
+
+  // --- Mode exclusivity matrix (who stops whom) --------------------------------
+  // Rows = the mode being STARTED; columns = what starting it stops first.
+  //
+  //                   diff/morph   flow    pulse   cinematics
+  //   applyDiff        (re-applies) stops   keeps   stops
+  //   toggleMorph(on)   —           stops   keeps   stops
+  //   startFlow         stops        —      keeps   stops
+  //   startPulse        keeps       keeps    —      stops
+  //   startCinematics   stops       stops   stops    —
+  //
+  // Rationale: diff/morph, flow and cinematics all own the same
+  // `changed`/`faded`/`pulse` paint (or fight over the stage), so they are
+  // pairwise exclusive. The activity pulse deliberately COEXISTS with
+  // diff/morph and with the flow (it only sets border props, defined last in
+  // the stylesheet — see the pulse state block above) but is exclusive with
+  // cinematics in BOTH directions: two competing timer loops, and the
+  // activity halo would overpaint the movie's `changed` accents.
   $: pulseHotCount = pulsePlan?.pulses.find((p) => p.intensity === 'hot')?.nodeIds.length ?? 0;
   $: pulseWarmCount = pulsePlan?.pulses.find((p) => p.intensity === 'warm')?.nodeIds.length ?? 0;
 
@@ -511,6 +531,12 @@
   // for FLOW_LOOP_PAUSE_MS, reset every flow class, and replay from wave 0.
   const FLOW_WAVE_MS = 450;
   const FLOW_LOOP_PAUSE_MS = 1000;
+  /// Marching-ants repaint interval: every styled frame forces a full canvas
+  /// redraw of the whole graph, so painting at display rate (~60 fps) is the
+  /// most expensive steady-state cost on CPU rendering (SwiftShader /
+  /// software WebViews). ~25 fps is visually indistinguishable for a
+  /// 12 px dash crawl and cuts that load by more than half.
+  const FLOW_PAINT_MS = 40;
   let flowPlan: FlowPlan | null = null;
   let flowWaveTimer: ReturnType<typeof setTimeout> | null = null;
   let flowRaf: ReturnType<typeof requestAnimationFrame> | null = null;
@@ -548,18 +574,24 @@
   }
 
   /// The rAF loop: scroll `line-dash-offset` on the active edges so the dashes
-  /// march. One batched `.style()` call per frame over the (small) active set.
-  /// The pattern repeats every 12 px (8+4), so wrapping the offset there keeps
-  /// the number bounded while staying visually continuous.
+  /// march. The pattern repeats every 12 px (8+4), so wrapping the offset there
+  /// keeps the number bounded while staying visually continuous. The loop still
+  /// rides rAF (pauses with the tab, stays vsync-aligned) but only issues the
+  /// batched `.style()` call when ≥ FLOW_PAINT_MS have accumulated since the
+  /// last paint — a time-accumulator throttle to ~25 fps (see FLOW_PAINT_MS).
   function startFlowRaf() {
     flowStart = performance.now();
+    let lastPaint = -FLOW_PAINT_MS; // first frame paints immediately
     const tick = () => {
       if (!cy || !flowActive) {
         flowRaf = null;
         return;
       }
       const elapsed = performance.now() - flowStart;
-      cy.edges('.flow-active').style('line-dash-offset', -(elapsed / 16) % 12);
+      if (elapsed - lastPaint >= FLOW_PAINT_MS) {
+        lastPaint = elapsed;
+        cy.edges('.flow-active').style('line-dash-offset', -(elapsed / 16) % 12);
+      }
       flowRaf = requestAnimationFrame(tick);
     };
     flowRaf = requestAnimationFrame(tick);
@@ -655,7 +687,8 @@
   /// (once — cached for the component's lifetime), joins it onto the graph and
   /// starts the heartbeat; turning it off stops the timers and strips every
   /// activity class back to the plain graph. Coexists with flow/diff/morph
-  /// (see the state block for the documented class-precedence choice).
+  /// (see the state block for the documented class-precedence choice) but is
+  /// mutually exclusive with the cinematics player (see the matrix above).
   async function togglePulse() {
     if (pulseActive) {
       stopPulse();
@@ -666,6 +699,11 @@
 
   async function startPulse() {
     if (!cy || !els) return;
+    // Pulse and cinematics are exclusive in both directions (startCinematics
+    // symmetrically stops the pulse): two competing timer loops, and the
+    // activity halo would overpaint the movie's `changed` accents. Flow and
+    // diff/morph deliberately keep running — see the exclusivity matrix.
+    if (cinematicsActive) stopCinematics();
     pulseActive = true;
     pulseError = null;
     if (!activityCache) {
@@ -1018,99 +1056,126 @@
 </script>
 
 <div class="bean-live-root">
+  <!-- Row 1 — the mode toolbar, in logical groups separated by dividers:
+       [view: zoom/fit/summary] | [since-ref overlays: diff + morph] |
+       [living layer: flow + pulse] | [film: cinematics toggle].
+       The cinematics PLAYER (play/pause + scrubber + step label) lives in its
+       own second row below (.cine-bar, only rendered while cinematics is
+       active), so the fully-stocked toolbar no longer overflows a narrow
+       viewer; flex-wrap keeps the extreme case orderly (groups wrap as units). -->
   <div class="toolbar">
-    <button type="button" on:click={() => zoomBy(1.25)} title={$t('diagram.zoomIn')}>＋</button>
-    <button type="button" on:click={() => zoomBy(0.8)} title={$t('diagram.zoomOut')}>－</button>
-    <button type="button" on:click={fit} title={$t('diagram.resetView')}>⌂</button>
-    <span class="summary">{nodeCount} · {edgeCount}</span>
+    <span class="group">
+      <button type="button" on:click={() => zoomBy(1.25)} title={$t('diagram.zoomIn')}>＋</button>
+      <button type="button" on:click={() => zoomBy(0.8)} title={$t('diagram.zoomOut')}>－</button>
+      <button type="button" on:click={fit} title={$t('diagram.resetView')}>⌂</button>
+      <span class="summary">{nodeCount} · {edgeCount}</span>
+    </span>
     {#if !empty && !embedded}
       <span class="divider"></span>
-      <label class="since-label" for="bean-diff-ref">{$t('diagram.beanGraphLive.since')}</label>
-      <input
-        id="bean-diff-ref"
-        class="since-input"
-        type="text"
-        bind:value={diffInput}
-        on:keydown={onDiffKey}
-        placeholder="HEAD~10"
-        title={$t('diagram.beanGraphLive.sinceTitle')}
-        aria-label={$t('diagram.beanGraphLive.sinceTitle')}
-      />
-      <button
-        type="button"
-        class="since-apply"
-        on:click={applyDiff}
-        disabled={diffLoading}
-        title={$t('diagram.beanGraphLive.applyDiff')}
-      >{diffLoading ? '…' : $t('diagram.beanGraphLive.applyDiff')}</button>
-      <!-- Morph toggle (V3.3): when on, the overlay arrives via the animated
-           transition instead of the static V3.2 diff paint. -->
-      <button
-        type="button"
-        class="morph-toggle"
-        class:active={overlayMode === 'morph'}
-        aria-pressed={morphRequested}
-        on:click={toggleMorph}
-        title={$t('diagram.beanGraphLive.morphTitle')}
-      >{$t('diagram.beanGraphLive.morph')}</button>
-      {#if diffRef}
+      <!-- Since-ref overlay group: the V3.2 diff and its animated V3.3 morph
+           cousin both paint changed/faded off one applied ref. -->
+      <span class="group">
+        <label class="since-label" for="bean-diff-ref">{$t('diagram.beanGraphLive.since')}</label>
+        <input
+          id="bean-diff-ref"
+          class="since-input"
+          type="text"
+          bind:value={diffInput}
+          on:keydown={onDiffKey}
+          placeholder="HEAD~10"
+          title={$t('diagram.beanGraphLive.sinceTitle')}
+          aria-label={$t('diagram.beanGraphLive.sinceTitle')}
+        />
         <button
           type="button"
-          class="since-clear"
-          on:click={() => { diffInput = ''; clearDiff(); }}
-          title={$t('diagram.beanGraphLive.clearDiff')}
-        >✕</button>
-        <span class="diff-summary">{$t('diagram.beanGraphLive.changedCount', { count: changedCount })}</span>
-      {/if}
-      {#if diffError}
-        <span class="diff-error" title={diffError}>⚠</span>
-      {/if}
+          class="since-apply"
+          on:click={applyDiff}
+          disabled={diffLoading}
+          title={$t('diagram.beanGraphLive.applyDiff')}
+        >{diffLoading ? '…' : $t('diagram.beanGraphLive.applyDiff')}</button>
+        <!-- Morph toggle (V3.3): when on, the overlay arrives via the animated
+             transition instead of the static V3.2 diff paint. -->
+        <button
+          type="button"
+          class="morph-toggle"
+          class:active={overlayMode === 'morph'}
+          aria-pressed={morphRequested}
+          on:click={toggleMorph}
+          title={$t('diagram.beanGraphLive.morphTitle')}
+        >{$t('diagram.beanGraphLive.morph')}</button>
+        {#if diffRef}
+          <button
+            type="button"
+            class="since-clear"
+            on:click={() => { diffInput = ''; clearDiff(); }}
+            title={$t('diagram.beanGraphLive.clearDiff')}
+          >✕</button>
+          <span class="diff-summary">{$t('diagram.beanGraphLive.changedCount', { count: changedCount })}</span>
+        {/if}
+        {#if diffError}
+          <span class="diff-error" title={diffError}>⚠</span>
+        {/if}
+      </span>
     {/if}
-    <!-- Flow toggle (V4.1): a simulated request wave. Visible even when
-         embedded (a tour step can play the flow), default off. Not a since-ref
-         overlay, so it lives beside the off/diff/morph controls. -->
     {#if !empty}
-      {#if embedded}<span class="divider"></span>{/if}
-      <button
-        type="button"
-        class="flow-toggle"
-        class:active={flowActive}
-        aria-pressed={flowActive}
-        on:click={toggleFlow}
-        title={$t('diagram.beanGraphLive.flowTitle')}
-      >{$t('diagram.beanGraphLive.flow')}</button>
-      <!-- Activity-pulse toggle (V4.2): the data-driven "living" layer. Like
-           the flow it is visible even embedded, default off; unlike the flow
-           it renders REAL commit_activity, so the tooltip says so. -->
-      <button
-        type="button"
-        class="pulse-toggle"
-        class:active={pulseActive}
-        aria-pressed={pulseActive}
-        on:click={togglePulse}
-        disabled={pulseLoading}
-        title={$t('diagram.beanGraphLive.pulseTitle')}
-      >{pulseLoading ? '…' : $t('diagram.beanGraphLive.pulse')}</button>
-      {#if pulseActive && pulsePlan}
-        <span class="pulse-summary">{$t('diagram.beanGraphLive.pulseSummary', { hot: pulseHotCount, warm: pulseWarmCount })}</span>
-      {/if}
-      {#if pulseError}
-        <span class="diff-error" title={pulseError}>⚠</span>
-      {/if}
-      <!-- Cinematics (V4.3): press play over the commit timeline. The toggle
-           reveals the player (play/pause + scrubber + step label); each step
-           paints the cumulative diff from the window start. Real commit data;
-           the tooltip carries the honest current-classes-only limitation. -->
-      <button
-        type="button"
-        class="cine-toggle"
-        class:active={cinematicsActive}
-        aria-pressed={cinematicsActive}
-        on:click={toggleCinematics}
-        disabled={cineLoading}
-        title={$t('diagram.beanGraphLive.cineTitle')}
-      >{cineLoading ? '…' : $t('diagram.beanGraphLive.cine')}</button>
-      {#if cinematicsActive && cineTimeline.length > 0}
+      <span class="divider"></span>
+      <!-- Living-layer group: flow (V4.1, simulated request wave) and activity
+           pulse (V4.2, REAL commit_activity — the tooltip says so). Both are
+           visible even when embedded (a tour step can play them), default off;
+           neither is a since-ref overlay, so they sit apart from diff/morph. -->
+      <span class="group">
+        <button
+          type="button"
+          class="flow-toggle"
+          class:active={flowActive}
+          aria-pressed={flowActive}
+          on:click={toggleFlow}
+          title={$t('diagram.beanGraphLive.flowTitle')}
+        >{$t('diagram.beanGraphLive.flow')}</button>
+        <button
+          type="button"
+          class="pulse-toggle"
+          class:active={pulseActive}
+          aria-pressed={pulseActive}
+          on:click={togglePulse}
+          disabled={pulseLoading}
+          title={$t('diagram.beanGraphLive.pulseTitle')}
+        >{pulseLoading ? '…' : $t('diagram.beanGraphLive.pulse')}</button>
+        {#if pulseActive && pulsePlan}
+          <span class="pulse-summary">{$t('diagram.beanGraphLive.pulseSummary', { hot: pulseHotCount, warm: pulseWarmCount })}</span>
+        {/if}
+        {#if pulseError}
+          <span class="diff-error" title={pulseError}>⚠</span>
+        {/if}
+      </span>
+      <span class="divider"></span>
+      <!-- Film group (V4.3): the cinematics toggle only — activating it opens
+           the dedicated player row below. Real commit data; the tooltip
+           carries the honest current-classes-only limitation. -->
+      <span class="group">
+        <button
+          type="button"
+          class="cine-toggle"
+          class:active={cinematicsActive}
+          aria-pressed={cinematicsActive}
+          on:click={toggleCinematics}
+          disabled={cineLoading}
+          title={$t('diagram.beanGraphLive.cineTitle')}
+        >{cineLoading ? '…' : $t('diagram.beanGraphLive.cine')}</button>
+        {#if cineError}
+          <span class="diff-error" title={cineError}>⚠</span>
+        {/if}
+      </span>
+    {/if}
+    <span class="hint">{$t('diagram.drillHint')}</span>
+  </div>
+  <!-- Row 2 — the cinematics player, only while cinematics is active. Moving
+       it out of the toolbar removes the widest block (play + scrubber + step
+       label) from row 1 AND lets the scrubber breathe: flex:1 instead of a
+       fixed 110px. -->
+  {#if cinematicsActive}
+    <div class="cine-bar">
+      {#if cineTimeline.length > 0}
         <button
           type="button"
           class="cine-play"
@@ -1134,15 +1199,11 @@
             total: cineTimeline.length,
             summary: cineTimeline[cineStep].summary,
           })}</span>
-      {:else if cinematicsActive && !cineLoading}
+      {:else if !cineLoading}
         <span class="cine-step">{$t('diagram.beanGraphLive.cineEmpty')}</span>
       {/if}
-      {#if cineError}
-        <span class="diff-error" title={cineError}>⚠</span>
-      {/if}
-    {/if}
-    <span class="hint">{$t('diagram.drillHint')}</span>
-  </div>
+    </div>
+  {/if}
   {#if loading}
     <div class="placeholder">{$t('diagram.rendering')}</div>
   {:else if error}
@@ -1165,10 +1226,17 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
+    /* Size the responsive @container query below off the viewer pane, not the
+       window — this component can sit in a narrow split while the window is
+       wide. */
+    container-type: inline-size;
   }
   .toolbar {
     display: flex;
     align-items: center;
+    /* Fallback for extreme widths: groups wrap as whole units instead of
+       individual controls squeezing/overflowing at random. */
+    flex-wrap: wrap;
     gap: 6px;
     padding: 6px 10px;
     background: var(--bg-1);
@@ -1176,7 +1244,15 @@
     flex-shrink: 0;
     font-size: 12px;
   }
-  .toolbar button {
+  /* One logical toolbar group (view / diff+morph / flow+pulse / cinematics):
+     keeps its controls on one line so flex-wrap breaks BETWEEN groups. */
+  .group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .toolbar button,
+  .cine-bar button {
     background: var(--bg-2);
     border: 1px solid var(--bg-3);
     color: var(--fg-0);
@@ -1185,7 +1261,8 @@
     height: 24px;
     cursor: pointer;
   }
-  .toolbar button:hover {
+  .toolbar button:hover,
+  .cine-bar button:hover {
     border-color: var(--accent-2);
   }
   .summary {
@@ -1279,13 +1356,28 @@
     opacity: 0.6;
     cursor: default;
   }
-  .toolbar button.cine-play {
+  /* The dedicated player row (row 2, visible only while cinematics is
+     active): same chrome as the toolbar, and the scrubber takes the freed
+     width. */
+  .cine-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--bg-3);
+    flex-shrink: 0;
+    font-size: 12px;
+  }
+  .cine-bar button.cine-play {
     width: auto;
     padding: 0 6px;
     font-size: 10px;
+    flex-shrink: 0;
   }
   .cine-slider {
-    width: 110px;
+    flex: 1;
+    min-width: 60px;
     height: 22px;
     margin: 0;
     accent-color: #d2a8ff;
@@ -1293,7 +1385,7 @@
   .cine-step {
     font-size: 11px;
     color: #d2a8ff;
-    max-width: 240px;
+    max-width: 45%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1310,6 +1402,13 @@
     margin-left: auto;
     font-size: 11px;
     color: var(--fg-2);
+  }
+  /* Narrow viewer pane: the drill hint is the most expendable item — drop it
+     before the mode groups have to wrap. */
+  @container (max-width: 900px) {
+    .hint {
+      display: none;
+    }
   }
   .stage {
     flex: 1;
