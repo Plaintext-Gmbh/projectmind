@@ -3,13 +3,7 @@
   import { riskAtlas, type RiskScore, type RiskWeights } from '../lib/api';
   import { classes, selectedClass, viewMode } from '../lib/store';
   import { get } from 'svelte/store';
-  import {
-    treemap,
-    tileValue as val,
-    colorForScore as colorFor,
-    shortName,
-    type TreemapRect,
-  } from '../lib/treemap';
+  import { treemap, tileValue as val, colorForScore as colorFor, shortName } from '../lib/treemap';
 
   // Cockpit 2.1 — Risk Atlas (Issue #157):
   //   Treemap (Fläche = SLOC, Farbe = Score) auf dem bereits gemergten risk_atlas-Backend.
@@ -34,8 +28,6 @@
   // Container-Pixelmasse (für das Treemap-Layout).
   let boxW = 0;
   let boxH = 0;
-
-  type Rect = TreemapRect;
 
   function loadWeights(): RiskWeights {
     try {

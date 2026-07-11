@@ -291,8 +291,6 @@
   $: scale = $viewport.scale;
   $: tx = $viewport.tx;
   $: ty = $viewport.ty;
-  $: baseW = $viewport.baseW;
-  $: baseH = $viewport.baseH;
 
   let dragging = false;
   let dragStartX = 0;
