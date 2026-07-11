@@ -2,6 +2,8 @@
   "nav.files": "Fichiers",
   "nav.home": "Accueil — Vue d'ensemble avec filtres effacés",
   "nav.diagrams": "Diagrammes",
+  "nav.demo": "Démo",
+  "nav.demoTitle": "Démo autonome — l'application présente le dépôt ouvert toute seule",
   "nav.walkthrough": "Visite",
   "nav.artifact": "Artefact",
   "nav.artifactTitle": "Ouvrir l'artefact généré par l'IA",

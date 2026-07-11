@@ -25,6 +25,7 @@ use projectmind_core::git::{self, ChangedFile};
 use projectmind_core::heartbeat;
 use projectmind_core::html::{self, HtmlFile, HtmlSnippet};
 use projectmind_core::state::{self, UiState, ViewIntent};
+use projectmind_core::tour_suggest::{self, Persona};
 use projectmind_core::walkthrough::{
     self as wt, FeedbackEvent, FeedbackKind, FeedbackLog, Walkthrough,
 };
@@ -933,11 +934,37 @@ fn set_walkthrough_step(id: String, step: u32) -> Result<(), String> {
     let prev = state::read().ok().flatten().unwrap_or_default();
     let payload = UiState {
         repo_root: prev.repo_root,
-        view: ViewIntent::Walkthrough { id, step },
+        view: ViewIntent::Walkthrough {
+            id,
+            step,
+            present: false,
+            autoplay: false,
+        },
         ..UiState::default()
     };
     state::write(payload).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// One-click self-demo (V5.3): rank the open repo, materialise a
+/// template-narrated tour, persist it, and point the viewers at step 0 in
+/// present + autoplay mode. Thin 1:1 mirror of the `self_demo` MCP tool and the
+/// browser-host `POST /api/self_demo` route — all three call the same
+/// `tour_suggest::self_demo` in core. Returns `{ walkthrough_id, total }`.
+#[tauri::command]
+fn self_demo(
+    top: Option<usize>,
+    persona: Option<String>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<tour_suggest::SelfDemo, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    let top = top.unwrap_or(5).max(1);
+    let persona = persona.as_deref().map_or(Persona::NewDev, Persona::parse);
+    let spring = SpringPlugin::new();
+    tour_suggest::self_demo(repo, &spring, top, persona).map_err(|e| e.to_string())
 }
 
 fn now_secs() -> u64 {
@@ -1380,6 +1407,7 @@ pub fn run() {
             walkthrough_ack,
             walkthrough_request_more,
             set_walkthrough_step,
+            self_demo,
             end_walkthrough,
             speak,
             open_external,

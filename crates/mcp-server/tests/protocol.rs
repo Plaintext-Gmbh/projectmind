@@ -108,6 +108,25 @@ fn tools_list_includes_open_repo() {
 }
 
 #[test]
+fn tools_list_includes_self_demo() {
+    let mut s = Server::spawn();
+    let resp = s.call(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#);
+    let tools = resp["result"]["tools"].as_array().unwrap();
+    let sd = tools
+        .iter()
+        .find(|t| t["name"] == "self_demo")
+        .expect("self_demo tool registered");
+    // Both knobs are optional and documented.
+    let props = &sd["inputSchema"]["properties"];
+    assert!(props.get("top").is_some(), "top documented");
+    assert!(props.get("persona").is_some(), "persona documented");
+    assert!(
+        sd["inputSchema"].get("required").is_none(),
+        "self_demo has no required args"
+    );
+}
+
+#[test]
 fn docs_for_class_returns_ranked_mentions() {
     let tmp = TempRepo::create_with_java_class();
     // One doc that links the source file, names the FQN and code-spans the

@@ -24,6 +24,7 @@ use projectmind_core::files::{self, MarkdownFile, MarkdownHit, ModuleFile};
 use projectmind_core::git::{self, ChangedFile};
 use projectmind_core::html::{self, HtmlFile, HtmlSnippet};
 use projectmind_core::state::{self, UiState, ViewIntent};
+use projectmind_core::tour_suggest::{self, Persona};
 use projectmind_core::walkthrough::{
     self as wt, FeedbackEvent, FeedbackKind, FeedbackLog, Walkthrough,
 };
@@ -684,10 +685,32 @@ fn route_api(
                 view: ViewIntent::Walkthrough {
                     id: args.id,
                     step: args.step,
+                    present: false,
+                    autoplay: false,
                 },
                 ..UiState::default()
             })?;
             Ok(json!({ "ok": true }))
+        }
+        ("POST", "/api/self_demo") => {
+            // One-click self-demo (V5.3): rank + materialise + persist a tour
+            // and open it in present + autoplay mode. Same `tour_suggest::
+            // self_demo` core path the `self_demo` MCP tool and Tauri command
+            // take, so every surface behaves identically.
+            let args: SelfDemoArgs = if body.is_empty() {
+                SelfDemoArgs::default()
+            } else {
+                serde_json::from_slice(body)?
+            };
+            let top = args.top.unwrap_or(5).max(1);
+            let persona = args
+                .persona
+                .as_deref()
+                .map_or(Persona::NewDev, Persona::parse);
+            let repo = repo(&guard)?;
+            let spring = SpringPlugin::new();
+            let outcome = tour_suggest::self_demo(repo, &spring, top, persona)?;
+            Ok(serde_json::to_value(outcome)?)
         }
         ("POST", "/api/end_walkthrough") => {
             wt::clear()?;
@@ -720,6 +743,16 @@ struct FeedbackArgs {
 struct StepArgs {
     id: String,
     step: u32,
+}
+
+/// Body of `POST /api/self_demo`. Both knobs are optional (empty body =
+/// defaults), mirroring the `self_demo` MCP tool + Tauri command.
+#[derive(Deserialize, Default)]
+struct SelfDemoArgs {
+    #[serde(default)]
+    top: Option<usize>,
+    #[serde(default)]
+    persona: Option<String>,
 }
 
 /// Body of `POST /api/add_annotation`. Mirrors the Tauri-side

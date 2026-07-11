@@ -2,6 +2,8 @@
   "nav.files": "Files",
   "nav.home": "Home — Overview with filters cleared",
   "nav.diagrams": "Diagrams",
+  "nav.demo": "Demo",
+  "nav.demoTitle": "Self-running demo — the app tours the open repo by itself",
   "nav.walkthrough": "Walk-through",
   "nav.artifact": "Artifact",
   "nav.artifactTitle": "Open the AI-generated artifact",

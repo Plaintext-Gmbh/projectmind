@@ -126,7 +126,7 @@ For Phase 1, all plugins are **statically registered** in `core::registry` via a
 
 ## MCP Tools
 
-39 tools as of v0.11 + unreleased — the full name/parameter reference lives in the
+40 tools as of v0.11 + unreleased — the full name/parameter reference lives in the
 [README tool table](../README.md); this section only maps them onto the
 architecture. Grouped by concern:
 
@@ -148,7 +148,10 @@ architecture. Grouped by concern:
 - **Walkthroughs & cockpit** — `walkthrough_start`, `walkthrough_append`,
   `walkthrough_set_step`, `walkthrough_clear`, `walkthrough_feedback`,
   `walkthrough_query` (semantic tour search), `tour_scaffold` (auto-narrated
-  tour skeleton), `risk_atlas`, `pattern_check`, `architect_briefing`
+  tour skeleton), `self_demo` (one-click self-demo: materialise a tour and open
+  it in present + autoplay via the `tour_suggest::self_demo` core path — same
+  code the `▶ Demo` button, the Tauri command and the browser host take),
+  `risk_atlas`, `pattern_check`, `architect_briefing`
 - **Docs & artifacts** — `list_html`, `list_html_snippets`, `docs_for_class`
   (ranked in-repo Markdown mentions of a class — the code↔doc bridge),
   `present_artifact`, `list_artifacts`
