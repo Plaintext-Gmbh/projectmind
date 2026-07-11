@@ -19,10 +19,27 @@
   /// is highlighted, and the orbit camera flies to it. Deliberately no
   /// view hijacking — the flight only happens while the city is the open
   /// view; a step arriving while another view is up does nothing here.
+  ///
+  /// V5 adds the city *time-lapse*: a 🎬 player row (1:1 the BeanGraphLive
+  /// cinematics pattern) that scrubs the shared commit timeline and grows
+  /// window-born buildings out of the ground (pure `cityTimelapse.ts` +
+  /// `commitTimeline.ts`).
+  ///
+  /// Mode exclusivity matrix (who stops whom — pattern: BeanGraphLive):
+  ///   - Lapse ⟂ Walk, BOTH directions: `enterWalk()` stops the lapse and
+  ///     `startLapse()` exits walk mode — `cityWalk.collides()` checks ALL
+  ///     buildings, so on foot you would run into invisible walls.
+  ///   - Lapse vs. tour: the tour cursor is external (MCP) and cannot be
+  ///     stopped from here, so while the lapse runs `applyTour()` keeps the
+  ///     colour highlight (instanceColor ⟂ instanceMatrix) but suppresses
+  ///     the camera flight; `startLapse()` also aborts an in-flight one and
+  ///     `stopLapse()` re-applies the tour, flight included.
+  ///   - `resetCamera` stays always allowed; orbiting the growing city
+  ///     during the lapse is the whole point.
   import { onDestroy, onMount } from 'svelte';
   import { get } from 'svelte/store';
-  import { codeCityData, currentWalkthrough } from '../lib/api';
-  import type { ClassEntry, Walkthrough } from '../lib/api';
+  import { codeCityData, commitActivity, currentWalkthrough, listChangesSince } from '../lib/api';
+  import type { ChangedFile, ClassEntry, CommitActivity, Walkthrough } from '../lib/api';
   import {
     cameraFitFor,
     codeCityLayout,
@@ -34,9 +51,19 @@
     cameraFlightTo,
     resolveTourTarget,
     shouldRefetchTourBody,
+    smoothstep,
     tweenPose,
     type CameraPose,
   } from '../lib/diagrams/cityTour';
+  import { buildCommitTimeline, stepRange } from '../lib/diagrams/commitTimeline';
+  import type { CinematicsRange, CinematicsStep } from '../lib/diagrams/commitTimeline';
+  import {
+    bornPaths,
+    growthTargets,
+    LAPSE_STEP_MS,
+    stepScales,
+    visibleBuildings,
+  } from '../lib/diagrams/cityTimelapse';
   import {
     classes,
     fileView,
@@ -140,6 +167,50 @@
   /// (flying the pointer-locked camera around would be disorienting).
   let beacon: import('three').Mesh | null = null;
 
+  // --- City time-lapse (V5) ---------------------------------------------------
+  // "The city rises before your eyes": the shared commit timeline
+  // (commitTimeline.ts) is scrubbed step by step, each step k fetching the
+  // CUMULATIVE diff `timeline[0].sha .. timeline[k].sha`. Buildings whose
+  // file that diff reports as added/renamed are "born in the window" and
+  // grow in (scale-Y tween) at the first step that lists them; every other
+  // building is base city, standing from step 0 (honest current-state
+  // semantics — see cityTimelapse.ts for the full model + limitations).
+  // State names mirror BeanGraphLive's `cine*` fields on purpose.
+  let lapseActive = false;
+  let lapseTimeline: CinematicsStep[] = [];
+  let lapseStep = 0;
+  let lapsePlaying = false;
+  let lapseLoading = false;
+  let lapseError: string | null = null;
+  /// Change-sets already fetched, keyed by the step's `to` SHA (`from` is
+  /// the constant timeline start). Kept for the component's lifetime so
+  /// replays and scrubbing are instant.
+  const lapseCache = new Map<string, ChangedFile[]>();
+  /// Last-request-wins guard for scrubbing: every shown step bumps this, and
+  /// a resolving fetch only paints when its ticket is still the newest.
+  let lapseSeq = 0;
+  let lapseTimer: ReturnType<typeof setTimeout> | null = null;
+  /// Building ids born anywhere in the window — `bornPaths` of the
+  /// full-window diff, fetched once on lapse start.
+  let windowBorn: ReadonlySet<string> = new Set<string>();
+  /// `commit_activity` payload, fetched once and kept (BeanGraphLive's
+  /// activityCache pattern) — timeline rebuilds are then free.
+  let activityCache: CommitActivity | null = null;
+  /// Per-instance growth scale, aligned with `model.buildings` by index
+  /// (the instanceId mapping picking/tours rely on is never reordered):
+  /// `scaleCur` advances linearly towards `scaleTgt` (0 hidden / 1 grown)
+  /// and is eased with smoothstep only at matrix-write time.
+  let scaleCur = new Float32Array(0);
+  let scaleTgt = new Float32Array(0);
+  /// Visible-building count of the last painted step, for the player chip.
+  let lapseVisibleCount = 0;
+  /// Growth-tween paint interval: instanceMatrix uploads are throttled to
+  /// ~25 fps with a time accumulator — the #213 pattern (FLOW_PAINT_MS in
+  /// BeanGraphLive); visually indistinguishable, halves the upload cost.
+  const LAPSE_PAINT_MS = 40;
+  /// Timestamp of the previous growth tick (0 = not primed yet).
+  let lapseLastTick = 0;
+
   /// Sentinel thrown by buildScene when three's renderer constructor fails
   /// despite the preflight (e.g. context-count exhaustion, driver blacklist)
   /// — mountCity maps it onto the placeholder instead of the raw error text.
@@ -163,6 +234,9 @@
       const data = await codeCityData();
       hasRisk = data.has_risk;
       model = codeCityLayout(data);
+      // Growth scales ride the model's building indices — full city on mount.
+      scaleCur = new Float32Array(model.buildings.length).fill(1);
+      scaleTgt = new Float32Array(model.buildings.length).fill(1);
       truncated = model.truncated;
       buildingCount = model.buildings.length;
       districtCount = model.districts.length;
@@ -327,6 +401,7 @@
     // flight the tween writes the pose first; controls.update() is a
     // no-op then (any user input cancels the flight before it applies).
     renderer.setAnimationLoop((time: number) => {
+      stepLapseFrame(time); // growth tween (V5) — settled = free, see below
       if (walkMode) {
         stepWalkFrame(time);
       } else {
@@ -416,7 +491,10 @@
       : null;
     const idx = hit ? model.buildings.findIndex((b) => b.id === hit.buildingId) : -1;
     setTourBuilding(idx);
-    if (tourBuilding && !walkMode) startFlight(tourBuilding);
+    // While the time-lapse runs the highlight still lands (colour is
+    // orthogonal to the growth matrices) but the camera stays with the
+    // user orbiting the growing city — no flight (V5 exclusivity matrix).
+    if (tourBuilding && !walkMode && !lapseActive) startFlight(tourBuilding);
   }
 
   /// Swap the highlighted building: restore the previous instance colour,
@@ -492,6 +570,228 @@
     flight = null;
   }
 
+  // --- City time-lapse (V5) ---------------------------------------------------
+  // Player plumbing is a 1:1 mirror of BeanGraphLive's cinematics (V4.3):
+  // recursive setTimeout that only re-arms AFTER a step's fetch+paint
+  // resolved, cache keyed by the `to` SHA, prefetch of k+1, and a sequence
+  // counter so wild scrubbing never paints an out-of-order frame.
+
+  async function toggleLapse() {
+    if (lapseActive) {
+      stopLapse();
+    } else {
+      await startLapse();
+    }
+  }
+
+  /// Start the time-lapse: leave walk mode (exclusivity — see the header
+  /// matrix), build the timeline from the (cached) activity payload, fetch
+  /// the full-window diff once to learn which buildings are window-born,
+  /// then show the baseline and start playing. Every await is followed by
+  /// an abort guard (the user may toggle off mid-fetch — keep the caches,
+  /// paint nothing), mirroring `startCinematics`.
+  async function startLapse() {
+    if (lapseActive || !model) return;
+    if (walkMode) exitWalk();
+    flight = null; // suppress a tour flight already in progress
+    lapseActive = true;
+    lapseError = null;
+    if (!activityCache) {
+      lapseLoading = true;
+      try {
+        activityCache = await commitActivity();
+      } catch (err) {
+        lapseError = String(err);
+        lapseActive = false;
+        return;
+      } finally {
+        lapseLoading = false;
+      }
+      if (!lapseActive || !model) return;
+    }
+    lapseTimeline = buildCommitTimeline(activityCache);
+    lapseStep = 0;
+    if (lapseTimeline.length === 0) {
+      // Honest empty state: no commits in the window (or no git repo) — the
+      // toggle stays pressed and the player row says why, nothing plays.
+      return;
+    }
+    // One full-window fetch up front: its born-set is the birth base set,
+    // and it doubles as the cache entry of the final step.
+    const windowRange = stepRange(lapseTimeline, lapseTimeline.length - 1);
+    if (!windowRange) return;
+    lapseLoading = true;
+    try {
+      windowBorn = bornPaths(await lapseChanges(windowRange));
+    } catch (err) {
+      lapseError = String(err);
+      lapseActive = false;
+      return;
+    } finally {
+      lapseLoading = false;
+    }
+    if (!lapseActive || !model) return;
+    await showLapseStep(0);
+    if (!lapseActive) return;
+    lapsePlaying = true;
+    scheduleLapseTick();
+  }
+
+  /// Stop the player: cancel the tick, invalidate any in-flight step fetch
+  /// (sequence bump) and set every growth target back to 1 — the full city
+  /// grows back through the same tween instead of snapping. The change-set
+  /// cache, the timeline and the activity payload stay for the next
+  /// activation. A suppressed tour gets its flight back.
+  function stopLapse() {
+    lapseActive = false;
+    lapsePlaying = false;
+    lapseSeq += 1;
+    if (lapseTimer !== null) {
+      clearTimeout(lapseTimer);
+      lapseTimer = null;
+    }
+    scaleTgt.fill(1);
+    applyTour();
+  }
+
+  /// Resolve a step's change set: baseline (`from === to`) is empty by
+  /// construction (no fetch), otherwise cache-or-fetch keyed by the `to` SHA.
+  async function lapseChanges(range: CinematicsRange): Promise<ChangedFile[]> {
+    if (range.from === range.to) return [];
+    const cached = lapseCache.get(range.to);
+    if (cached) return cached;
+    const changes = await listChangesSince(range.from, range.to);
+    lapseCache.set(range.to, changes);
+    return changes;
+  }
+
+  /// Warm the cache for step `k` without painting anything — fired after
+  /// each shown step so auto-play (and a forward scrub) usually hits the
+  /// cache. Best-effort: a failed prefetch is silent; the step itself will
+  /// retry and surface the error when actually shown.
+  function prefetchLapseStep(k: number) {
+    if (k >= lapseTimeline.length) return;
+    const range = stepRange(lapseTimeline, k);
+    if (!range || range.from === range.to || lapseCache.has(range.to)) return;
+    void listChangesSince(range.from, range.to)
+      .then((changes) => {
+        lapseCache.set(range.to, changes);
+      })
+      .catch(() => {
+        /* best-effort — see doc comment */
+      });
+  }
+
+  /// Show timeline step `k`: fetch (or hit the cache for) the cumulative
+  /// change set, derive the visible-building set and write the growth
+  /// targets — no matrix write here, the animation loop tweens towards the
+  /// targets. Guarded by the sequence counter so during scrubbing only the
+  /// latest request paints.
+  async function showLapseStep(k: number) {
+    if (!model || lapseTimeline.length === 0) return;
+    const clamped = Math.max(0, Math.min(k, lapseTimeline.length - 1));
+    lapseStep = clamped;
+    lapseError = null;
+    const range = stepRange(lapseTimeline, clamped);
+    if (!range) return;
+    const seq = ++lapseSeq;
+    try {
+      const changes = await lapseChanges(range);
+      if (seq !== lapseSeq || !lapseActive || !model) return;
+      const visible = visibleBuildings(model.buildings, windowBorn, bornPaths(changes));
+      lapseVisibleCount = visible.size;
+      growthTargets(model.buildings, visible, scaleTgt);
+      prefetchLapseStep(clamped + 1);
+    } catch (err) {
+      if (seq === lapseSeq) lapseError = String(err);
+    }
+  }
+
+  function toggleLapsePlay() {
+    if (lapsePlaying) {
+      pauseLapse();
+    } else {
+      void playLapse();
+    }
+  }
+
+  /// Resume (or restart) auto-play. Pressing play at the final frame rewinds
+  /// to the baseline first, so ▶ always yields a moving picture.
+  async function playLapse() {
+    if (!lapseActive || lapseTimeline.length === 0) return;
+    lapsePlaying = true;
+    if (lapseStep >= lapseTimeline.length - 1) {
+      await showLapseStep(0);
+      if (!lapseActive || !lapsePlaying) return;
+    }
+    scheduleLapseTick();
+  }
+
+  function pauseLapse() {
+    lapsePlaying = false;
+    if (lapseTimer !== null) {
+      clearTimeout(lapseTimer);
+      lapseTimer = null;
+    }
+  }
+
+  /// Arm the next auto-play tick. Each tick advances one step, awaits its
+  /// fetch+paint, and only then re-arms — reaching the final frame pauses
+  /// the player (the reel rests on "today"; ▶ replays from the baseline).
+  function scheduleLapseTick() {
+    if (lapseTimer !== null) clearTimeout(lapseTimer);
+    lapseTimer = setTimeout(async () => {
+      lapseTimer = null;
+      if (!lapseActive || !lapsePlaying) return;
+      if (lapseStep + 1 >= lapseTimeline.length) {
+        lapsePlaying = false;
+        return;
+      }
+      await showLapseStep(lapseStep + 1);
+      if (lapseActive && lapsePlaying) scheduleLapseTick();
+    }, LAPSE_STEP_MS);
+  }
+
+  /// Slider scrub: jump straight to the step. The sequence counter in
+  /// showLapseStep makes the latest scrub win over any in-flight older
+  /// fetch; a running auto-play simply continues from the scrubbed position.
+  function onLapseScrub(evt: Event) {
+    const value = Number((evt.currentTarget as HTMLInputElement).value);
+    if (Number.isFinite(value)) void showLapseStep(value);
+  }
+
+  /// One growth frame, driven by the shared animation loop: advance every
+  /// scale linearly towards its target (`stepScales`) and rewrite the
+  /// instance matrices with the smoothstep-eased scale — height AND ground
+  /// pivot, so buildings rise out of the plateau instead of inflating in
+  /// place. `s = 0` collapses the box to zero area, so the raycaster never
+  /// hovers/drills an invisible building. Runs independently of
+  /// `lapseActive` (stopLapse animates the city back to full). Throttled to
+  /// ~25 fps via time accumulator (#213 pattern) and — once every scale sits
+  /// on its target — completely free apart from one Float32Array scan.
+  function stepLapseFrame(now: number) {
+    if (!three || !buildingsMesh || !model) return;
+    if (lapseLastTick === 0) {
+      lapseLastTick = now; // prime the accumulator; dt from 0 would snap
+      return;
+    }
+    const dt = now - lapseLastTick;
+    if (dt < LAPSE_PAINT_MS) return;
+    lapseLastTick = now;
+    if (!stepScales(scaleCur, scaleTgt, dt)) return; // settled → no upload
+    // Simplest correct variant while animating: rewrite all instances (2000
+    // composes ≪ 1 ms; the ~25 fps throttle bounds the upload rate).
+    const matrix = new three.Matrix4();
+    for (let i = 0; i < model.buildings.length; i++) {
+      const b = model.buildings[i];
+      const s = smoothstep(scaleCur[i]);
+      matrix.makeScale(b.w, b.h * s, b.d);
+      matrix.setPosition(b.x + b.w / 2, b.y + (b.h * s) / 2, b.z + b.d / 2);
+      buildingsMesh.setMatrixAt(i, matrix);
+    }
+    buildingsMesh.instanceMatrix.needsUpdate = true;
+  }
+
   // --- First-person walk (V4.6b) ---------------------------------------------
 
   function toggleWalk() {
@@ -504,6 +804,10 @@
   /// gaze) and grab the pointer. Esc (= pointer-lock exit) leaves the mode.
   function enterWalk() {
     if (walkMode || !three || !camera || !controls || !renderer || !model || !PointerLock) return;
+    // Walk ⟂ lapse (V5 matrix): collision checks ALL buildings, so walking
+    // through the half-grown city would mean invisible walls. Stopping the
+    // lapse re-grows the city; entering it mid-growth is fine (honest).
+    if (lapseActive) stopLapse();
     savedOrbit = {
       pos: camera.position.toArray() as [number, number, number],
       target: controls.target.toArray() as [number, number, number],
@@ -720,7 +1024,15 @@
   });
 
   onDestroy(() => {
-    // Tour plumbing first: stop reacting to cursor moves, drop the flight.
+    // Lapse plumbing first (light stopLapse — no re-grow, no tour re-apply
+    // during teardown): kill the tick and poison in-flight step fetches.
+    lapsePlaying = false;
+    lapseSeq += 1;
+    if (lapseTimer !== null) {
+      clearTimeout(lapseTimer);
+      lapseTimer = null;
+    }
+    // Tour plumbing next: stop reacting to cursor moves, drop the flight.
     unsubscribeTour();
     tourFetchSeq++; // poison in-flight body fetches
     flight = null;
@@ -766,6 +1078,21 @@
       on:click={toggleWalk}
       title={$t('diagram.codeCity.walkHud')}
     >{$t('diagram.codeCity.walk')}</button>
+    <!-- Time-lapse toggle (V5): activating it opens the dedicated player
+         row below. Real commit data; the tooltip carries the honest
+         base-city / today's-buildings-only limitation. -->
+    <button
+      type="button"
+      class="lapse-toggle"
+      class:active={lapseActive}
+      aria-pressed={lapseActive}
+      disabled={loading || !!error || empty || webglUnavailable || lapseLoading}
+      on:click={toggleLapse}
+      title={$t('diagram.codeCity.lapseTitle')}
+    >{lapseLoading ? '…' : $t('diagram.codeCity.lapse')}</button>
+    {#if lapseError}
+      <span class="lapse-error" title={lapseError}>⚠</span>
+    {/if}
     <span class="summary">{buildingCount} · {districtCount}</span>
     <span class="divider"></span>
     <span class="legend">
@@ -793,6 +1120,45 @@
     {/if}
     <span class="hint">{$t('diagram.drillHint')}</span>
   </div>
+  <!-- Row 2 — the time-lapse player, only while the lapse is active
+       (markup + CSS pattern: BeanGraphLive's .cine-bar): play/pause, the
+       commit scrubber, the step label and the visible/total chip. -->
+  {#if lapseActive}
+    <div class="lapse-bar">
+      {#if lapseTimeline.length > 0}
+        <button
+          type="button"
+          class="lapse-play"
+          on:click={toggleLapsePlay}
+          title={lapsePlaying ? $t('diagram.codeCity.lapsePause') : $t('diagram.codeCity.lapsePlay')}
+          aria-label={lapsePlaying ? $t('diagram.codeCity.lapsePause') : $t('diagram.codeCity.lapsePlay')}
+        >{lapsePlaying ? '❚❚' : '▶'}</button>
+        <input
+          type="range"
+          class="lapse-slider"
+          min="0"
+          max={lapseTimeline.length - 1}
+          step="1"
+          value={lapseStep}
+          on:input={onLapseScrub}
+          aria-label={$t('diagram.codeCity.lapseSlider')}
+        />
+        <span class="lapse-step" title={lapseTimeline[lapseStep].summary}
+          >{$t('diagram.codeCity.lapseStep', {
+            step: lapseStep + 1,
+            total: lapseTimeline.length,
+            summary: lapseTimeline[lapseStep].summary,
+          })}</span>
+        <span class="lapse-count"
+          >{$t('diagram.codeCity.lapseCount', {
+            visible: lapseVisibleCount,
+            total: buildingCount,
+          })}</span>
+      {:else if !lapseLoading}
+        <span class="lapse-step">{$t('diagram.codeCity.lapseEmpty')}</span>
+      {/if}
+    </div>
+  {/if}
   {#if loading}
     <div class="placeholder">{$t('diagram.rendering')}</div>
   {:else if webglUnavailable}
@@ -870,18 +1236,74 @@
   .toolbar button:hover {
     border-color: var(--accent-2);
   }
-  .toolbar button.walk-toggle {
+  .toolbar button.walk-toggle,
+  .toolbar button.lapse-toggle {
     width: auto;
     padding: 0 8px;
     font-size: 11px;
   }
-  .toolbar button.walk-toggle.active {
+  .toolbar button.walk-toggle.active,
+  .toolbar button.lapse-toggle.active {
     border-color: var(--accent-2);
     color: var(--accent-2);
   }
-  .toolbar button.walk-toggle:disabled {
+  .toolbar button.walk-toggle:disabled,
+  .toolbar button.lapse-toggle:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+  .lapse-error {
+    color: var(--error);
+    cursor: help;
+  }
+  /* --- Time-lapse player row (V5) — the .cine-bar pattern from
+     BeanGraphLive; the accent matches GLOW_COLOR in the scene ("freshly
+     built" gold), keeping the growth read consistent. --- */
+  .lapse-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--bg-3);
+    flex-shrink: 0;
+    font-size: 12px;
+  }
+  .lapse-bar button.lapse-play {
+    background: var(--bg-2);
+    border: 1px solid var(--bg-3);
+    color: var(--fg-0);
+    border-radius: 4px;
+    width: auto;
+    height: 24px;
+    padding: 0 6px;
+    font-size: 10px;
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+  .lapse-bar button.lapse-play:hover {
+    border-color: var(--accent-2);
+  }
+  .lapse-slider {
+    flex: 1;
+    min-width: 60px;
+    height: 22px;
+    margin: 0;
+    accent-color: #ffd666;
+  }
+  .lapse-step {
+    font-size: 11px;
+    color: #ffd666;
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .lapse-count {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg-2);
+    white-space: nowrap;
   }
   .summary {
     font-family: var(--mono);
