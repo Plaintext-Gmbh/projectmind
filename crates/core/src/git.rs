@@ -327,27 +327,11 @@ pub fn file_recency(repo_root: &Path) -> Result<Vec<FileRecency>, GitError> {
         let author_name = author.name().map(str::to_string).filter(|s| !s.is_empty());
         let author_email = author.email().map(str::to_string).filter(|s| !s.is_empty());
 
-        let Ok(tree) = commit.tree() else { continue };
-        // Compare each parent against this commit's tree. For the root
-        // commit (no parent) we diff against an empty tree so every file
-        // gets an "added" delta.
-        let parent_trees: Vec<git2::Tree<'_>> =
-            commit.parents().filter_map(|p| p.tree().ok()).collect();
-
-        let touched = if parent_trees.is_empty() {
-            paths_in_diff(
-                repo.diff_tree_to_tree(None, Some(&tree), None)
-                    .ok()
-                    .as_ref(),
-            )
-        } else {
-            let mut paths: Vec<PathBuf> = Vec::new();
-            for parent in &parent_trees {
-                if let Ok(diff) = repo.diff_tree_to_tree(Some(parent), Some(&tree), None) {
-                    paths.extend(paths_in_diff(Some(&diff)));
-                }
-            }
-            paths
+        // First-parent diff; merge commits are skipped entirely (see
+        // `first_parent_touched_paths`) so the "last edit" stays the real
+        // authoring commit, never the merge that brought it in.
+        let Some(touched) = first_parent_touched_paths(&repo, &commit) else {
+            continue;
         };
 
         for path in touched {
@@ -399,8 +383,9 @@ pub struct CommitDrop {
 /// (within the window / cap) that touched a file attributed to it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleActivity {
-    /// Module identifier. Either a Maven `artifactId` / Cargo crate name
-    /// (when the file falls inside a discovered module root) or, as a
+    /// Module identifier. Either the module's manifest coordinate — Maven
+    /// `groupId:artifactId` / Cargo `name@version`, matching the engine's
+    /// `Module::id` so activity joins onto module-keyed data — or, as a
     /// fallback, the file's top-level directory (`.` for repo-root files).
     pub module: String,
     /// Commits that touched this module, newest-first. A single commit that
@@ -454,12 +439,16 @@ pub const ACTIVITY_MAX_MODULES: usize = 500;
 ///
 /// Walks HEAD backwards over the last [`ACTIVITY_WINDOW_SECS`] (capped at
 /// [`ACTIVITY_MAX_COMMITS`] visited commits). For each commit it diffs
-/// against its parent(s), attributes every touched file to a module, and
-/// records a [`CommitDrop`] on that module's band.
+/// against its first parent (merge commits are skipped — their changes are
+/// counted at the original commits, so a merge-PR workflow isn't doubled),
+/// attributes every touched file to a module, and records a [`CommitDrop`]
+/// on that module's band.
 ///
 /// Module attribution reuses the same discovery the engine uses when
 /// opening a repo: Maven modules (`pom.xml`) first, then Cargo crates
-/// (`Cargo.toml`). A file is attributed to the deepest discovered module
+/// (`Cargo.toml`). Module ids are the manifest coordinates (Maven
+/// `groupId:artifactId` / Cargo `name@version`), identical to the engine's
+/// `Module::id`. A file is attributed to the deepest discovered module
 /// whose root contains it; files outside any module (or in a repo with no
 /// build manifests) fall back to their top-level directory, with `.` for
 /// files sitting directly in the repo root.
@@ -525,23 +514,11 @@ pub fn commit_activity(repo_root: &Path) -> CommitActivity {
             .map(ToString::to_string)
             .unwrap_or_default();
 
-        let Ok(tree) = commit.tree() else { continue };
-        let parent_trees: Vec<git2::Tree<'_>> =
-            commit.parents().filter_map(|p| p.tree().ok()).collect();
-        let touched = if parent_trees.is_empty() {
-            paths_in_diff(
-                repo.diff_tree_to_tree(None, Some(&tree), None)
-                    .ok()
-                    .as_ref(),
-            )
-        } else {
-            let mut paths: Vec<PathBuf> = Vec::new();
-            for parent in &parent_trees {
-                if let Ok(diff) = repo.diff_tree_to_tree(Some(parent), Some(&tree), None) {
-                    paths.extend(paths_in_diff(Some(&diff)));
-                }
-            }
-            paths
+        // First-parent diff; merge commits are skipped entirely (see
+        // `first_parent_touched_paths`) so a merge-PR workflow doesn't
+        // count every change twice (branch commit + merge diff).
+        let Some(touched) = first_parent_touched_paths(&repo, &commit) else {
+            continue;
         };
 
         // Which modules did this commit touch? A commit that changes two
@@ -624,6 +601,13 @@ struct ModuleRoot {
 /// shows. `base` is the canonicalised repo root; each module root is
 /// reduced to a repo-relative prefix. Returns roots deepest-first; an empty
 /// vec means "attribute by top-level directory" (a manifest-less repo).
+///
+/// Module ids are the full manifest coordinates (`MavenModule::coordinate`
+/// / `CargoCrate::coordinate`) — exactly what the engine assigns to
+/// `Module::id` — so consumers joining activity onto module-keyed data
+/// (`tour_suggest`, the frontend activity pulse) match on equal ids. Bare
+/// `artifact_id` / crate `name` here silently killed those joins for Maven
+/// modules with a `groupId` and Cargo crates with a literal version.
 fn discover_module_roots(base: &Path) -> Vec<ModuleRoot> {
     let rel = |root: &Path| root.strip_prefix(base).unwrap_or(root).to_path_buf();
     let maven = crate::maven::discover(base);
@@ -632,7 +616,7 @@ fn discover_module_roots(base: &Path) -> Vec<ModuleRoot> {
             .into_iter()
             .map(|m| ModuleRoot {
                 rel_root: rel(&m.root),
-                id: m.artifact_id,
+                id: m.coordinate(),
             })
             .collect();
     }
@@ -640,7 +624,7 @@ fn discover_module_roots(base: &Path) -> Vec<ModuleRoot> {
         .into_iter()
         .map(|c| ModuleRoot {
             rel_root: rel(&c.root),
-            id: c.name,
+            id: c.coordinate(),
         })
         .collect()
 }
@@ -668,6 +652,26 @@ fn module_of(path: &Path, module_roots: &[ModuleRoot]) -> String {
         .map_or_else(|| ".".to_string(), ToString::to_string)
 }
 
+/// Paths touched by `commit`, diffed against its first parent (or against
+/// the empty tree for a root commit, so every file counts as added).
+///
+/// Merge commits return `None`: their branch-side changes are already
+/// counted at the original commits the revwalk visits anyway, so diffing a
+/// merge against its parents would double every activity metric on
+/// merge-PR workflows. Skipping them matches `git log`'s default of
+/// showing no patch for merges.
+fn first_parent_touched_paths(repo: &GitRepo, commit: &git2::Commit<'_>) -> Option<Vec<PathBuf>> {
+    if commit.parent_count() > 1 {
+        return None;
+    }
+    let tree = commit.tree().ok()?;
+    let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
+    let diff = repo
+        .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)
+        .ok()?;
+    Some(paths_in_diff(Some(&diff)))
+}
+
 /// Helper: collect paths from a diff. Returns an empty list when `diff` is
 /// `None` (let callers stay terse).
 fn paths_in_diff(diff: Option<&Diff<'_>>) -> Vec<PathBuf> {
@@ -681,8 +685,142 @@ fn paths_in_diff(diff: Option<&Diff<'_>>) -> Vec<PathBuf> {
     out
 }
 
+/// Test-only git fixtures shared with the sibling modules that walk history
+/// (`crate::risk` reuses the merge-history builder for its churn tests).
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::GitRepo;
+    use std::fs;
+    use std::path::Path;
+
+    pub(crate) fn init_repo(dir: &Path) -> GitRepo {
+        let repo = GitRepo::init(dir).unwrap();
+        // libgit2 requires user.name + user.email for commits.
+        let mut cfg = repo.config().unwrap();
+        cfg.set_str("user.name", "Test").unwrap();
+        cfg.set_str("user.email", "test@example.com").unwrap();
+        repo
+    }
+
+    pub(crate) fn commit_file(
+        repo: &GitRepo,
+        dir: &Path,
+        rel: &str,
+        content: &str,
+        msg: &str,
+        when: i64,
+    ) {
+        commit_file_as(
+            repo,
+            dir,
+            rel,
+            content,
+            msg,
+            when,
+            "Test",
+            "test@example.com",
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn commit_file_as(
+        repo: &GitRepo,
+        dir: &Path,
+        rel: &str,
+        content: &str,
+        msg: &str,
+        when: i64,
+        author_name: &str,
+        author_email: &str,
+    ) {
+        fs::write(dir.join(rel), content).unwrap();
+        let mut idx = repo.index().unwrap();
+        idx.add_path(Path::new(rel)).unwrap();
+        idx.write().unwrap();
+        let tree_id = idx.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig =
+            git2::Signature::new(author_name, author_email, &git2::Time::new(when, 0)).unwrap();
+        let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+        let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
+        repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &parents)
+            .unwrap();
+    }
+
+    /// Root tree = `base` plus a one-file subtree `dir_name/file_name`, so
+    /// the merge tests can synthesise side-branch commits without touching
+    /// the shared on-disk index.
+    fn tree_with_subdir_file<'r>(
+        repo: &'r GitRepo,
+        base: &git2::Tree<'_>,
+        dir_name: &str,
+        file_name: &str,
+        content: &str,
+    ) -> git2::Tree<'r> {
+        let blob = repo.blob(content.as_bytes()).unwrap();
+        let mut sub = repo.treebuilder(None).unwrap();
+        sub.insert(file_name, blob, 0o100_644).unwrap();
+        let sub_id = sub.write().unwrap();
+        let mut root = repo.treebuilder(Some(base)).unwrap();
+        root.insert(dir_name, sub_id, 0o040_000).unwrap();
+        let root_id = root.write().unwrap();
+        repo.find_tree(root_id).unwrap()
+    }
+
+    /// Build a merge-PR-style history on an initialised repo:
+    ///
+    /// ```text
+    /// A "base" (base.txt) ── B "feat work" (feat/x.rs) ── M "merge feature"
+    ///        └────────── C "main work" (main/y.rs) ──────────┘
+    /// ```
+    ///
+    /// `M` is a true two-parent merge (first parent `B`, second `C`) whose
+    /// tree contains both sides' files. Timestamps ascend `base_when` →
+    /// `base_when + 300`, so a TIME-sorted revwalk visits `M` first.
+    pub(crate) fn build_merge_history(repo: &GitRepo, dir: &Path, base_when: i64) {
+        commit_file(repo, dir, "base.txt", "1", "base", base_when);
+        fs::create_dir_all(dir.join("feat")).unwrap();
+        commit_file(repo, dir, "feat/x.rs", "1", "feat work", base_when + 100);
+
+        let b = repo.head().unwrap().peel_to_commit().unwrap();
+        let a = b.parent(0).unwrap();
+
+        // Side commit C: parented on A, touches main/y.rs only.
+        let sig_c = git2::Signature::new(
+            "Test",
+            "test@example.com",
+            &git2::Time::new(base_when + 200, 0),
+        )
+        .unwrap();
+        let tree_c = tree_with_subdir_file(repo, &a.tree().unwrap(), "main", "y.rs", "1");
+        let c_oid = repo
+            .commit(None, &sig_c, &sig_c, "main work", &tree_c, &[&a])
+            .unwrap();
+        let c = repo.find_commit(c_oid).unwrap();
+
+        // Merge M: union tree of B and C, parents (B, C).
+        let sig_m = git2::Signature::new(
+            "Test",
+            "test@example.com",
+            &git2::Time::new(base_when + 300, 0),
+        )
+        .unwrap();
+        let tree_m = tree_with_subdir_file(repo, &b.tree().unwrap(), "main", "y.rs", "1");
+        repo.commit(
+            Some("HEAD"),
+            &sig_m,
+            &sig_m,
+            "merge feature",
+            &tree_m,
+            &[&b, &c],
+        )
+        .unwrap();
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::test_support::{build_merge_history, commit_file, commit_file_as, init_repo};
     use super::*;
     use std::fs;
     use std::path::PathBuf;
@@ -708,53 +846,6 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
-    }
-
-    fn init_repo(dir: &Path) -> GitRepo {
-        let repo = GitRepo::init(dir).unwrap();
-        // libgit2 requires user.name + user.email for commits.
-        let mut cfg = repo.config().unwrap();
-        cfg.set_str("user.name", "Test").unwrap();
-        cfg.set_str("user.email", "test@example.com").unwrap();
-        repo
-    }
-
-    fn commit_file(repo: &GitRepo, dir: &Path, rel: &str, content: &str, msg: &str, when: i64) {
-        commit_file_as(
-            repo,
-            dir,
-            rel,
-            content,
-            msg,
-            when,
-            "Test",
-            "test@example.com",
-        );
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn commit_file_as(
-        repo: &GitRepo,
-        dir: &Path,
-        rel: &str,
-        content: &str,
-        msg: &str,
-        when: i64,
-        author_name: &str,
-        author_email: &str,
-    ) {
-        fs::write(dir.join(rel), content).unwrap();
-        let mut idx = repo.index().unwrap();
-        idx.add_path(Path::new(rel)).unwrap();
-        idx.write().unwrap();
-        let tree_id = idx.write_tree().unwrap();
-        let tree = repo.find_tree(tree_id).unwrap();
-        let sig =
-            git2::Signature::new(author_name, author_email, &git2::Time::new(when, 0)).unwrap();
-        let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
-        let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
-        repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &parents)
-            .unwrap();
     }
 
     #[test]
@@ -946,6 +1037,122 @@ mod tests {
             !modules.contains(&"old"),
             "ancient commit dropped by window"
         );
+    }
+
+    #[test]
+    fn commit_activity_skips_merge_commits() {
+        let tmp = TempDir::new();
+        let repo = init_repo(tmp.path());
+        let now = i64::try_from(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        )
+        .unwrap();
+        build_merge_history(&repo, tmp.path(), now - 400);
+
+        let out = commit_activity(tmp.path());
+        let by_module: HashMap<_, _> = out.modules.iter().map(|m| (m.module.clone(), m)).collect();
+
+        // Exactly one drop per module — the merge commit must not re-count
+        // the branch's changes (pre-fix: feat and main showed 2 drops each).
+        assert_eq!(by_module.get("feat").unwrap().commits.len(), 1);
+        assert_eq!(by_module.get("main").unwrap().commits.len(), 1);
+        assert_eq!(by_module.get(".").unwrap().commits.len(), 1);
+        assert_eq!(out.total_commits, 3);
+
+        // The merge itself never surfaces as a drop on any band.
+        for m in &out.modules {
+            assert!(
+                m.commits.iter().all(|c| c.summary != "merge feature"),
+                "merge commit leaked into module {}",
+                m.module
+            );
+        }
+    }
+
+    #[test]
+    fn file_recency_attributes_merged_files_to_their_real_commits() {
+        let tmp = TempDir::new();
+        let repo = init_repo(tmp.path());
+        let now = i64::try_from(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        )
+        .unwrap();
+        build_merge_history(&repo, tmp.path(), now - 400);
+
+        let result = file_recency(tmp.path()).unwrap();
+        let by_path: HashMap<_, _> = result.iter().map(|r| (r.path.clone(), r)).collect();
+
+        // The TIME-sorted walk sees the merge first; it must not claim the
+        // files the branch commits authored (pre-fix both showed "merge
+        // feature" as their last edit).
+        let x = by_path.get(&PathBuf::from("feat/x.rs")).expect("feat/x.rs");
+        assert_eq!(x.summary, "feat work");
+        let y = by_path.get(&PathBuf::from("main/y.rs")).expect("main/y.rs");
+        assert_eq!(y.summary, "main work");
+    }
+
+    #[test]
+    fn commit_activity_maven_module_ids_are_full_coordinates() {
+        // The id must be `MavenModule::coordinate()` (`groupId:artifactId`)
+        // — the same id the engine assigns to `Module::id` — or every
+        // module-keyed join (tour ranking, activity pulse) silently misses.
+        let tmp = TempDir::new();
+        let repo = init_repo(tmp.path());
+        fs::write(
+            tmp.path().join("pom.xml"),
+            "<project><groupId>com.acme</groupId><artifactId>demo</artifactId></project>",
+        )
+        .unwrap();
+        let now = i64::try_from(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        )
+        .unwrap();
+        commit_file(&repo, tmp.path(), "A.java", "class A {}", "init", now - 100);
+
+        let out = commit_activity(tmp.path());
+        let ids: Vec<&str> = out.modules.iter().map(|m| m.module.as_str()).collect();
+        assert_eq!(ids, vec!["com.acme:demo"]);
+    }
+
+    #[test]
+    fn commit_activity_cargo_module_ids_include_version() {
+        // Same for Cargo: `CargoCrate::coordinate()` is `name@version` when
+        // the manifest carries a literal version.
+        let tmp = TempDir::new();
+        let repo = init_repo(tmp.path());
+        fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let now = i64::try_from(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        )
+        .unwrap();
+        commit_file(
+            &repo,
+            tmp.path(),
+            "lib.rs",
+            "pub fn f() {}",
+            "init",
+            now - 100,
+        );
+
+        let out = commit_activity(tmp.path());
+        let ids: Vec<&str> = out.modules.iter().map(|m| m.module.as_str()).collect();
+        assert_eq!(ids, vec!["demo@0.1.0"]);
     }
 
     #[test]

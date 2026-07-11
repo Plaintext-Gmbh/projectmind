@@ -457,7 +457,7 @@ pub(crate) fn list() -> Value {
             },
             {
                 "name": "commit_activity",
-                "description": "Per-module commit activity over the last 24 months (timeline river, #63 concept 4). Groups commits by module (Maven artifactId / Cargo crate name, or top-level directory as fallback); each module lists its commit drops (age in seconds, sha, summary), newest-first. Modules sorted freshest-first. Capped at 5,000 commits walked. Answers 'when did module X go active/quiet'.",
+                "description": "Per-module commit activity over the last 24 months (timeline river, #63 concept 4). Groups commits by module (manifest coordinate: Maven groupId:artifactId / Cargo name@version, or top-level directory as fallback); each module lists its commit drops (age in seconds, sha, summary), newest-first. Modules sorted freshest-first. Capped at 5,000 commits walked. Answers 'when did module X go active/quiet'.",
                 "inputSchema": no_args_schema()
             },
             {

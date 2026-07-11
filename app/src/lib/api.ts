@@ -285,7 +285,9 @@ export interface CommitDrop {
 
 /// Commit activity for one module. Mirrors `git::ModuleActivity`.
 export interface ModuleActivity {
-  /// Module id (Maven artifactId / Cargo crate name, or top-level dir).
+  /// Module id — the manifest coordinate (Maven `groupId:artifactId` /
+  /// Cargo `name@version`), matching `BeanNode.module`, or a top-level
+  /// directory as fallback.
   module: string;
   /// Commits that touched this module, newest-first.
   commits: CommitDrop[];

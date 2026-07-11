@@ -153,7 +153,9 @@ pub struct BeanNode {
     pub id: String,
     /// Simple class name shown on the node.
     pub label: String,
-    /// Module id the class belongs to (Maven `groupId:artifactId` / Cargo crate).
+    /// Module id the class belongs to (Maven `groupId:artifactId` / Cargo
+    /// `name@version`). Same id `commit_activity` reports, so activity joins
+    /// onto graph nodes by equality.
     pub module: String,
     /// Primary stereotype (`service`, `rest-controller`, …) or `null` when the
     /// class has none. Matches the priority order the Mermaid `classDef` uses.

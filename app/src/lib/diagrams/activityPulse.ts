@@ -33,21 +33,19 @@
 /// warm, exactly 30 days old is cool. The limits are injectable (`buckets`
 /// param) so tests can pin the boundaries without faking 7-day timestamps.
 ///
-/// ## The join (and its trap)
+/// ## The join
 ///
-/// The two sides name modules differently:
-/// - `BeanNode.module` is `groupId:artifactId` for Maven (or the bare crate
-///   name for Cargo) — see `crates/core/src/diagram.rs` `BeanNode`.
-/// - `ModuleActivity.module` is the bare `artifactId` / crate name, or a
-///   top-level directory as fallback — see `crates/core/src/git.rs`
-///   `ModuleActivity`.
+/// Both sides carry the engine's module id — the manifest coordinate
+/// (Maven `groupId:artifactId` / Cargo `name@version`):
+/// - `BeanNode.module` — see `crates/core/src/diagram.rs` `BeanNode`.
+/// - `ModuleActivity.module` — see `crates/core/src/git.rs`
+///   `ModuleActivity` (`commit_activity` derives it from the same manifest
+///   discovery the engine uses).
 ///
-/// So the join is a **suffix match**: `beanModule.split(':').pop()` must
-/// equal the activity module id. For Cargo (no colon) that is the identity,
-/// for Maven it strips the groupId. A bean module with no matching activity
-/// entry simply gets no pulse — silent, never an error (e.g. the activity
-/// walker attributed the files to a top-level dir instead, or the module had
-/// no commits in the window).
+/// So the join is an **exact match** on the module id. A bean module with
+/// no matching activity entry simply gets no pulse — silent, never an error
+/// (e.g. the activity walker attributed the files to a top-level dir
+/// instead, or the module had no commits in the window).
 ///
 /// Kept dependency-free (no `cytoscape` import) so the plan stays a plain
 /// function — same pattern as `beanGraphFlow.ts` / `beanGraphMorph.ts`.
@@ -92,13 +90,6 @@ export interface ActivityPulsePlan {
   animate: boolean;
 }
 
-/// The bean side of the join: `groupId:artifactId` → `artifactId`; a bare
-/// crate name (no colon) passes through unchanged.
-function beanModuleSuffix(beanModule: string): string {
-  const parts = beanModule.split(':');
-  return parts[parts.length - 1];
-}
-
 /// Bucket one module by the age of its freshest commit. The backend sorts
 /// commits newest-first, but we take the minimum defensively so the plan
 /// never depends on that ordering. Empty commit lists are `cool`.
@@ -111,8 +102,9 @@ function bucketOf(secsAgoList: number[], buckets: PulseBuckets): PulseIntensity 
 }
 
 /// Build the activity-pulse plan: join every graph node against the repo's
-/// commit activity (suffix match, see module header) and group the matched
-/// nodes into `hot` / `warm` buckets by their module's freshest commit.
+/// commit activity (exact module-id match, see module header) and group the
+/// matched nodes into `hot` / `warm` buckets by their module's freshest
+/// commit.
 ///
 /// Pure: empty graph or empty/`no_git` activity → `{ pulses: [], animate:
 /// false }`, deterministic, never throws, does not mutate its inputs.
@@ -136,15 +128,14 @@ export function planActivityPulse(
   const warmModules = new Set<string>();
 
   for (const n of els.nodes) {
-    const suffix = beanModuleSuffix(n.data.module);
-    const intensity = intensityOf.get(suffix);
+    const intensity = intensityOf.get(n.data.module);
     // No activity entry (join miss) or a cool module → no pulse, silently.
     if (intensity === 'hot') {
       hotNodeIds.push(n.data.id);
-      hotModules.add(suffix);
+      hotModules.add(n.data.module);
     } else if (intensity === 'warm') {
       warmNodeIds.push(n.data.id);
-      warmModules.add(suffix);
+      warmModules.add(n.data.module);
     }
   }
 
