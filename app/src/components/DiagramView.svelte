@@ -6,6 +6,7 @@
   import {
     showDiagram,
     scaffoldC4Model,
+    mergeC4Model,
     fileRecency,
     commitActivity,
     listChangesSince,
@@ -89,6 +90,9 @@
   let c4ModelAbsent = false;
   let scaffolding = false;
   let scaffoldToast: string | null = null;
+  // c4-model round-trip (#142, V6.3): "Modell aktualisieren" merges new code
+  // structure into docs/architecture.dsl without touching user edits.
+  let merging = false;
 
   $: selectedDoc = docGraph?.nodes.find((n) => n.id === selectedDocId) ?? null;
   $: selectedOutgoing = selectedDocId
@@ -558,6 +562,34 @@
     }
   }
 
+  /// Merge new code structure into docs/architecture.dsl (#142, V6.3), then
+  /// re-render. Strictly additive — the architect's own edits, hand-added
+  /// elements and comments are never touched. The toast reports how many
+  /// elements were folded in, or "already up to date" when nothing changed.
+  async function mergeModel() {
+    merging = true;
+    error = null;
+    try {
+      const result = await mergeC4Model();
+      const added =
+        result.added_containers + result.added_components + result.added_relationships;
+      scaffoldToast =
+        added === 0
+          ? $t('diagram.c4Model.upToDate')
+          : $t('diagram.c4Model.merged', {
+              containers: result.added_containers,
+              components: result.added_components,
+              relationships: result.added_relationships,
+            });
+      setTimeout(() => (scaffoldToast = null), 5000);
+      await render(kind, folderLayout, docGraphLayout);
+    } catch (err) {
+      error = String(err);
+    } finally {
+      merging = false;
+    }
+  }
+
   /// Fit the freshly-rendered stage `<svg>` to the stage box at scale=1 so
   /// live zoom/pan then works off the viewport transform. Shared by every
   /// render path (mermaid + the hand-rolled SVG renderers).
@@ -977,6 +1009,19 @@
         on:click={() => (docGraphLayout = 'orphans')}
         title="Orphans layout"
       >O</button>
+    {:else if kind === 'c4-model' && !c4ModelAbsent}
+      <!-- c4-model round-trip (#142, V6.3): only shown once the model exists
+           (the empty-state offers "Scaffold" instead). Folds new code structure
+           into docs/architecture.dsl additively — the architect's edits stay. -->
+      <span class="divider"></span>
+      <button
+        class="c4-update"
+        on:click={mergeModel}
+        disabled={merging}
+        title={$t('diagram.c4Model.update.tooltip')}
+      >
+        {merging ? $t('diagram.c4Model.updating') : $t('diagram.c4Model.update')}
+      </button>
     {/if}
     <span class="zoom-readout">{Math.round(scale * 100)}%</span>
     {#if kind === 'doc-graph' && docGraph}
@@ -1190,6 +1235,19 @@
     color: var(--accent-2);
     border-color: var(--accent-2);
     background: color-mix(in srgb, var(--accent-2) 16%, var(--bg-2));
+  }
+
+  /* c4-model round-trip (#142): the "update model" toolbar action carries a
+     text label, so it overrides the fixed-square toolbar button sizing. */
+  .toolbar button.c4-update {
+    width: auto;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .toolbar button.c4-update:disabled {
+    opacity: 0.6;
+    cursor: default;
   }
 
   .divider {

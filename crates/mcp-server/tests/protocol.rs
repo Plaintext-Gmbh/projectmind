@@ -149,6 +149,32 @@ fn tools_list_includes_scaffold_c4_model() {
 }
 
 #[test]
+fn tools_list_includes_merge_c4_model() {
+    let mut s = Server::spawn();
+    let resp = s.call(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#);
+    let tools = resp["result"]["tools"].as_array().unwrap();
+    let tool = tools
+        .iter()
+        .find(|t| t["name"] == "merge_c4_model")
+        .expect("merge_c4_model tool registered");
+    // No-argument tool: the schema declares no required fields.
+    assert!(
+        tool["inputSchema"].get("required").is_none(),
+        "merge_c4_model has no required args"
+    );
+    // Its description must call out the additive, edit-preserving contract (#142).
+    let descr = tool["description"].as_str().unwrap();
+    assert!(
+        descr.contains("ADDITIVE"),
+        "additive contract documented: {descr}"
+    );
+    assert!(
+        descr.contains("preserv"),
+        "edit-preservation documented: {descr}"
+    );
+}
+
+#[test]
 fn docs_for_class_returns_ranked_mentions() {
     let tmp = TempRepo::create_with_java_class();
     // One doc that links the source file, names the FQN and code-spans the

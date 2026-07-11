@@ -405,6 +405,14 @@ fn scaffold_c4_model_schema() -> Value {
     })
 }
 
+/// JSON Schema for the `merge_c4_model` tool — no arguments.
+fn merge_c4_model_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {}
+    })
+}
+
 fn tour_scaffold_schema() -> Value {
     json!({
         "type": "object",
@@ -646,8 +654,13 @@ pub(crate) fn list() -> Value {
             },
             {
                 "name": "scaffold_c4_model",
-                "description": "Scaffold an EDITABLE C4 model (#142) — write `docs/architecture.dsl` (a Structurizr-DSL subset) into the open repo so an architect can hand-edit the architecture in Git, JVM-free. Generated once from the same data as the `c4-container` diagram (modules -> containers, cross-module relations -> relationships, a `developer` person on the busiest module). CRITICAL: this NEVER clobbers an existing file — if `docs/architecture.dsl` is already present it is left untouched and `created:false` is returned; the user owns the file after the first scaffold. Render the (possibly edited) model with the `c4-model` diagram via `view_diagram`/`show_diagram`. There is deliberately no semantic merge of regenerated structure with edits (a follow-up); to regenerate from scratch, delete the file and scaffold again. Returns `{ path, created }`. Use when the user says `scaffold the C4 model` / `make the architecture editable` / `create docs/architecture.dsl`.",
+                "description": "Scaffold an EDITABLE C4 model (#142) — write `docs/architecture.dsl` (a Structurizr-DSL subset) into the open repo so an architect can hand-edit the architecture in Git, JVM-free. Generated once from the same data as the `c4-container` diagram (modules -> containers, cross-module relations -> relationships, a `developer` person on the busiest module). CRITICAL: this NEVER clobbers an existing file — if `docs/architecture.dsl` is already present it is left untouched and `created:false` is returned; the user owns the file after the first scaffold. Render the (possibly edited) model with the `c4-model` diagram via `view_diagram`/`show_diagram`. To pull NEW code structure into an existing model without losing your edits, use `merge_c4_model` instead. Returns `{ path, created }`. Use when the user says `scaffold the C4 model` / `make the architecture editable` / `create docs/architecture.dsl`.",
                 "inputSchema": scaffold_c4_model_schema()
+            },
+            {
+                "name": "merge_c4_model",
+                "description": "Round-trip the EDITABLE C4 model (#142) — fold NEW code structure into `docs/architecture.dsl` while preserving every edit you made. This closes the round-trip gap of `scaffold_c4_model` (which only writes the file once): as the code grows new modules / classes / cross-module relations, call this to ADD them to your model. STRICTLY ADDITIVE: it only inserts elements the code has but the DSL lacks — new `container`s (modules), new `component`s (top classes), new cross-module `relationship`s. It NEVER deletes or changes anything already in the file: descriptions you rewrote, external `softwareSystem`s / extra `person` actors / custom relationships you added by hand, and all comments survive byte-for-byte (elements the code dropped are also kept — prune those yourself). Identity is the DSL `id` (stable module-prefixed ids). If `docs/architecture.dsl` does not exist yet it is scaffolded fresh (like `scaffold_c4_model`). Returns `{ path, created, added_containers, added_components, added_relationships }`; all `added_*` are 0 when the model already covers the code (`already up to date`). Use when the user says `update the C4 model` / `pull new modules into architecture.dsl` / `merge the architecture` / `refresh the C4 model but keep my edits`.",
+                "inputSchema": merge_c4_model_schema()
             },
             {
                 "name": "open_browser_repo",
@@ -715,6 +728,7 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "tour_scaffold" => tour_scaffold(state, parsed.arguments).await,
         "self_demo" => self_demo(state, parsed.arguments).await,
         "scaffold_c4_model" => scaffold_c4_model(state).await,
+        "merge_c4_model" => merge_c4_model(state).await,
         "open_browser_repo" => open_browser_repo(state, parsed.arguments).await,
         "browser_status" => browser_status(),
         "stop_browser" => stop_browser(),
@@ -2022,6 +2036,28 @@ async fn scaffold_c4_model(state: &Mutex<ServerState>) -> DispatchResult {
             "ok": true,
             "path": outcome.path,
             "created": outcome.created,
+        }))
+        .unwrap_or_else(|_| "{}".into());
+        Ok(text_result(body))
+    })
+}
+
+/// Merge new code structure into `docs/architecture.dsl` (#142) — additive,
+/// preserving user edits and comments. Same `c4_dsl::merge_c4_model` core path
+/// the Tauri command and browser-host route take.
+async fn merge_c4_model(state: &Mutex<ServerState>) -> DispatchResult {
+    let state = state.lock().await;
+    with_repo(&state, |repo| {
+        let spring = SpringPlugin::new();
+        let outcome = c4_dsl::merge_c4_model(repo, &spring)
+            .map_err(|e| DispatchError::internal(format!("merge_c4_model: {e}")))?;
+        let body = serde_json::to_string_pretty(&json!({
+            "ok": true,
+            "path": outcome.path,
+            "created": outcome.created,
+            "added_containers": outcome.added_containers,
+            "added_components": outcome.added_components,
+            "added_relationships": outcome.added_relationships,
         }))
         .unwrap_or_else(|_| "{}".into());
         Ok(text_result(body))
