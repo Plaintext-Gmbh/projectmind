@@ -138,7 +138,10 @@ architecture. Grouped by concern:
 - **Diagrams** — `show_diagram` (returns Mermaid/JSON payloads to the client),
   `view_diagram` (pushes a diagram into the open viewers; live/3D kinds such
   as `bean-graph-live`, `timeline-river`, `code-city` render from their own
-  endpoints)
+  endpoints; the code city's time-lapse player (V5) replays the same
+  `commit_activity` + cumulative `list_changes_since` data frontend-only —
+  buildings first added within the activity window grow in step by step,
+  everything older stands as the base city)
 - **Viewer pushes (statefile intents)** — `view_class`, `view_file`,
   `view_diff`, `start_gui`
 - **Browser host** — `open_browser_repo`, `browser_status`, `stop_browser`
