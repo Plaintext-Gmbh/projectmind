@@ -42,6 +42,8 @@ export interface PresenterState {
   scale: Scale;
   /** Whether the TTS narrator is enabled. */
   narrator: boolean;
+  /** Whether autoplay (self-running demo) is advancing the deck. */
+  autoplay: boolean;
   /** Which overlays are currently shown. */
   overlays: Set<Overlay>;
 }
@@ -54,6 +56,7 @@ export function initPresenter(total: number, step = 0): PresenterState {
     total: Math.max(0, total),
     scale: DEFAULT_SCALE,
     narrator: false,
+    autoplay: false,
     overlays: new Set(),
   };
 }
@@ -116,6 +119,9 @@ export type PresenterAction =
   | { type: 'next' }
   | { type: 'prev' }
   | { type: 'toggleNarrator' }
+  | { type: 'toggleAutoplay' }
+  | { type: 'stopAutoplay' }
+  | { type: 'autoAdvance' }
   | { type: 'toggleOverlay'; overlay: Overlay }
   | { type: 'cycleScale' }
   | { type: 'cycleScaleDown' }
@@ -137,6 +143,9 @@ export function keyToAction(key: string): PresenterAction | null {
     case 'n':
     case 'N':
       return { type: 'toggleNarrator' };
+    case 'a':
+    case 'A':
+      return { type: 'toggleAutoplay' };
     case 'r':
     case 'R':
       return { type: 'toggleOverlay', overlay: 'risk' };
@@ -169,14 +178,30 @@ export function reduce(state: PresenterState, action: PresenterAction): Presente
       return { ...state, active: true };
     case 'exit':
       // Leaving the deck also clears transient overlays so re-entering starts
-      // clean; the scale/narrator preference persists.
-      return { ...state, active: false, overlays: new Set() };
+      // clean; the scale/narrator preference persists. Autoplay never
+      // survives an exit — a demo must not keep running behind a closed deck.
+      return { ...state, active: false, autoplay: false, overlays: new Set() };
     case 'next':
       return { ...state, step: clampStep(state.step + 1, state.total) };
     case 'prev':
       return { ...state, step: clampStep(state.step - 1, state.total) };
     case 'toggleNarrator':
       return { ...state, narrator: !state.narrator };
+    case 'toggleAutoplay':
+      // Turning the demo on also turns the narrator on (a self-running demo
+      // that stays mute defeats its purpose); turning it off leaves the
+      // narrator preference untouched.
+      return state.autoplay
+        ? { ...state, autoplay: false }
+        : { ...state, autoplay: true, narrator: true };
+    case 'stopAutoplay':
+      return state.autoplay ? { ...state, autoplay: false } : state;
+    case 'autoAdvance':
+      // The autoplay tick: advance one step; on the last step the demo ends
+      // instead of looping (an unattended kiosk loop can come later).
+      return isLastStep(state)
+        ? { ...state, autoplay: false }
+        : { ...state, step: clampStep(state.step + 1, state.total) };
     case 'toggleOverlay': {
       const overlays = new Set(state.overlays);
       if (overlays.has(action.overlay)) overlays.delete(action.overlay);
@@ -198,4 +223,21 @@ export function reduce(state: PresenterState, action: PresenterAction): Presente
     default:
       return state;
   }
+}
+
+/** Bounds for {@link autoplayDelayMs} (exported for the unit tests). */
+export const AUTOPLAY_MIN_MS = 4000;
+export const AUTOPLAY_MAX_MS = 30000;
+
+/**
+ * How long the autoplay dwells on a step before advancing. The OS/Web
+ * synthesisers give us no reliable "finished" signal on every runtime, so the
+ * cadence is derived from the narration length instead: a base pause plus
+ * ~2.6 words/second of reading time, clamped so an empty note still shows
+ * briefly and a wall of text cannot stall the demo.
+ */
+export function autoplayDelayMs(narration: string): number {
+  const words = narration.trim().split(/\s+/).filter(Boolean).length;
+  const ms = 3000 + words * 380;
+  return Math.min(AUTOPLAY_MAX_MS, Math.max(AUTOPLAY_MIN_MS, ms));
 }
