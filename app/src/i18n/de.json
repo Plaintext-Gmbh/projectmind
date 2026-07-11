@@ -96,6 +96,8 @@
   "diagram.codeCity.legendGlow": "Glühen = Commits < 7d",
   "diagram.codeCity.walk": "Begehen",
   "diagram.codeCity.walkHud": "WASD bewegen · Maus umsehen · Shift rennen · Esc beendet",
+  "diagram.codeCity.tour": "Tour",
+  "diagram.codeCity.tourHint": "Folgt dem aktiven Tour-Schritt — im Orbit fliegt die Kamera zum Gebäude, zu Fuß markiert es ein Leuchtfeuer; Ziehen übernimmt",
   "diagram.drillHint": "Klicke auf einen Knoten, um hineinzuspringen",
   "diagram.colourBy": "einfärben nach",
   "diagram.colourBy.structure": "Nach Knotenart einfärben (Standard)",

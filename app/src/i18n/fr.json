@@ -96,6 +96,8 @@
   "diagram.codeCity.legendGlow": "lueur = commits < 7j",
   "diagram.codeCity.walk": "Marcher",
   "diagram.codeCity.walkHud": "WASD se déplacer · souris regarder · Maj courir · Échap quitter",
+  "diagram.codeCity.tour": "Visite",
+  "diagram.codeCity.tourHint": "Suit l'étape active de la visite — en orbite la caméra vole vers son bâtiment, à pied une balise le signale ; glisser pour reprendre la main",
   "diagram.drillHint": "Cliquez sur un noeud pour explorer",
   "diagram.colourBy": "colorer par",
   "diagram.colourBy.structure": "Colorer par type de noeud (par défaut)",
