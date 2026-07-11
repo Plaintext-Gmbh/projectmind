@@ -12,6 +12,9 @@
 //! 1. [`generate_c4_dsl`] emits a Structurizr-DSL subset from the same data as
 //!    [`crate::diagram::render_c4_container`] (modules → containers, cross-module
 //!    relations → relationships, a `developer` person on the busiest module).
+//!    Each container also lists the module's **top-3 components** — its most
+//!    important classes — so the model carries the C4 component level too (see
+//!    [`generate_c4_dsl`] for the importance heuristic and the deliberate cap).
 //! 2. [`scaffold_c4_model`] writes that DSL to `docs/architecture.dsl` **once**
 //!    — it never clobbers an existing file, so after the first scaffold the file
 //!    is owned by the user and versioned in Git.
@@ -157,6 +160,12 @@ pub fn c4_model_path(repo: &Repository) -> PathBuf {
     repo.root.join(C4_MODEL_REL_PATH)
 }
 
+/// Number of components emitted per container. Deliberately small: at ~19
+/// modules a higher cap makes the combined container+component view unreadable,
+/// and the model is *editable* — the architect can add more `component` lines
+/// to any `container` block by hand and ProjectMind never overwrites them.
+pub const COMPONENTS_PER_CONTAINER: usize = 3;
+
 /// Generate a Structurizr-DSL subset describing `repo`'s container view.
 ///
 /// The mapping is identical to [`crate::diagram::render_c4_container`]: one
@@ -165,6 +174,20 @@ pub fn c4_model_path(repo: &Repository) -> PathBuf {
 /// (highest cross-module in-degree). Output is deterministic — modules and
 /// relationships are sorted — so regenerating an unchanged repo yields byte-
 /// identical DSL.
+///
+/// Each `container` block additionally carries the module's top
+/// [`COMPONENTS_PER_CONTAINER`] **components** — its most important classes — so
+/// the model reaches the C4 component level. Importance is the class's
+/// **fan-in**: how many *distinct* other classes reference it through the
+/// framework relations graph (`framework.relations`). This is exactly the
+/// `deps` signal [`crate::risk::compute`] uses, computed directly here because
+/// `risk::compute` additionally needs a live git repo (churn) and a coverage
+/// report and is far too heavy for a pure DSL generation. Ties — including the
+/// common all-zero case for a repo with no relations — are broken by
+/// **stereotype priority** (`rest-controller` > `controller` > `service` >
+/// `repository` > `configuration` > `component` > anything else), then by class
+/// name, so the output is fully deterministic. The component `description` is
+/// the chosen stereotype (or `"class"` when the class has none).
 #[must_use]
 pub fn generate_c4_dsl(repo: &Repository, framework: &dyn FrameworkPlugin) -> String {
     let title = repo
@@ -191,6 +214,10 @@ pub fn generate_c4_dsl(repo: &Repository, framework: &dyn FrameworkPlugin) -> St
         dsl_str(title)
     );
 
+    // Per-class fan-in across the whole repo, from the framework relations
+    // graph — the importance signal for component selection.
+    let fan_in = fan_in_by_fqn(repo, framework);
+
     // Stable order — BTreeMap keys are already sorted.
     let mut module_ids: Vec<&String> = repo.modules.keys().collect();
     module_ids.sort();
@@ -204,12 +231,35 @@ pub fn generate_c4_dsl(repo: &Repository, framework: &dyn FrameworkPlugin) -> St
         } else {
             format!("{class_count} classes")
         };
-        let _ = writeln!(
-            out,
-            "            {id} = container \"{}\" \"{}\"",
-            dsl_str(label),
-            dsl_str(&descr)
-        );
+        let components = top_components(module, &fan_in);
+        if components.is_empty() {
+            let _ = writeln!(
+                out,
+                "            {id} = container \"{}\" \"{}\"",
+                dsl_str(label),
+                dsl_str(&descr)
+            );
+        } else {
+            let _ = writeln!(
+                out,
+                "            {id} = container \"{}\" \"{}\" {{",
+                dsl_str(label),
+                dsl_str(&descr)
+            );
+            for comp in &components {
+                // Prefix the component id with the module id so ids stay
+                // collision-free across modules (two modules may both hold a
+                // class named `Config`).
+                let comp_id = format!("{id}_{}", dsl_id(&comp.name));
+                let _ = writeln!(
+                    out,
+                    "                {comp_id} = component \"{}\" \"{}\"",
+                    dsl_str(&comp.name),
+                    dsl_str(&comp.stereotype)
+                );
+            }
+            out.push_str("            }\n");
+        }
     }
     out.push_str("        }\n");
 
@@ -265,6 +315,97 @@ fn cross_module_edges(
         }
     }
     edges
+}
+
+/// Per-class fan-in (`fqn` → number of *distinct* classes referencing it) from
+/// the framework relations graph. This mirrors `risk::FanCounts`' in-degree —
+/// the same signal [`crate::risk::compute`] weights as `deps` — but stays cheap
+/// (no git, no coverage): `(from, to)` pairs are deduplicated and self-edges
+/// dropped so a class that both injects and calls another counts once.
+fn fan_in_by_fqn(repo: &Repository, framework: &dyn FrameworkPlugin) -> BTreeMap<String, u32> {
+    let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
+    let mut fan_in: BTreeMap<String, u32> = BTreeMap::new();
+    for module in repo.modules.values() {
+        for rel in framework.relations(module) {
+            if rel.from == rel.to {
+                continue;
+            }
+            if seen.insert((rel.from.clone(), rel.to.clone())) {
+                *fan_in.entry(rel.to.clone()).or_default() += 1;
+            }
+        }
+    }
+    fan_in
+}
+
+/// A class chosen to represent a container at the component level.
+struct ChosenComponent {
+    /// Simple class name.
+    name: String,
+    /// The class's most significant stereotype, or `"class"` when it has none.
+    stereotype: String,
+}
+
+/// Pick the [`COMPONENTS_PER_CONTAINER`] most important classes of `module`.
+///
+/// Ranking key (highest first): fan-in, then stereotype priority, then class
+/// name. Every tie-breaker is total and deterministic, so a repo with no
+/// relations (all fan-in 0) still yields a stable, meaningful choice driven by
+/// stereotype and name.
+fn top_components(
+    module: &projectmind_plugin_api::Module,
+    fan_in: &BTreeMap<String, u32>,
+) -> Vec<ChosenComponent> {
+    let mut ranked: Vec<(u32, usize, &str, &str)> = module
+        .classes
+        .values()
+        .map(|class| {
+            let fi = fan_in.get(&class.fqn).copied().unwrap_or(0);
+            let (rank, stereotype) = stereotype_rank(class);
+            (fi, rank, stereotype, class.name.as_str())
+        })
+        .collect();
+    // Higher fan-in first; lower stereotype rank (0 = most important) first;
+    // then name ascending — all applied on the negated/ordered keys below.
+    ranked.sort_by(|a, b| {
+        b.0.cmp(&a.0) // fan-in desc
+            .then(a.1.cmp(&b.1)) // stereotype rank asc (0 wins)
+            .then(a.3.cmp(b.3)) // name asc
+    });
+    ranked
+        .into_iter()
+        .take(COMPONENTS_PER_CONTAINER)
+        .map(|(_, _, stereotype, name)| ChosenComponent {
+            name: name.to_string(),
+            stereotype: stereotype.to_string(),
+        })
+        .collect()
+}
+
+/// Map a class to `(priority_rank, stereotype_label)`. Rank 0 is the most
+/// important; classes without a known stereotype get the largest rank so they
+/// sort last, labelled `"class"`. The priority list matches
+/// `diagram::stereotype_lookup` so both views agree on what "important" means.
+fn stereotype_rank(class: &projectmind_plugin_api::Class) -> (usize, &str) {
+    const PRIORITY: [&str; 7] = [
+        "rest-controller",
+        "controller",
+        "service",
+        "repository",
+        "configuration",
+        "component",
+        "rest",
+    ];
+    for (rank, name) in PRIORITY.iter().enumerate() {
+        if class.stereotypes.iter().any(|s| s == name) {
+            return (rank, name);
+        }
+    }
+    // Any other stereotype ranks just after the known ones (but before none).
+    if let Some(first) = class.stereotypes.first() {
+        return (PRIORITY.len(), first.as_str());
+    }
+    (PRIORITY.len() + 1, "class")
 }
 
 /// Parse a Structurizr-DSL subset into a [`C4Model`].
@@ -411,10 +552,14 @@ pub fn parse_c4_dsl(text: &str) -> C4Model {
 
 /// Render a [`C4Model`] as Mermaid `C4Container` text.
 ///
-/// The output format mirrors [`crate::diagram::render_c4_container`] byte-for-
-/// byte (same `C4Container` header, `title`, `Person(...)`, `System_Boundary`
-/// block, `Container(...)` lines and `Rel(...)` edges) so the frontend's
-/// existing Mermaid renderer draws it unchanged.
+/// The output format mirrors [`crate::diagram::render_c4_container`] (same
+/// `C4Container` header, `title`, `Person(...)`, `System_Boundary` block and
+/// `Rel(...)` edges) so the frontend's existing Mermaid renderer draws it
+/// unchanged. A container **with** components is rendered as a Mermaid-C4
+/// `Container_Boundary(id, "label") { Component(...) … }` nesting (still native
+/// `C4Container` syntax, drawn by the same renderer); a container **without**
+/// components stays a plain `Container(...)` line. Cross-module `Rel(...)` edges
+/// remain at module level.
 #[must_use]
 pub fn c4_model_to_mermaid(model: &C4Model) -> String {
     let mut out = String::from("C4Container\n");
@@ -460,21 +605,33 @@ pub fn c4_model_to_mermaid(model: &C4Model) -> String {
             c4_label(&system.name)
         );
         for c in &system.containers {
-            let _ = writeln!(
-                out,
-                "        Container({}, \"{}\", \"{}\")",
-                escape_id(&c.id),
-                c4_label(&c.name),
-                c4_label(&c.description)
-            );
-            for comp in &c.components {
+            if c.components.is_empty() {
                 let _ = writeln!(
                     out,
-                    "        Component({}, \"{}\", \"{}\")",
-                    escape_id(&comp.id),
-                    c4_label(&comp.name),
-                    c4_label(&comp.description)
+                    "        Container({}, \"{}\", \"{}\")",
+                    escape_id(&c.id),
+                    c4_label(&c.name),
+                    c4_label(&c.description)
                 );
+            } else {
+                // A container that owns components becomes a boundary so the
+                // components nest visibly inside it (Mermaid-C4 native syntax).
+                let _ = writeln!(
+                    out,
+                    "        Container_Boundary({}, \"{}\") {{",
+                    escape_id(&c.id),
+                    c4_label(&c.name)
+                );
+                for comp in &c.components {
+                    let _ = writeln!(
+                        out,
+                        "            Component({}, \"{}\", \"{}\")",
+                        escape_id(&comp.id),
+                        c4_label(&comp.name),
+                        c4_label(&comp.description)
+                    );
+                }
+                out.push_str("        }\n");
             }
         }
         out.push_str("    }\n");
@@ -763,6 +920,15 @@ mod tests {
         }
     }
 
+    fn class_with_stereotype(fqn: &str, stereotype: &str) -> Class {
+        Class {
+            fqn: fqn.into(),
+            name: fqn.rsplit('.').next().unwrap_or(fqn).into(),
+            stereotypes: vec![stereotype.into()],
+            ..Default::default()
+        }
+    }
+
     fn cross_repo() -> Repository {
         let mut repo = Repository::new(PathBuf::from("/tmp/my-repo"));
         let mut api = Module {
@@ -792,13 +958,24 @@ mod tests {
             dsl.contains("softwareSystem \"my-repo\""),
             "no system:\n{dsl}"
         );
+        // Both modules now open a container block because they carry
+        // components (top-3 classes).
         assert!(
-            dsl.contains("g_api = container \"api\" \"2 classes\""),
-            "api container missing:\n{dsl}"
+            dsl.contains("g_api = container \"api\" \"2 classes\" {"),
+            "api container (with components) missing:\n{dsl}"
         );
         assert!(
-            dsl.contains("g_core = container \"core\" \"1 class\""),
-            "core container missing/plural-wrong:\n{dsl}"
+            dsl.contains("g_core = container \"core\" \"1 class\" {"),
+            "core container (with components) missing/plural-wrong:\n{dsl}"
+        );
+        // Components are emitted with a module-prefixed id and the class name.
+        assert!(
+            dsl.contains("g_api_A = component \"A\""),
+            "component A missing:\n{dsl}"
+        );
+        assert!(
+            dsl.contains("g_core_Heart = component \"Heart\""),
+            "component Heart missing:\n{dsl}"
         );
         // Cross-module edge + developer anchored on the busiest module.
         assert!(
@@ -843,6 +1020,16 @@ mod tests {
         assert_eq!(sys.containers.len(), 2, "two containers:\n{sys:?}");
         let ids: Vec<&str> = sys.containers.iter().map(|c| c.id.as_str()).collect();
         assert!(ids.contains(&"g_api") && ids.contains(&"g_core"), "{ids:?}");
+        // Components survive the round-trip and attach to their container.
+        let api = sys.containers.iter().find(|c| c.id == "g_api").unwrap();
+        let comp_names: Vec<&str> = api.components.iter().map(|c| c.name.as_str()).collect();
+        assert!(
+            comp_names.contains(&"A") && comp_names.contains(&"B"),
+            "api components missing: {comp_names:?}"
+        );
+        let core = sys.containers.iter().find(|c| c.id == "g_core").unwrap();
+        assert_eq!(core.components.len(), 1, "{:?}", core.components);
+        assert_eq!(core.components[0].name, "Heart");
         // developer->explores + g_api->g_core = 2 relationships.
         assert_eq!(model.relationships.len(), 2, "{:?}", model.relationships);
         assert!(model
@@ -954,8 +1141,15 @@ mod tests {
             "{mermaid}"
         );
         assert!(mermaid.contains("System_Boundary(my_repo,"), "{mermaid}");
+        // Containers with components render as a Container_Boundary nesting
+        // Component(...) lines; the module-level Rel edges stay unchanged.
         assert!(
-            mermaid.contains("Container(g_api, \"api\", \"2 classes\")"),
+            mermaid.contains("Container_Boundary(g_api, \"api\") {"),
+            "{mermaid}"
+        );
+        assert!(mermaid.contains("Component(g_api_A, \"A\","), "{mermaid}");
+        assert!(
+            mermaid.contains("Component(g_core_Heart, \"Heart\","),
             "{mermaid}"
         );
         assert!(
@@ -1001,6 +1195,197 @@ mod tests {
         );
         assert!(mermaid.contains("Rel(dev, web, \"uses\")"), "{mermaid}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A module with more than the cap of classes emits exactly
+    /// `COMPONENTS_PER_CONTAINER` components — never more.
+    #[test]
+    fn generate_caps_components_per_container() {
+        let mut repo = Repository::new(PathBuf::from("/tmp/cap-repo"));
+        let mut m = Module {
+            id: "g:big".into(),
+            ..Default::default()
+        };
+        for n in 0..10 {
+            let fqn = format!("p.C{n}");
+            m.classes.insert(fqn.clone(), class(&fqn));
+        }
+        repo.insert_module(m);
+
+        let dsl = generate_c4_dsl(&repo, &NoRelFw);
+        let n_components = dsl.matches(" = component ").count();
+        assert_eq!(
+            n_components, COMPONENTS_PER_CONTAINER,
+            "should emit exactly the cap:\n{dsl}"
+        );
+        // Deterministic pick with no relations: stereotype/name order → the
+        // alphabetically-first classes win (C0, C1, C2).
+        assert!(dsl.contains("component \"C0\""), "{dsl}");
+        assert!(dsl.contains("component \"C1\""), "{dsl}");
+        assert!(dsl.contains("component \"C2\""), "{dsl}");
+        assert!(!dsl.contains("component \"C3\""), "cap breached:\n{dsl}");
+    }
+
+    /// A module with a single class emits exactly one component.
+    #[test]
+    fn generate_single_class_module_has_one_component() {
+        let mut repo = Repository::new(PathBuf::from("/tmp/one-repo"));
+        let mut m = Module {
+            id: "g:solo".into(),
+            ..Default::default()
+        };
+        m.classes.insert("s.Only".into(), class("s.Only"));
+        repo.insert_module(m);
+
+        let dsl = generate_c4_dsl(&repo, &NoRelFw);
+        assert_eq!(dsl.matches(" = component ").count(), 1, "{dsl}");
+        assert!(dsl.contains("g_solo = container"), "{dsl}");
+        assert!(dsl.contains("g_solo_Only = component \"Only\""), "{dsl}");
+    }
+
+    /// A module with no classes emits a plain `container` with no components and
+    /// no opening brace.
+    #[test]
+    fn generate_empty_module_has_no_components() {
+        let mut repo = Repository::new(PathBuf::from("/tmp/empty-mod-repo"));
+        repo.insert_module(Module {
+            id: "g:hollow".into(),
+            ..Default::default()
+        });
+
+        let dsl = generate_c4_dsl(&repo, &NoRelFw);
+        assert_eq!(dsl.matches(" = component ").count(), 0, "{dsl}");
+        // Plain container line (no trailing `{`).
+        assert!(
+            dsl.contains("g_hollow = container \"hollow\" \"0 classes\"\n"),
+            "empty module should be a plain container:\n{dsl}"
+        );
+    }
+
+    /// Two modules that each hold a class of the same simple name still produce
+    /// collision-free component ids (module-prefixed).
+    #[test]
+    fn generate_component_ids_are_collision_free_across_modules() {
+        let mut repo = Repository::new(PathBuf::from("/tmp/collide-repo"));
+        let mut a = Module {
+            id: "g:alpha".into(),
+            ..Default::default()
+        };
+        a.classes.insert("a.Config".into(), class("a.Config"));
+        let mut b = Module {
+            id: "g:beta".into(),
+            ..Default::default()
+        };
+        b.classes.insert("b.Config".into(), class("b.Config"));
+        repo.insert_module(a);
+        repo.insert_module(b);
+
+        let dsl = generate_c4_dsl(&repo, &NoRelFw);
+        assert!(
+            dsl.contains("g_alpha_Config = component \"Config\""),
+            "{dsl}"
+        );
+        assert!(
+            dsl.contains("g_beta_Config = component \"Config\""),
+            "{dsl}"
+        );
+
+        // Parsing back gives one component under each container — no clobber.
+        let model = parse_c4_dsl(&dsl);
+        let sys = &model.systems[0];
+        for c in &sys.containers {
+            assert_eq!(
+                c.components.len(),
+                1,
+                "container {} :{:?}",
+                c.id,
+                c.components
+            );
+        }
+        // All component ids across the whole model are distinct.
+        let mut ids: Vec<&str> = sys
+            .containers
+            .iter()
+            .flat_map(|c| c.components.iter().map(|comp| comp.id.as_str()))
+            .collect();
+        let before = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(before, ids.len(), "duplicate component ids: {ids:?}");
+    }
+
+    /// Stereotype priority breaks ties when fan-in is equal (here: all zero),
+    /// so a controller outranks a plain class regardless of name order.
+    #[test]
+    fn generate_orders_components_by_stereotype_then_name() {
+        let mut repo = Repository::new(PathBuf::from("/tmp/stereo-repo"));
+        let mut m = Module {
+            id: "g:web".into(),
+            ..Default::default()
+        };
+        // Name order alone would prefer Aaa/Bbb; stereotype must win.
+        m.classes.insert("w.Aaa".into(), class("w.Aaa")); // no stereotype
+        m.classes.insert("w.Bbb".into(), class("w.Bbb")); // no stereotype
+        m.classes.insert(
+            "w.Repo".into(),
+            class_with_stereotype("w.Repo", "repository"),
+        );
+        m.classes.insert(
+            "w.Ctrl".into(),
+            class_with_stereotype("w.Ctrl", "controller"),
+        );
+        repo.insert_module(m);
+
+        let dsl = generate_c4_dsl(&repo, &NoRelFw);
+        // Cap 3 → controller, repository, then the alphabetically-first plain
+        // class (Aaa). Bbb is dropped.
+        assert!(dsl.contains("component \"Ctrl\" \"controller\""), "{dsl}");
+        assert!(dsl.contains("component \"Repo\" \"repository\""), "{dsl}");
+        assert!(dsl.contains("component \"Aaa\" \"class\""), "{dsl}");
+        assert!(
+            !dsl.contains("component \"Bbb\""),
+            "Bbb should be capped:\n{dsl}"
+        );
+        // Order in the text: Ctrl before Repo before Aaa.
+        let ctrl = dsl.find("\"Ctrl\"").unwrap();
+        let repo_pos = dsl.find("\"Repo\"").unwrap();
+        let aaa = dsl.find("\"Aaa\"").unwrap();
+        assert!(ctrl < repo_pos && repo_pos < aaa, "wrong order:\n{dsl}");
+    }
+
+    /// Fan-in beats stereotype: a highly-referenced plain class outranks a
+    /// controller with no incoming edges.
+    #[test]
+    fn generate_ranks_high_fan_in_first() {
+        let repo = cross_repo();
+        // In cross_repo, core.Heart has fan-in 2 (both api classes call it) and
+        // is a plain class; the api classes have fan-in 0.
+        let dsl = generate_c4_dsl(&repo, &CrossFw);
+        assert!(
+            dsl.contains("g_core_Heart = component \"Heart\""),
+            "high-fan-in class must be a component:\n{dsl}"
+        );
+    }
+
+    /// generate → parse → to_mermaid keeps the component level end-to-end.
+    #[test]
+    fn round_trip_preserves_components_to_mermaid() {
+        let repo = cross_repo();
+        let dsl = generate_c4_dsl(&repo, &CrossFw);
+        assert!(
+            dsl.contains(" = component "),
+            "generate emits components:\n{dsl}"
+        );
+        let model = parse_c4_dsl(&dsl);
+        let mermaid = c4_model_to_mermaid(&model);
+        assert!(
+            mermaid.contains("Component("),
+            "mermaid keeps components:\n{mermaid}"
+        );
+        assert!(
+            mermaid.contains("Container_Boundary("),
+            "mermaid nests components in a boundary:\n{mermaid}"
+        );
     }
 
     #[test]
