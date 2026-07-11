@@ -723,6 +723,16 @@ fn route_api(
             let outcome = c4_dsl::scaffold_c4_model(repo, &spring)?;
             Ok(serde_json::to_value(outcome)?)
         }
+        ("POST", "/api/merge_c4_model") => {
+            // Merge new code structure into the editable C4 model (#142):
+            // additive, preserving user edits and comments. Same
+            // `c4_dsl::merge_c4_model` core path the `merge_c4_model` MCP tool
+            // and Tauri command take.
+            let repo = repo(&guard)?;
+            let spring = SpringPlugin::new();
+            let outcome = c4_dsl::merge_c4_model(repo, &spring)?;
+            Ok(serde_json::to_value(outcome)?)
+        }
         ("POST", "/api/end_walkthrough") => {
             wt::clear()?;
             let prev = state::read().ok().flatten().unwrap_or_default();

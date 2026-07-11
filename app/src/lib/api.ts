@@ -820,6 +820,29 @@ export async function scaffoldC4Model(): Promise<ScaffoldResult> {
   return invoke<ScaffoldResult>('scaffold_c4_model');
 }
 
+/// Result of merging new code structure into the editable C4 model (#142): the
+/// path, whether the file had to be scaffolded fresh (`created`), and how many
+/// new elements were folded in. All `added_*` are 0 when the model already
+/// covered the code ("already up to date"). The merge is strictly additive —
+/// existing descriptions, user-added elements and comments are never touched.
+export interface MergeModelResult {
+  path: string;
+  created: boolean;
+  added_containers: number;
+  added_components: number;
+  added_relationships: number;
+}
+
+/// Merge new code structure into `docs/architecture.dsl` for the open repo
+/// (#142). Additive round-trip: adds only the containers / components /
+/// relationships the code has but the DSL lacks, preserving every edit and
+/// comment. Scaffolds fresh when the file is absent. Re-render the `c4-model`
+/// diagram afterwards to see the folded-in structure.
+export async function mergeC4Model(): Promise<MergeModelResult> {
+  if (!isTauriRuntime()) return post<MergeModelResult>('/api/merge_c4_model', {});
+  return invoke<MergeModelResult>('merge_c4_model');
+}
+
 // ----- Artifacts -----------------------------------------------------------
 
 export type ArtifactFormat = 'html' | 'markdown';

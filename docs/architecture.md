@@ -149,12 +149,21 @@ architecture. Grouped by concern:
   Mermaid via `core::c4_dsl` (`generate_c4_dsl` → `parse_c4_dsl` →
   `c4_model_to_mermaid`). Round-trip without a JVM / Structurizr CLI. The
   scaffold generates once and **never clobbers** the file, so after the first
-  scaffold the `.dsl` is the source of truth and ProjectMind never rewrites it
-  (no semantic merge — a deliberate follow-up). The `c4-model` handler returns
-  a `C4_MODEL_ABSENT` sentinel when the file is missing, which the frontend
-  renders as a "scaffold it" empty state. Exposed across the same four surfaces
-  as every other action (MCP tool, Tauri command, browser-host route, `api.ts`
-  wrapper), all calling one `core::c4_dsl::scaffold_c4_model`.
+  scaffold the `.dsl` is the source of truth and ProjectMind never rewrites it.
+  `merge_c4_model` (V6.3) closes the round-trip loop: it folds **new** code
+  structure into the existing `.dsl` **additively** — `merge_c4_dsl` diffs the
+  parsed model against the desired structure by DSL `id` and splices only the
+  missing containers / components / relationships into the original text at the
+  right brace depth (text-insertion, *not* re-emission), so every user edit,
+  hand-added element and comment survives byte-for-byte. It is idempotent and a
+  no-op (byte-identical file) when the model already covers the code; scaffolds
+  fresh when the file is absent. The `c4-model` handler returns a
+  `C4_MODEL_ABSENT` sentinel when the file is missing, which the frontend
+  renders as a "scaffold it" empty state (and shows an **Update model** button
+  that calls `merge_c4_model` once the model exists). Both actions are exposed
+  across the same four surfaces as every other action (MCP tool, Tauri command,
+  browser-host route, `api.ts` wrapper), all calling one
+  `core::c4_dsl::{scaffold_c4_model, merge_c4_model}`.
 - **Viewer pushes (statefile intents)** — `view_class`, `view_file`,
   `view_diff`, `start_gui`
 - **Browser host** — `open_browser_repo`, `browser_status`, `stop_browser`

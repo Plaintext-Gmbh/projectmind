@@ -986,6 +986,23 @@ fn scaffold_c4_model(state: State<'_, Arc<AppState>>) -> Result<c4_dsl::Scaffold
     c4_dsl::scaffold_c4_model(repo, &spring).map_err(|e| e.to_string())
 }
 
+/// Merge new code structure into the editable C4 model (`docs/architecture.dsl`)
+/// for the open repo (#142). Mirrors the `merge_c4_model` MCP tool and the
+/// browser-host `POST /api/merge_c4_model` route — all three call the same
+/// `c4_dsl::merge_c4_model` in core. Strictly additive: adds only the
+/// containers / components / relationships the code has but the DSL lacks, never
+/// touching user edits or comments; scaffolds fresh when the file is absent.
+/// Returns `{ path, created, added_containers, added_components, added_relationships }`.
+#[tauri::command]
+fn merge_c4_model(state: State<'_, Arc<AppState>>) -> Result<c4_dsl::MergeModelResult, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    let spring = SpringPlugin::new();
+    c4_dsl::merge_c4_model(repo, &spring).map_err(|e| e.to_string())
+}
+
 fn now_secs() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
@@ -1428,6 +1445,7 @@ pub fn run() {
             set_walkthrough_step,
             self_demo,
             scaffold_c4_model,
+            merge_c4_model,
             end_walkthrough,
             speak,
             open_external,
