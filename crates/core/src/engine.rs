@@ -227,6 +227,11 @@ impl Engine {
             // independently of which framework/language plugin produced it.
             if !repo.modules.is_empty() {
                 out.insert("c4-container".to_string());
+                // c4-model (#142) is the editable sibling of c4-container: it
+                // renders docs/architecture.dsl. Always offered alongside
+                // c4-container so the "scaffold it" empty state is reachable
+                // even before the file exists.
+                out.insert("c4-model".to_string());
                 out.insert("architecture-layers".to_string());
                 // architecture-flow is the prettier, interactive variant
                 // of architecture-layers — both stay available because

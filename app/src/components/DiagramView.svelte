@@ -5,6 +5,7 @@
   import DrawIoFrame from './DrawIoFrame.svelte';
   import {
     showDiagram,
+    scaffoldC4Model,
     fileRecency,
     commitActivity,
     listChangesSince,
@@ -81,6 +82,13 @@
   let docGraphLayout: 'network' | 'radial' | 'orphans' = 'network';
   let loading = false;
   let error: string | null = null;
+  // c4-model (#142): the sentinel the backend returns when
+  // docs/architecture.dsl has not been scaffolded yet. Kept in sync with
+  // `c4_dsl::C4_MODEL_ABSENT` in core.
+  const C4_MODEL_ABSENT = '%% c4-model: no docs/architecture.dsl';
+  let c4ModelAbsent = false;
+  let scaffolding = false;
+  let scaffoldToast: string | null = null;
 
   $: selectedDoc = docGraph?.nodes.find((n) => n.id === selectedDocId) ?? null;
   $: selectedOutgoing = selectedDocId
@@ -447,6 +455,16 @@
       timelineRiver = null;
 
       const payload = await showDiagram(k);
+      // c4-model (#142): if docs/architecture.dsl is not scaffolded yet the
+      // backend returns a sentinel — show the "scaffold it" empty state
+      // instead of feeding the sentinel to Mermaid.
+      c4ModelAbsent = k === 'c4-model' && payload.trim() === C4_MODEL_ABSENT;
+      if (c4ModelAbsent) {
+        mermaidSource = '';
+        svg = '';
+        loading = false;
+        return;
+      }
       docGraph = null;
       drawIoXml = '';
       if (k !== 'folder-map') {
@@ -517,6 +535,26 @@
       svg = '';
     } finally {
       loading = false;
+    }
+  }
+
+  /// Scaffold docs/architecture.dsl (#142), then re-render so the freshly
+  /// written model shows immediately. Never clobbers an existing file — the
+  /// toast reports whether the call created it or found it already present.
+  async function scaffoldModel() {
+    scaffolding = true;
+    error = null;
+    try {
+      const result = await scaffoldC4Model();
+      scaffoldToast = result.created
+        ? $t('diagram.c4Model.scaffolded')
+        : $t('diagram.c4Model.exists');
+      setTimeout(() => (scaffoldToast = null), 4000);
+      await render(kind, folderLayout, docGraphLayout);
+    } catch (err) {
+      error = String(err);
+    } finally {
+      scaffolding = false;
     }
   }
 
@@ -977,6 +1015,15 @@
   {:else if error}
     <div class="error">⚠ {error}</div>
     <pre>{mermaidSource}</pre>
+  {:else if c4ModelAbsent}
+    <!-- c4-model (#142): docs/architecture.dsl is not scaffolded yet. Offer to
+         create it; ProjectMind writes it once and never overwrites it after. -->
+    <div class="c4-empty">
+      <p class="c4-empty-title">{$t('diagram.c4Model.empty')}</p>
+      <button class="c4-scaffold" on:click={scaffoldModel} disabled={scaffolding}>
+        {scaffolding ? $t('diagram.c4Model.scaffolding') : $t('diagram.c4Model.scaffold')}
+      </button>
+    </div>
   {:else if drawIoXml}
     <div class="drawio-stage">
       <DrawIoFrame xml={drawIoXml} title="draw.io architecture layer map" />
@@ -1106,6 +1153,9 @@
     </div>
   {/if}
   {/if}
+  {#if scaffoldToast}
+    <div class="c4-toast" role="status">{scaffoldToast}</div>
+  {/if}
 </div>
 
 <style>
@@ -1115,6 +1165,7 @@
     flex-direction: column;
     min-height: 0;
     background: var(--bg-0);
+    position: relative;
   }
 
   .toolbar {
@@ -1459,5 +1510,53 @@
     padding: 12px;
     border-radius: var(--radius-sm);
     overflow-x: auto;
+  }
+
+  /* c4-model (#142) empty state: no docs/architecture.dsl yet. */
+  .c4-empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 40px;
+    text-align: center;
+  }
+
+  .c4-empty-title {
+    color: var(--fg-2);
+    max-width: 40ch;
+    margin: 0;
+  }
+
+  .c4-scaffold {
+    padding: 8px 18px;
+    font-size: 14px;
+    color: var(--fg-1);
+    background: var(--bg-2);
+    border: 1px solid var(--accent, var(--fg-2));
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+
+  .c4-scaffold:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  .c4-toast {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 8px 16px;
+    font-size: 13px;
+    color: var(--fg-1);
+    background: var(--bg-2);
+    border: 1px solid var(--border, var(--fg-2));
+    border-radius: var(--radius-sm);
+    box-shadow: 0 2px 8px rgb(0 0 0 / 30%);
+    z-index: 10;
   }
 </style>

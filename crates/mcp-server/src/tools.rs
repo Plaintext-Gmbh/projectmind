@@ -18,7 +18,7 @@ use projectmind_core::session::{self, Since};
 use projectmind_core::state::{self, UiState, ViewIntent};
 use projectmind_core::tour_suggest::{self, Persona};
 use projectmind_core::walkthrough::{self as wt, QuizQuestion, Walkthrough, WalkthroughStep};
-use projectmind_core::{diagram, git, html};
+use projectmind_core::{c4_dsl, diagram, git, html};
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_plugin_api::FrameworkPlugin;
 use serde::Deserialize;
@@ -98,6 +98,7 @@ fn diagram_schema() -> Value {
                     "inheritance-tree",
                     "doc-graph",
                     "c4-container",
+                    "c4-model",
                     "architecture-layers",
                     "architecture-flow",
                     "module-chord",
@@ -396,6 +397,14 @@ fn self_demo_schema() -> Value {
     })
 }
 
+/// JSON Schema for the `scaffold_c4_model` tool — no arguments.
+fn scaffold_c4_model_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {}
+    })
+}
+
 fn tour_scaffold_schema() -> Value {
     json!({
         "type": "object",
@@ -636,6 +645,11 @@ pub(crate) fn list() -> Value {
                 "inputSchema": self_demo_schema()
             },
             {
+                "name": "scaffold_c4_model",
+                "description": "Scaffold an EDITABLE C4 model (#142) — write `docs/architecture.dsl` (a Structurizr-DSL subset) into the open repo so an architect can hand-edit the architecture in Git, JVM-free. Generated once from the same data as the `c4-container` diagram (modules -> containers, cross-module relations -> relationships, a `developer` person on the busiest module). CRITICAL: this NEVER clobbers an existing file — if `docs/architecture.dsl` is already present it is left untouched and `created:false` is returned; the user owns the file after the first scaffold. Render the (possibly edited) model with the `c4-model` diagram via `view_diagram`/`show_diagram`. There is deliberately no semantic merge of regenerated structure with edits (a follow-up); to regenerate from scratch, delete the file and scaffold again. Returns `{ path, created }`. Use when the user says `scaffold the C4 model` / `make the architecture editable` / `create docs/architecture.dsl`.",
+                "inputSchema": scaffold_c4_model_schema()
+            },
+            {
                 "name": "open_browser_repo",
                 "description": "Start the in-process browser host that serves the ProjectMind webapp at a tokenized URL, then surface that URL to the user verbatim — they will open it themselves; you cannot. Use after `open in browser` / `im Browser zeigen` / `show me on my iPad / phone / laptop`. Pass `lan: true` whenever the user mentions a remote device (iPad, phone, second machine on the same WLAN) — otherwise the URL is `http://127.0.0.1:...` and unreachable from anything but this machine. The bearer token in the URL fragment gates every API call regardless of bind address. Idempotent: calling again with a different `path` reopens the host on the existing port; call `browser_status` first to avoid restarting the host. Once the user has opened the URL, every subsequent `view_*` / `walkthrough_*` push will mirror to that browser tab in addition to the Desktop GUI.",
                 "inputSchema": open_browser_repo_schema()
@@ -700,6 +714,7 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "architect_briefing" => architect_briefing(state, parsed.arguments).await,
         "tour_scaffold" => tour_scaffold(state, parsed.arguments).await,
         "self_demo" => self_demo(state, parsed.arguments).await,
+        "scaffold_c4_model" => scaffold_c4_model(state).await,
         "open_browser_repo" => open_browser_repo(state, parsed.arguments).await,
         "browser_status" => browser_status(),
         "stop_browser" => stop_browser(),
@@ -944,6 +959,9 @@ async fn show_diagram(state: &Mutex<ServerState>, args: Value) -> DispatchResult
         "folder-map" => Ok(text_result(diagram::render_folder_map(repo))),
         "inheritance-tree" => Ok(text_result(diagram::render_inheritance_tree(repo))),
         "c4-container" => Ok(text_result(diagram::render_c4_container(repo, &spring))),
+        // c4-model (#142) renders the editable docs/architecture.dsl file, not
+        // repo-derived data. Returns the C4_MODEL_ABSENT sentinel when unscaffolded.
+        "c4-model" => Ok(text_result(c4_dsl::render_c4_model(repo))),
         "architecture-layers" => Ok(text_result(diagram::render_architecture_layers_drawio(
             repo,
         ))),
@@ -1985,6 +2003,25 @@ async fn self_demo(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
             "ok": true,
             "walkthrough_id": outcome.walkthrough_id,
             "total": outcome.total,
+        }))
+        .unwrap_or_else(|_| "{}".into());
+        Ok(text_result(body))
+    })
+}
+
+/// Scaffold `docs/architecture.dsl` (#142) — write the editable C4 model once,
+/// never clobber. Same `c4_dsl::scaffold_c4_model` core path the Tauri command
+/// and the browser-host route take.
+async fn scaffold_c4_model(state: &Mutex<ServerState>) -> DispatchResult {
+    let state = state.lock().await;
+    with_repo(&state, |repo| {
+        let spring = SpringPlugin::new();
+        let outcome = c4_dsl::scaffold_c4_model(repo, &spring)
+            .map_err(|e| DispatchError::internal(format!("scaffold_c4_model: {e}")))?;
+        let body = serde_json::to_string_pretty(&json!({
+            "ok": true,
+            "path": outcome.path,
+            "created": outcome.created,
         }))
         .unwrap_or_else(|_| "{}".into());
         Ok(text_result(body))

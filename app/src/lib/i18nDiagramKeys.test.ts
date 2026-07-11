@@ -30,6 +30,7 @@ const allKinds: Record<DiagramKind, true> = {
   'inheritance-tree': true,
   'doc-graph': true,
   'c4-container': true,
+  'c4-model': true,
   'architecture-layers': true,
   'architecture-flow': true,
   'module-chord': true,

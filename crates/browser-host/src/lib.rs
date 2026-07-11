@@ -28,7 +28,7 @@ use projectmind_core::tour_suggest::{self, Persona};
 use projectmind_core::walkthrough::{
     self as wt, FeedbackEvent, FeedbackKind, FeedbackLog, Walkthrough,
 };
-use projectmind_core::{diagram, risk, Engine, Repository};
+use projectmind_core::{c4_dsl, diagram, risk, Engine, Repository};
 use projectmind_framework_lombok::LombokPlugin;
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_lang_java::JavaPlugin;
@@ -558,6 +558,8 @@ fn route_api(
                 "folder-map" => Ok(json!(diagram::render_folder_map(repo))),
                 "inheritance-tree" => Ok(json!(diagram::render_inheritance_tree(repo))),
                 "c4-container" => Ok(json!(diagram::render_c4_container(repo, &spring))),
+                // c4-model (#142) renders the editable docs/architecture.dsl file.
+                "c4-model" => Ok(json!(c4_dsl::render_c4_model(repo))),
                 "architecture-layers" => {
                     Ok(json!(diagram::render_architecture_layers_drawio(repo)))
                 }
@@ -710,6 +712,15 @@ fn route_api(
             let repo = repo(&guard)?;
             let spring = SpringPlugin::new();
             let outcome = tour_suggest::self_demo(repo, &spring, top, persona)?;
+            Ok(serde_json::to_value(outcome)?)
+        }
+        ("POST", "/api/scaffold_c4_model") => {
+            // Scaffold the editable C4 model (#142): write docs/architecture.dsl
+            // once, never clobber. Same `c4_dsl::scaffold_c4_model` core path the
+            // `scaffold_c4_model` MCP tool and Tauri command take.
+            let repo = repo(&guard)?;
+            let spring = SpringPlugin::new();
+            let outcome = c4_dsl::scaffold_c4_model(repo, &spring)?;
             Ok(serde_json::to_value(outcome)?)
         }
         ("POST", "/api/end_walkthrough") => {

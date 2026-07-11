@@ -16,6 +16,7 @@ pub mod activity_heatmap;
 pub mod annotations;
 pub mod architecture_flow;
 pub mod artifact;
+pub mod c4_dsl;
 pub mod cargo;
 pub mod code_city;
 pub mod code_graph;

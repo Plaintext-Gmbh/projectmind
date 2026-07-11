@@ -20,6 +20,7 @@ export type DiagramKind =
   | 'inheritance-tree'
   | 'doc-graph'
   | 'c4-container'
+  | 'c4-model'
   | 'architecture-layers'
   | 'architecture-flow'
   | 'module-chord'
