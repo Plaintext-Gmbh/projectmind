@@ -161,31 +161,49 @@ pub fn build(root: &Path) -> DocGraph {
     }
 }
 
+/// One `[label](href)` link extracted from Markdown. Shared with the
+/// doc-mention scanner (`doc_mentions`), which reuses the same parser to
+/// resolve links onto class source files.
 #[derive(Debug)]
-struct MarkdownLink {
-    label: String,
-    href: String,
+pub(crate) struct MarkdownLink {
+    pub(crate) label: String,
+    pub(crate) href: String,
 }
 
 fn markdown_links(markdown: &str) -> Vec<MarkdownLink> {
+    markdown_links_indexed(markdown)
+        .into_iter()
+        .map(|(_, link)| link)
+        .collect()
+}
+
+/// Like `markdown_links`, but each link carries the byte offset of its
+/// opening bracket — the doc-mention scanner needs positions for line
+/// numbers and snippets. Image links (`![…](…)`) are skipped.
+pub(crate) fn markdown_links_indexed(markdown: &str) -> Vec<(usize, MarkdownLink)> {
     let link_re =
         Regex::new(r#"!?\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)"#).expect("valid regex");
     link_re
         .captures_iter(markdown)
         .filter_map(|caps| {
-            let whole = caps.get(0)?.as_str();
-            if whole.starts_with('!') {
+            let whole = caps.get(0)?;
+            if whole.as_str().starts_with('!') {
                 return None;
             }
-            Some(MarkdownLink {
-                label: caps.get(1)?.as_str().trim().to_string(),
-                href: caps.get(2)?.as_str().trim().to_string(),
-            })
+            Some((
+                whole.start(),
+                MarkdownLink {
+                    label: caps.get(1)?.as_str().trim().to_string(),
+                    href: caps.get(2)?.as_str().trim().to_string(),
+                },
+            ))
         })
         .collect()
 }
 
-fn is_external(href: &str) -> bool {
+/// True for absolute web/mail/tel hrefs — links that can never point at a
+/// repository file. Shared with the doc-mention scanner.
+pub(crate) fn is_external(href: &str) -> bool {
     let lower = href.to_ascii_lowercase();
     lower.starts_with("http://")
         || lower.starts_with("https://")
@@ -214,7 +232,9 @@ fn resolve_markdown_href(root: &Path, source_abs: &Path, href: &str) -> Option<P
     joined.strip_prefix(root).ok().map(Path::to_path_buf)
 }
 
-fn normalize_relative(path: PathBuf) -> PathBuf {
+/// Collapse `.` / `..` components without touching the filesystem. Shared
+/// with the doc-mention scanner, which resolves link hrefs the same way.
+pub(crate) fn normalize_relative(path: PathBuf) -> PathBuf {
     let mut out = PathBuf::new();
     for component in path.components() {
         match component {

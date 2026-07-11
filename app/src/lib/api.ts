@@ -220,6 +220,40 @@ export async function classOutline(fqn: string): Promise<ClassOutline> {
   return invoke<ClassOutline>('class_outline', { fqn });
 }
 
+/// Which rule produced a doc-mention hit, strongest first: the doc links the
+/// class's source file > the FQN appears verbatim > the simple name sits in
+/// an inline code span > the bare (distinctive) name appears.
+export type DocMentionKind = 'link' | 'fqn' | 'code' | 'name';
+
+/// One Markdown document that mentions the selected class. Mirrors
+/// `doc_mentions::DocMention` (Code↔Doc bridge, #65).
+export interface DocMentionHit {
+  /// Path relative to the repository root, `/`-separated.
+  rel: string;
+  /// Absolute path on disk — what `fileView` opens.
+  abs: string;
+  /// Document title (first H1 or file stem).
+  title: string;
+  /// Best (highest-rank) rule that hit.
+  kind: DocMentionKind;
+  /// Total number of hits across all rules.
+  count: number;
+  /// 1-based line of the first hit of the best rule.
+  line: number;
+  /// ~120-char window around that hit.
+  snippet: string;
+}
+
+/// Repo-internal Markdown docs mentioning a class, ranked (Code↔Doc bridge,
+/// #65). Dual-mode (Tauri invoke / browser-host HTTP) like every other read;
+/// the `docs_for_class` MCP tool serves the same data to the LLM.
+export async function docsForClass(fqn: string, limit = 8): Promise<DocMentionHit[]> {
+  if (!isTauriRuntime()) {
+    return api<DocMentionHit[]>(`/api/docs_for_class${query({ fqn, limit })}`);
+  }
+  return invoke<DocMentionHit[]>('docs_for_class', { fqn, limit });
+}
+
 export async function listChangesSince(reference: string, to?: string): Promise<ChangedFile[]> {
   if (!isTauriRuntime()) {
     return api<ChangedFile[]>(`/api/list_changes_since${query({ reference, to })}`);

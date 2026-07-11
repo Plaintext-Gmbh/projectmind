@@ -23,6 +23,7 @@ pub mod code_graph_sqlite;
 pub mod coverage;
 pub mod diagram;
 pub mod doc_graph;
+pub mod doc_mentions;
 pub mod engine;
 pub mod file_access;
 pub mod files;

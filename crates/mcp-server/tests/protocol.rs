@@ -104,6 +104,56 @@ fn tools_list_includes_open_repo() {
     assert!(names.contains(&"open_repo"));
     assert!(names.contains(&"show_class"));
     assert!(names.contains(&"show_diagram"));
+    assert!(names.contains(&"docs_for_class"));
+}
+
+#[test]
+fn docs_for_class_returns_ranked_mentions() {
+    let tmp = TempRepo::create_with_java_class();
+    // One doc that links the source file, names the FQN and code-spans the
+    // simple name; `Hello` (5 chars, one hump) is NOT distinctive, so the
+    // bare name alone must not create hits.
+    std::fs::write(
+        tmp.root.join("DESIGN.md"),
+        "# Design\n\nThe `Hello` entry point lives in [source](Hello.java); see demo.Hello.\nHello is also written bare here.\n",
+    )
+    .unwrap();
+    let mut s = Server::spawn();
+    let path = tmp.root.to_string_lossy().into_owned();
+    s.call(&format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"open_repo","arguments":{{"path":"{path}"}}}}}}"#
+    ));
+    let resp = s.call(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"docs_for_class","arguments":{"fqn":"demo.Hello"}}}"#,
+    );
+    let arr: serde_json::Value =
+        serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let arr = arr.as_array().unwrap();
+    assert_eq!(arr.len(), 1, "expected exactly the DESIGN.md hit: {arr:?}");
+    assert_eq!(arr[0]["rel"], "DESIGN.md");
+    assert_eq!(arr[0]["title"], "Design");
+    // Best rule wins: the source-file link outranks fqn/code-span.
+    assert_eq!(arr[0]["kind"], "link");
+    // link (href) + fqn + code span = 3; the bare `Hello` mentions must not count.
+    assert_eq!(arr[0]["count"], 3);
+    assert_eq!(arr[0]["line"], 3);
+}
+
+#[test]
+fn docs_for_class_rejects_unknown_fqn() {
+    let tmp = TempRepo::create_with_java_class();
+    let mut s = Server::spawn();
+    let path = tmp.root.to_string_lossy().into_owned();
+    s.call(&format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"open_repo","arguments":{{"path":"{path}"}}}}}}"#
+    ));
+    let resp = s.call(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"docs_for_class","arguments":{"fqn":"nope.Missing"}}}"#,
+    );
+    assert!(resp["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("class not found"));
 }
 
 #[test]

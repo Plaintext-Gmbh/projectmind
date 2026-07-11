@@ -128,6 +128,7 @@ custom agent — can connect to. It implements:
 | `list_classes` | List parsed classes (filter by stereotype). |
 | `find_class` | Case-insensitive substring search by simple or fully-qualified name. |
 | `class_outline` | Methods, fields, annotations and visibility of a class — without source. |
+| `docs_for_class` | Repo-internal Markdown documents that mention a class or link to its source file, ranked by precision (source-file link > FQN > inline-code name > bare distinctive name). The bridge from code to the ADRs / design docs / runbooks behind it. |
 | `show_class` | Source of a class with optional line-range highlights. |
 | `relations` | The full bean / injection graph as JSON: `{from, to, kind, cross_module}` edges. |
 | `list_changes_since` | Files changed since a given git ref. |
