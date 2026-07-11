@@ -12,6 +12,53 @@
 
   $: available = ($repo?.available_diagrams ?? []) as DiagramKind[];
 
+  /// Sidebar sections (F9): 14 tiles are too many for one flat list.
+  /// Purely presentational — availability and the order *within* a group
+  /// still come from the backend's available_diagrams; empty groups vanish.
+  type DiagramGroup = 'structure' | 'activity' | 'threeD' | 'docs' | 'languages';
+  const GROUP_ORDER: DiagramGroup[] = ['structure', 'activity', 'threeD', 'docs', 'languages'];
+
+  function groupFor(kind: string): DiagramGroup {
+    switch (kind) {
+      case 'folder-map':
+      case 'activity-heatmap':
+      case 'timeline-river':
+        return 'activity';
+      case 'code-city':
+        return 'threeD';
+      case 'doc-graph':
+        return 'docs';
+      case 'language-stats':
+        return 'languages';
+      default:
+        // bean-graph, bean-graph-live, package-tree, inheritance-tree,
+        // c4-container, architecture-layers, module-chord, architecture-flow
+        // — and any future kind this frontend doesn't know yet, so nothing
+        // ever drops out of the sidebar.
+        return 'structure';
+    }
+  }
+
+  $: groups = GROUP_ORDER.map((id) => ({
+    id,
+    kinds: available.filter((k) => groupFor(k) === id),
+  })).filter((g) => g.kinds.length > 0);
+
+  function groupLabel(id: DiagramGroup): string {
+    switch (id) {
+      case 'structure':
+        return $t('diagram.group.structure');
+      case 'activity':
+        return $t('diagram.group.activity');
+      case 'threeD':
+        return $t('diagram.group.threeD');
+      case 'docs':
+        return $t('diagram.group.docs');
+      case 'languages':
+        return $t('diagram.group.languages');
+    }
+  }
+
   // If the active kind isn't in the new repo's available set, snap to
   // the first one so the right pane is never staring at an unavailable
   // diagram. App.svelte does this too — the duplication is intentional
@@ -117,24 +164,29 @@
       {:else if available.length === 0}
         <div class="empty">{$t('diagram.noDiagrams')}</div>
       {:else}
-        <ul class="list">
-          {#each available as k (k)}
-            <li>
-              <button
-                type="button"
-                class="item"
-                class:selected={selectedKind === k}
-                on:click={() => (selectedKind = k)}
-              >
-                <span class="item-title">{labelFor(k)}</span>
-                <span class="item-meta">
-                  <span class="kind">{k}</span>
-                </span>
-                <span class="item-desc">{descriptionFor(k)}</span>
-              </button>
-            </li>
-          {/each}
-        </ul>
+        {#each groups as group (group.id)}
+          <section class="group">
+            <h3 class="group-title">{groupLabel(group.id)}</h3>
+            <ul class="list">
+              {#each group.kinds as k (k)}
+                <li>
+                  <button
+                    type="button"
+                    class="item"
+                    class:selected={selectedKind === k}
+                    on:click={() => (selectedKind = k)}
+                  >
+                    <span class="item-title">{labelFor(k)}</span>
+                    <span class="item-meta">
+                      <span class="kind">{k}</span>
+                    </span>
+                    <span class="item-desc">{descriptionFor(k)}</span>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          </section>
+        {/each}
       {/if}
     </aside>
 
@@ -200,6 +252,19 @@
     background: var(--bg-1);
     overflow-y: auto;
     padding: 12px;
+  }
+
+  .group + .group {
+    margin-top: 16px;
+  }
+  .group-title {
+    margin: 0 0 6px;
+    padding: 0 2px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-2);
   }
 
   .list {
