@@ -19,6 +19,7 @@
     stepCounter,
     isFirstStep,
     isLastStep,
+    autoplayDelayMs,
     type PresenterState,
     type Overlay,
   } from '../lib/presenter';
@@ -45,6 +46,12 @@
 
   // A one-line hint surfaced when the OS narrator is missing.
   let narratorHint = '';
+
+  // The self-running-demo tick. The synthesiser gives no reliable "finished"
+  // signal on every runtime, so autoplay derives its cadence from the
+  // narration length (autoplayDelayMs) and re-arms this timer once per step.
+  // Any user input tears it down (stopAutoplayIfActive) — the human takes over.
+  let autoplayTimer: ReturnType<typeof setTimeout> | null = null;
 
   $: step = body && body.steps[ps.step] ? body.steps[ps.step] : null;
   $: counter = stepCounter(ps);
@@ -104,6 +111,8 @@
       targetLoading = false;
     }
     if (ps.narrator) void narrateCurrent();
+    // Re-arm the autoplay tick for this step (no-op unless autoplay is on).
+    scheduleAutoAdvance();
   }
 
   async function loadClass(fqn: string, highlight: LineRange[]) {
@@ -123,6 +132,57 @@
 
   function isMarkdown(p: string): boolean {
     return /\.(md|markdown|mdx)$/i.test(p);
+  }
+
+  // ----- Autoplay (self-running demo) ---------------------------------------
+
+  /// Arm (or re-arm) the per-step autoplay timer. Always clears the previous
+  /// timer first so a step never carries two pending advances; only schedules
+  /// a fresh one while autoplay is on. Called at the end of loadTarget() so the
+  /// cadence restarts cleanly on every step. The dwell is derived from the
+  /// narration length because the synthesiser has no reliable end signal.
+  function scheduleAutoAdvance() {
+    if (autoplayTimer) clearTimeout(autoplayTimer);
+    autoplayTimer = null;
+    if (!ps.autoplay) return;
+    const text = step?.narration ?? step?.title ?? '';
+    autoplayTimer = setTimeout(advanceAuto, autoplayDelayMs(text));
+  }
+
+  /// One autoplay tick. Mirrors go('next') but goes through the autoAdvance
+  /// action, which stops the demo on the last step instead of wrapping. When
+  /// it does stop, ps.autoplay is false and loadTarget()'s scheduleAutoAdvance
+  /// simply arms nothing — the deck rests on the final step.
+  async function advanceAuto() {
+    const before = ps.step;
+    ps = reduce(ps, { type: 'autoAdvance' });
+    if (ps.step !== before) {
+      await loadTarget();
+      await persistStep(ps.step);
+    }
+  }
+
+  /// The single place any user input calls to reclaim control from the demo.
+  /// Tears down the pending tick and flips autoplay off (no-op when it's
+  /// already off, so it's cheap to call from every handler).
+  function stopAutoplayIfActive() {
+    if (!ps.autoplay) return;
+    if (autoplayTimer) clearTimeout(autoplayTimer);
+    autoplayTimer = null;
+    ps = reduce(ps, { type: 'stopAutoplay' });
+  }
+
+  /// Toggle autoplay from the header button / the `a` key. Turning it on arms
+  /// the tick immediately; turning it off tears the pending timer down.
+  function toggleAutoplay() {
+    ps = reduce(ps, { type: 'toggleAutoplay' });
+    if (ps.autoplay) {
+      if (ps.narrator) void narrateCurrent();
+      scheduleAutoAdvance();
+    } else {
+      if (autoplayTimer) clearTimeout(autoplayTimer);
+      autoplayTimer = null;
+    }
   }
 
   // ----- Navigation ---------------------------------------------------------
@@ -145,6 +205,7 @@
   }
 
   async function go(action: 'next' | 'prev') {
+    stopAutoplayIfActive();
     const before = ps.step;
     ps = reduce(ps, { type: action });
     if (ps.step !== before) {
@@ -165,6 +226,7 @@
   }
 
   function toggleNarrator() {
+    stopAutoplayIfActive();
     ps = reduce(ps, { type: 'toggleNarrator' });
     narratorHint = '';
     if (ps.narrator) void narrateCurrent();
@@ -172,14 +234,17 @@
   }
 
   function toggleOverlay(overlay: Overlay) {
+    stopAutoplayIfActive();
     ps = reduce(ps, { type: 'toggleOverlay', overlay });
   }
 
   function cycleScale() {
+    stopAutoplayIfActive();
     ps = reduce(ps, { type: 'cycleScale' });
   }
 
   function exit() {
+    stopAutoplayIfActive();
     stopSpeaking();
     ps = reduce(ps, { type: 'exit' });
     presenterActive.set(false);
@@ -208,7 +273,15 @@
     // changing).
     ev.preventDefault();
     ev.stopPropagation();
+    // `a` (toggleAutoplay) is the one key the user presses to *start* the
+    // demo, so it must not tear autoplay down; every other key means the human
+    // is driving and hands control back (stopAutoplayIfActive). The wrapper
+    // functions (go/toggleNarrator/toggleOverlay/cycleScale/exit) already call
+    // it, so only the inline-reduce paths below need it explicitly.
     switch (action.type) {
+      case 'toggleAutoplay':
+        toggleAutoplay();
+        break;
       case 'next':
         void go('next');
         break;
@@ -225,12 +298,14 @@
         cycleScale();
         break;
       case 'setScale':
+        stopAutoplayIfActive();
         ps = reduce(ps, action);
         break;
       case 'exit':
         exit();
         break;
       default:
+        stopAutoplayIfActive();
         ps = reduce(ps, action);
     }
   }
@@ -240,7 +315,10 @@
     void loadBody();
     return () => window.removeEventListener('keydown', onKey, true);
   });
-  onDestroy(() => stopSpeaking());
+  onDestroy(() => {
+    stopSpeaking();
+    if (autoplayTimer) clearTimeout(autoplayTimer);
+  });
 </script>
 
 <section class="presenter" style="--scale: {ps.scale};" aria-label={$t('presenter.aria')}>
@@ -256,6 +334,13 @@
         title={$t('presenter.narrator.toggle')}
         aria-pressed={ps.narrator}
       >🔊 n</button>
+      <button
+        class="ctl"
+        class:on={ps.autoplay}
+        on:click={toggleAutoplay}
+        title={$t('presenter.autoplay.toggle')}
+        aria-pressed={ps.autoplay}
+      >▶ a</button>
       <button
         class="ctl"
         class:on={ps.overlays.has('risk')}

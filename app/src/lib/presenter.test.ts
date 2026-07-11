@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AUTOPLAY_MAX_MS,
+  AUTOPLAY_MIN_MS,
+  autoplayDelayMs,
   clampStep,
   DEFAULT_SCALE,
   initPresenter,
@@ -91,6 +94,10 @@ describe('keyToAction', () => {
     expect(keyToAction('n')).toEqual({ type: 'toggleNarrator' });
     expect(keyToAction('N')).toEqual({ type: 'toggleNarrator' });
   });
+  it('maps a to the autoplay toggle (either case)', () => {
+    expect(keyToAction('a')).toEqual({ type: 'toggleAutoplay' });
+    expect(keyToAction('A')).toEqual({ type: 'toggleAutoplay' });
+  });
   it('maps r and p to the overlay toggles', () => {
     expect(keyToAction('r')).toEqual({ type: 'toggleOverlay', overlay: 'risk' });
     expect(keyToAction('p')).toEqual({ type: 'toggleOverlay', overlay: 'pattern' });
@@ -116,13 +123,14 @@ describe('reduce', () => {
     expect(s.step).toBe(2);
   });
 
-  it('exit deactivates and clears overlays but keeps scale', () => {
+  it('exit deactivates, clears overlays and autoplay but keeps scale', () => {
     const s = reduce(
-      state({ active: true, scale: 1.5, overlays: new Set(['risk']) }),
+      state({ active: true, scale: 1.5, autoplay: true, overlays: new Set(['risk']) }),
       { type: 'exit' },
     );
     expect(s.active).toBe(false);
     expect(s.overlays.size).toBe(0);
+    expect(s.autoplay).toBe(false);
     expect(s.scale).toBe(1.5);
   });
 
@@ -147,6 +155,37 @@ describe('reduce', () => {
     expect(on.narrator).toBe(true);
     const off = reduce(on, { type: 'toggleNarrator' });
     expect(off.narrator).toBe(false);
+  });
+
+  it('toggleAutoplay off→on turns on autoplay AND the narrator', () => {
+    const on = reduce(state({ autoplay: false, narrator: false }), { type: 'toggleAutoplay' });
+    expect(on.autoplay).toBe(true);
+    expect(on.narrator).toBe(true);
+  });
+
+  it('toggleAutoplay on→off leaves the narrator preference untouched', () => {
+    const off = reduce(state({ autoplay: true, narrator: true }), { type: 'toggleAutoplay' });
+    expect(off.autoplay).toBe(false);
+    expect(off.narrator).toBe(true);
+  });
+
+  it('stopAutoplay clears autoplay and is a no-op when already off', () => {
+    const stopped = reduce(state({ autoplay: true }), { type: 'stopAutoplay' });
+    expect(stopped.autoplay).toBe(false);
+    const already = state({ autoplay: false });
+    expect(reduce(already, { type: 'stopAutoplay' })).toBe(already); // same reference, no-op
+  });
+
+  it('autoAdvance advances one step while autoplay stays on', () => {
+    const s = reduce(state({ step: 3, autoplay: true }), { type: 'autoAdvance' });
+    expect(s.step).toBe(4);
+    expect(s.autoplay).toBe(true);
+  });
+
+  it('autoAdvance on the last step ends the demo without looping', () => {
+    const s = reduce(state({ step: 11, total: 12, autoplay: true }), { type: 'autoAdvance' });
+    expect(s.step).toBe(11); // stays put — no wrap-around
+    expect(s.autoplay).toBe(false); // demo ends
   });
 
   it('toggleOverlay adds then removes an overlay', () => {
@@ -192,5 +231,22 @@ describe('reduce', () => {
     reduce(before, { type: 'toggleOverlay', overlay: 'pattern' });
     expect(before.overlays).toEqual(snapshot.overlays);
     expect(before.step).toBe(snapshot.step);
+  });
+});
+
+describe('autoplayDelayMs', () => {
+  it('an empty narration falls back to the minimum dwell', () => {
+    expect(autoplayDelayMs('')).toBe(AUTOPLAY_MIN_MS);
+    expect(autoplayDelayMs('   ')).toBe(AUTOPLAY_MIN_MS);
+  });
+  it('scales with the word count (3000 + words*380, clamped)', () => {
+    // 5 words → 3000 + 5*380 = 4900ms, above the 4000 floor.
+    expect(autoplayDelayMs('one two three four five')).toBe(4900);
+    // 10 words → 3000 + 10*380 = 6800ms.
+    expect(autoplayDelayMs('a b c d e f g h i j')).toBe(6800);
+  });
+  it('a very long narration is clamped to the maximum', () => {
+    const wall = Array.from({ length: 500 }, () => 'word').join(' ');
+    expect(autoplayDelayMs(wall)).toBe(AUTOPLAY_MAX_MS);
   });
 });
