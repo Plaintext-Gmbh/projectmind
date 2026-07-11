@@ -52,6 +52,10 @@
   let loading = true;
   let error: string | null = null;
   let empty = false;
+  /// WebGL missing (software rendering, disabled hardware acceleration):
+  /// instead of three's raw "Error creating WebGL context" the stage shows
+  /// an explanatory placeholder — every other diagram keeps working.
+  let webglUnavailable = false;
   let hasRisk = false;
   let truncated = false;
   let buildingCount = 0;
@@ -129,6 +133,22 @@
   /// (flying the pointer-locked camera around would be disorienting).
   let beacon: import('three').Mesh | null = null;
 
+  /// Sentinel thrown by buildScene when three's renderer constructor fails
+  /// despite the preflight (e.g. context-count exhaustion, driver blacklist)
+  /// — mountCity maps it onto the placeholder instead of the raw error text.
+  const WEBGL_UNAVAILABLE = new Error('WebGL unavailable');
+
+  /// Preflight: can this environment create a WebGL context at all?
+  /// Cheaper and friendlier than letting `new T.WebGLRenderer` throw.
+  function webglSupported(): boolean {
+    try {
+      const canvas = document.createElement('canvas');
+      return !!(canvas.getContext('webgl2') ?? canvas.getContext('webgl'));
+    } catch {
+      return false;
+    }
+  }
+
   async function mountCity() {
     loading = true;
     error = null;
@@ -140,6 +160,14 @@
       buildingCount = model.buildings.length;
       districtCount = model.districts.length;
       empty = buildingCount === 0;
+
+      // No WebGL → explanatory placeholder, and the (heavy) three chunk
+      // is never fetched at all.
+      if (!webglSupported()) {
+        webglUnavailable = true;
+        loading = false;
+        return;
+      }
 
       // Dynamic imports — the whole three chunk lands only now.
       const [threeModule, { OrbitControls }, { PointerLockControls }] = await Promise.all([
@@ -161,7 +189,8 @@
       applyTour();
       loading = false;
     } catch (err) {
-      error = String(err);
+      if (err === WEBGL_UNAVAILABLE) webglUnavailable = true;
+      else error = String(err);
       loading = false;
     }
   }
@@ -178,7 +207,14 @@
     // Night-sky parity with the folder-map SVG background.
     scene.background = new T.Color('#090d14');
 
-    renderer = new T.WebGLRenderer({ antialias: true });
+    // The preflight can pass and this still throw (context limit reached,
+    // GPU process gone) — same user story, same placeholder.
+    try {
+      renderer = new T.WebGLRenderer({ antialias: true });
+    } catch {
+      scene = null;
+      throw WEBGL_UNAVAILABLE;
+    }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(container.clientWidth || 1, container.clientHeight || 1);
     container.appendChild(renderer.domElement);
@@ -687,7 +723,7 @@
       class="walk-toggle"
       class:active={walkMode}
       aria-pressed={walkMode}
-      disabled={loading || !!error || empty}
+      disabled={loading || !!error || empty || webglUnavailable}
       on:click={toggleWalk}
       title={$t('diagram.codeCity.walkHud')}
     >{$t('diagram.codeCity.walk')}</button>
@@ -720,6 +756,13 @@
   </div>
   {#if loading}
     <div class="placeholder">{$t('diagram.rendering')}</div>
+  {:else if webglUnavailable}
+    <div class="placeholder no-webgl">
+      <span class="no-webgl-icon" aria-hidden="true">🏙</span>
+      <strong class="no-webgl-title">{$t('diagram.codeCity.noWebgl.title')}</strong>
+      <span>{$t('diagram.codeCity.noWebgl.body')}</span>
+      <span class="no-webgl-hint">{$t('diagram.codeCity.noWebgl.hint')}</span>
+    </div>
   {:else if error}
     <div class="error">⚠ {error}</div>
   {:else if empty}
@@ -727,7 +770,7 @@
   {/if}
   <div
     class="stage"
-    class:hidden={loading || !!error || empty}
+    class:hidden={loading || !!error || empty || webglUnavailable}
     bind:this={container}
     role="img"
     aria-label={$t('diagram.codeCity.aria')}
@@ -964,5 +1007,28 @@
   }
   .error {
     color: var(--error);
+  }
+  /* --- WebGL empty state (F7) — same tone as the other placeholders,
+     just with an icon + title so the "why" and the "what now" both land. */
+  .no-webgl {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 48px 24px;
+  }
+  .no-webgl-icon {
+    font-size: 28px;
+    opacity: 0.75;
+  }
+  .no-webgl-title {
+    font-size: 14px;
+    color: var(--fg-0);
+  }
+  .no-webgl-hint {
+    font-size: 12px;
+    color: var(--fg-2);
   }
 </style>
