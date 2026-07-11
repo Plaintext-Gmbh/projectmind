@@ -2,6 +2,8 @@
   "nav.files": "Dateien",
   "nav.home": "Home — Übersicht mit gelöschten Filtern",
   "nav.diagrams": "Diagramme",
+  "nav.demo": "Demo",
+  "nav.demoTitle": "Selbstlaufende Demo — die App führt selbst durch das offene Repo",
   "nav.walkthrough": "Tour",
   "nav.artifact": "Artefakt",
   "nav.artifactTitle": "Das KI-generierte Artefakt öffnen",

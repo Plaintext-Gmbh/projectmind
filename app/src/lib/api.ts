@@ -788,6 +788,21 @@ export async function endWalkthrough(): Promise<void> {
   return invoke<void>('end_walkthrough');
 }
 
+/// Outcome of the one-click self-demo — the persisted tour handle + step count.
+export interface SelfDemo {
+  walkthrough_id: string;
+  total: number;
+}
+
+/// One-click self-demo (V5.3): the server ranks the open repo, materialises a
+/// template-narrated tour, persists it, and points the state at step 0 in
+/// present + autoplay mode. The next state poll then opens the presenter and
+/// starts autoplay — this call just kicks it off.
+export async function selfDemo(persona?: string): Promise<SelfDemo> {
+  if (!isTauriRuntime()) return post<SelfDemo>('/api/self_demo', persona ? { persona } : {});
+  return invoke<SelfDemo>('self_demo', { persona });
+}
+
 // ----- Artifacts -----------------------------------------------------------
 
 export type ArtifactFormat = 'html' | 'markdown';
@@ -839,7 +854,7 @@ export type ViewIntent =
   | { kind: 'diagram'; diagram_kind: string }
   | { kind: 'diff'; reference: string; to?: string | null }
   | { kind: 'file'; path: string; anchor?: string | null }
-  | { kind: 'walkthrough'; id: string; step: number }
+  | { kind: 'walkthrough'; id: string; step: number; present?: boolean; autoplay?: boolean }
   | { kind: 'artifact'; id: string };
 
 export async function currentState(): Promise<UiState | null> {

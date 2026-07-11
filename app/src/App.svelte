@@ -27,6 +27,7 @@
     moduleSidebarVisible,
     classSidebarVisible,
     presenterActive,
+    demoAutostart,
   } from './lib/store';
   import {
     openRepo,
@@ -36,6 +37,7 @@
     listModuleFiles,
     showClass,
     currentState,
+    selfDemo,
     browserToken,
     clearBrowserToken,
     isTauriRuntime,
@@ -326,6 +328,18 @@
     if (!get(walkthroughCursor)) return;
     viewMode.set('walkthrough');
     presenterActive.set(true);
+  }
+
+  /// Kick off the one-click self-demo (V5.3): the server ranks the open repo,
+  /// materialises a tour, and points the state at it in present + autoplay
+  /// mode. The next state poll (walkthrough case above) opens the presenter and
+  /// starts autoplay — so there is nothing more to do here but surface errors.
+  async function runSelfDemo() {
+    try {
+      await selfDemo();
+    } catch (err) {
+      errorMessage.set(String(err));
+    }
   }
   // Reactive auto-push: any time a navigation-relevant store / local var
   // changes, snapshot it and hand it to nav.push. nav.push de-dupes against
@@ -736,6 +750,12 @@
             nonce: (cur?.nonce ?? 0) + 1,
           }));
           viewMode.set('walkthrough');
+          // Self-demo (V5.3): the `▶ Demo` / `self_demo` path tags the intent
+          // with `present` (open Presenter Mode) and `autoplay` (start the
+          // self-running deck). `demoAutostart` is a one-shot the presenter
+          // consumes on mount, so a normal tour push never auto-plays.
+          if (v.autoplay) demoAutostart.set(true);
+          if (v.present) enterPresenter();
           break;
         case 'artifact':
           artifactCursor.update((cur) => ({
@@ -1095,6 +1115,16 @@
       {:else}
         <button disabled>{codeTabLabel}</button>
         <button disabled>{$t('nav.diagrams')}</button>
+      {/if}
+      {#if $repo}
+        <button
+          class="demo-btn"
+          on:click={runSelfDemo}
+          title={$t('nav.demoTitle')}
+          aria-label={$t('nav.demo')}
+        >
+          ▶ {$t('nav.demo')}
+        </button>
       {/if}
       {#if $walkthroughCursor}
         <button
@@ -1950,6 +1980,18 @@
   }
   .walkthrough-btn:hover {
     background: color-mix(in srgb, var(--accent-2) 28%, var(--bg-1));
+  }
+
+  /* Self-demo entry (V5.3): the app narrates the open repo by itself.
+     Uses the primary accent so it reads as the headline action. */
+  .demo-btn {
+    background: color-mix(in srgb, var(--accent) 20%, var(--bg-1));
+    color: var(--accent);
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  .demo-btn:hover {
+    background: color-mix(in srgb, var(--accent) 32%, var(--bg-1));
   }
 
   .follow {

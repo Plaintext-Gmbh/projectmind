@@ -11,7 +11,8 @@
   import { marked } from 'marked';
   import { currentWalkthrough, setWalkthroughStep, showClass, readFileText } from '../lib/api';
   import type { Walkthrough, LineRange, ClassEntry } from '../lib/api';
-  import { presenterActive, walkthroughCursor, errorMessage } from '../lib/store';
+  import { presenterActive, walkthroughCursor, errorMessage, demoAutostart } from '../lib/store';
+  import { get } from 'svelte/store';
   import {
     initPresenter,
     reduce,
@@ -71,6 +72,14 @@
     ps = reduce(ps, { type: 'setTotal', total: body?.steps.length ?? 0 });
     ps = reduce(ps, { type: 'setStep', step: cursorStep });
     ps = reduce(ps, { type: 'enter' });
+    // Self-demo autostart (V5.3): if the `▶ Demo` path flagged autoplay, turn
+    // it on before the first loadTarget() so its scheduleAutoAdvance() arms the
+    // tick and narrateCurrent() reads step 0. One-shot — reset so a later manual
+    // `Present` opens paused. toggleAutoplay also enables the narrator.
+    if (get(demoAutostart)) {
+      demoAutostart.set(false);
+      if (!ps.autoplay) ps = reduce(ps, { type: 'toggleAutoplay' });
+    }
     await loadTarget();
   }
 

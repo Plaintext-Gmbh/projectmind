@@ -35,6 +35,7 @@ use crate::git::{self, CommitActivity};
 use crate::module_chord::{self, ModuleChord};
 use crate::repository::Repository;
 use crate::risk::{self, Options as RiskOptions, RiskScore};
+use crate::walkthrough::{self as wt, Walkthrough, WalkthroughStep, WalkthroughTarget};
 
 /// Commits inside this trailing window count toward the "activity" signal.
 pub const ACTIVITY_WINDOW_DAYS: u64 = 90;
@@ -508,6 +509,126 @@ fn repo_title(repo: &Repository) -> String {
     )
 }
 
+/// Turn a scaffold into a persistable [`Walkthrough`] with template narration
+/// built from each step's facts. English-only; steps stay editable via the
+/// walkthrough tools afterwards.
+///
+/// This is a pure data mapping (`TourScaffold` → `Walkthrough`, no IO). It
+/// lives in core so every surface — the `tour_scaffold` MCP tool, the
+/// `self_demo` one-click path, the Tauri command and the browser host — builds
+/// tours from the same code.
+#[must_use]
+pub fn materialize_walkthrough(scaffold: &TourScaffold) -> Walkthrough {
+    let title = format!("Tour: {}", scaffold.repo.title);
+    let summary = format!(
+        "Auto-generated tour of {} — {} module(s), {} class(es). \
+         Narration is template-generated; edit any step to refine it.",
+        scaffold.repo.title, scaffold.repo.modules_total, scaffold.repo.classes_total
+    );
+    let steps: Vec<WalkthroughStep> = scaffold
+        .suggested_steps
+        .iter()
+        .map(materialize_step)
+        .collect();
+    Walkthrough {
+        schema_version: wt::CURRENT_SCHEMA_VERSION,
+        id: wt::slugify_id(&title),
+        title,
+        summary,
+        steps,
+        quiz: Vec::new(),
+        updated_at: 0,
+    }
+}
+
+/// Map one [`SuggestedStep`] onto a [`WalkthroughStep`], joining its facts
+/// into a plain-markdown bullet list as the template narration.
+#[must_use]
+pub fn materialize_step(step: &SuggestedStep) -> WalkthroughStep {
+    let narration = if step.facts.is_empty() {
+        String::new()
+    } else {
+        step.facts
+            .iter()
+            .map(|f| format!("- {f}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let target = match &step.target {
+        StepTarget::Note => WalkthroughTarget::Note,
+        StepTarget::Class { fqn } => WalkthroughTarget::Class {
+            fqn: fqn.clone(),
+            highlight: Vec::new(),
+        },
+        StepTarget::Atlas { highlight } => WalkthroughTarget::Atlas {
+            module: None,
+            highlight_fqns: highlight.clone(),
+        },
+    };
+    WalkthroughStep {
+        title: step.title.clone(),
+        narration,
+        target,
+    }
+}
+
+/// Outcome of [`self_demo`]: the persisted tour handle and its step count.
+#[derive(Debug, Clone, Serialize)]
+pub struct SelfDemo {
+    /// Handle of the persisted walkthrough (`Walkthrough::id`).
+    pub walkthrough_id: String,
+    /// Number of steps in the generated tour.
+    pub total: usize,
+}
+
+/// One-click self-demo: rank the repo, materialise a template-narrated tour,
+/// persist it, and point the viewers at step 0 in **present + autoplay** mode.
+///
+/// This is the offline / no-client-LLM path behind the `▶ Demo` button: it
+/// reuses [`suggest_tour`] + [`materialize_walkthrough`], then mirrors the
+/// `walkthrough_start` persistence sequence (`wt::clear` → `wt::write_body` →
+/// `state::write`). The [`ViewIntent::Walkthrough`] it writes carries
+/// `present: true` and `autoplay: true` so the frontend opens the presenter and
+/// starts the self-running deck without any further clicks.
+///
+/// An empty / non-git repo degrades to a one-step overview tour rather than
+/// erroring — [`suggest_tour`] never fails.
+///
+/// # Errors
+/// Returns an [`std::io::Error`] if persisting the walkthrough body or the UI
+/// state fails.
+pub fn self_demo(
+    repo: &Repository,
+    framework: &dyn FrameworkPlugin,
+    top: usize,
+    persona: Persona,
+) -> std::io::Result<SelfDemo> {
+    use crate::state::{self, UiState, ViewIntent};
+
+    let scaffold = suggest_tour(repo, framework, top, persona);
+    let walkthrough = materialize_walkthrough(&scaffold);
+    let total = walkthrough.steps.len();
+
+    wt::clear()?;
+    let written = wt::write_body(walkthrough)?;
+    let prev = state::read().ok().flatten().unwrap_or_default();
+    state::write(UiState {
+        repo_root: prev.repo_root,
+        view: ViewIntent::Walkthrough {
+            id: written.id.clone(),
+            step: 0,
+            present: true,
+            autoplay: true,
+        },
+        ..UiState::default()
+    })?;
+
+    Ok(SelfDemo {
+        walkthrough_id: written.id,
+        total,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -911,5 +1032,71 @@ mod tests {
             }
             other => panic!("expected atlas target, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn materialize_step_maps_targets_and_narration() {
+        // Class step → Class target with facts joined as a bullet list.
+        let class_step = SuggestedStep {
+            title: "core".into(),
+            target: StepTarget::Class {
+                fqn: "a.Hub".into(),
+            },
+            facts: vec!["fact one".into(), "fact two".into()],
+        };
+        let ws = materialize_step(&class_step);
+        assert_eq!(ws.title, "core");
+        assert!(matches!(ws.target, WalkthroughTarget::Class { .. }));
+        assert!(ws.narration.contains("- fact one"));
+        assert!(ws.narration.contains("- fact two"));
+
+        // Atlas step carries the hotspot fqns.
+        let atlas_step = SuggestedStep {
+            title: "Where change happens".into(),
+            target: StepTarget::Atlas {
+                highlight: vec!["a.Hub".into()],
+            },
+            facts: vec![],
+        };
+        let ws = materialize_step(&atlas_step);
+        match ws.target {
+            WalkthroughTarget::Atlas { highlight_fqns, .. } => {
+                assert_eq!(highlight_fqns, vec!["a.Hub".to_string()]);
+            }
+            other => panic!("expected atlas target, got {other:?}"),
+        }
+        // No facts → empty narration.
+        assert!(ws.narration.is_empty());
+
+        // Note step round-trips to a Note target.
+        let note_step = SuggestedStep {
+            title: "Overview".into(),
+            target: StepTarget::Note,
+            facts: vec!["orient first".into()],
+        };
+        assert!(matches!(
+            materialize_step(&note_step).target,
+            WalkthroughTarget::Note
+        ));
+    }
+
+    #[test]
+    fn materialize_walkthrough_wraps_scaffold_steps() {
+        let core = mk_module("g:core", vec![klass("g:core.Hub")]);
+        let web = mk_module("g:web", vec![klass("g:web.A")]);
+        let repo = repo_with(vec![core, web]);
+        let fw = DummyFw { relations: vec![] };
+        let scaffold = suggest_tour(&repo, &fw, 5, Persona::NewDev);
+
+        let walkthrough = materialize_walkthrough(&scaffold);
+        assert!(walkthrough.title.starts_with("Tour: "));
+        assert_eq!(walkthrough.steps.len(), scaffold.suggested_steps.len());
+        assert_eq!(walkthrough.schema_version, wt::CURRENT_SCHEMA_VERSION);
+        assert!(walkthrough.quiz.is_empty());
+        // The overview step's target is a Note (matches build_steps' opener).
+        assert!(matches!(
+            walkthrough.steps[0].target,
+            WalkthroughTarget::Note
+        ));
     }
 }

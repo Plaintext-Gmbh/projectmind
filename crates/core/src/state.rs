@@ -85,6 +85,17 @@ pub enum ViewIntent {
         /// 0-based step pointer. Bumped by `walkthrough_set_step` and
         /// by user clicks on the step sidebar.
         step: u32,
+        /// When `true`, the frontend opens Presenter Mode for this tour on
+        /// arrival (the one-click `self_demo` path sets it). Defaults to
+        /// `false` and is omitted from serialisation then, so tours authored
+        /// or moved by every other code path stay byte-for-byte compatible.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        present: bool,
+        /// When `true`, the presenter starts the self-running autoplay deck on
+        /// arrival. Only meaningful alongside `present`. Defaults to `false`
+        /// and is omitted from serialisation then (backward-compatible).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        autoplay: bool,
     },
     /// An AI-generated artifact (HTML or Markdown). The body lives in
     /// [`crate::artifact::artifact_path`]; only the id rides in the state.

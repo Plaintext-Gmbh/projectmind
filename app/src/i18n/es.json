@@ -2,6 +2,8 @@
   "nav.files": "Archivos",
   "nav.home": "Inicio — Vista general con filtros borrados",
   "nav.diagrams": "Diagramas",
+  "nav.demo": "Demo",
+  "nav.demoTitle": "Demo automática — la app recorre por sí sola el repositorio abierto",
   "nav.walkthrough": "Tour",
   "nav.artifact": "Artefacto",
   "nav.artifactTitle": "Abrir el artefacto generado por la IA",

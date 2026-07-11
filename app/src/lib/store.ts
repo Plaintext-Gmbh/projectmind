@@ -49,6 +49,13 @@ export const walkthroughCursor = writable<WalkthroughCursor | null>(null);
 /// overlays) lives inside `PresenterView.svelte` via `lib/presenter.ts`.
 export const presenterActive = writable<boolean>(false);
 
+/// One-shot flag set by the `▶ Demo` self-demo path (state intent carried
+/// `autoplay: true`). When `PresenterView` mounts it reads this once, and if
+/// set, starts the self-running autoplay deck immediately, then resets it to
+/// `false` so a later manual `Present` doesn't auto-play. A plain flag rather
+/// than a prop keeps App.svelte's lazy `<PresenterView>` mount untouched.
+export const demoAutostart = writable<boolean>(false);
+
 export interface ArtifactCursor {
   id: string;
   /// Bumped on every applied artifact intent so the view re-fetches even when
