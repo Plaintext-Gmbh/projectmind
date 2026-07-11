@@ -353,23 +353,21 @@ pub fn churn_per_file(
         if commit.time().seconds() < cutoff {
             break;
         }
+        // Merge commits are skipped: their branch-side changes are counted
+        // at the original commits the walk visits anyway, so diffing a
+        // merge against its parents would double the churn of every file
+        // that arrives via a merge-PR workflow (same convention as
+        // `git::commit_activity` / `git::file_recency`).
+        if commit.parent_count() > 1 {
+            continue;
+        }
         let Ok(tree) = commit.tree() else { continue };
-        let parent_trees: Vec<git2::Tree<'_>> =
-            commit.parents().filter_map(|p| p.tree().ok()).collect();
-
-        if parent_trees.is_empty() {
-            if let Ok(diff) = repo.diff_tree_to_tree(None, Some(&tree), None) {
-                for path in paths(&diff) {
-                    *counts.entry(path).or_default() += 1;
-                }
-            }
-        } else {
-            for parent in &parent_trees {
-                if let Ok(diff) = repo.diff_tree_to_tree(Some(parent), Some(&tree), None) {
-                    for path in paths(&diff) {
-                        *counts.entry(path).or_default() += 1;
-                    }
-                }
+        // First parent, or the empty tree for a root commit (every file
+        // counts as added).
+        let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
+        if let Ok(diff) = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None) {
+            for path in paths(&diff) {
+                *counts.entry(path).or_default() += 1;
             }
         }
     }
@@ -623,6 +621,45 @@ mod tests {
             to: to.into(),
             kind: projectmind_plugin_api::RelationKind::Uses,
         }
+    }
+
+    #[test]
+    fn churn_per_file_skips_merge_commits() {
+        use crate::git::test_support::{build_merge_history, init_repo};
+
+        let dir = std::env::temp_dir().join(format!(
+            "projectmind-risk-churn-merge-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        struct Guard(PathBuf);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _guard = Guard(dir.clone());
+
+        let repo = init_repo(&dir);
+        let now = i64::try_from(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        )
+        .unwrap();
+        build_merge_history(&repo, &dir, now - 400);
+
+        let counts = churn_per_file(&dir, 365).unwrap();
+        // One touch per file — the merge commit must not re-count the
+        // branch's changes (pre-fix: feat/x.rs and main/y.rs showed 2).
+        assert_eq!(counts.get(Path::new("feat/x.rs")).copied(), Some(1));
+        assert_eq!(counts.get(Path::new("main/y.rs")).copied(), Some(1));
+        assert_eq!(counts.get(Path::new("base.txt")).copied(), Some(1));
     }
 
     #[test]

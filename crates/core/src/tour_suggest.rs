@@ -795,6 +795,76 @@ mod tests {
     }
 
     #[test]
+    fn activity_signal_joins_chord_and_git_module_ids_maven() {
+        // Regression for the dead activity signal: the chord side keys
+        // modules by the engine id (`MavenModule::coordinate()`, i.e.
+        // `groupId:artifactId`), while `commit_activity` runs its own
+        // manifest discovery. Both sides must produce the same id or
+        // `commits_90d` is always 0 and the 0.3 ranking weight is dead.
+        let git = TempGitRepo::new("join-maven");
+        std::fs::write(
+            git.dir.join("pom.xml"),
+            "<project><groupId>com.acme</groupId><artifactId>core</artifactId></project>",
+        )
+        .unwrap();
+        let hub = klass("core.Hub");
+        let core = mk_module_at("com.acme:core", git.dir.clone(), vec![hub]);
+        git.commit_classes(std::slice::from_ref(&core));
+
+        let mut repo = Repository::new(git.dir.clone());
+        repo.insert_module(core);
+        let scaffold = suggest_tour(&repo, &DummyFw { relations: vec![] }, 5, Persona::NewDev);
+
+        let ranked = scaffold
+            .ranking
+            .iter()
+            .find(|m| m.module == "com.acme:core")
+            .expect("ranked module");
+        assert_eq!(
+            ranked.commits_90d, 1,
+            "commit_activity ids must join onto the chord module id"
+        );
+        assert!(
+            ranked
+                .facts
+                .iter()
+                .any(|f| f.contains("1 commit(s) in 90d")),
+            "facts must report the joined activity, got {:?}",
+            ranked.facts
+        );
+    }
+
+    #[test]
+    fn activity_signal_joins_chord_and_git_module_ids_cargo() {
+        // Same join for Cargo with a literal version: the engine id is
+        // `name@version` (`CargoCrate::coordinate()`); a bare crate name on
+        // the activity side never matched it.
+        let git = TempGitRepo::new("join-cargo");
+        std::fs::write(
+            git.dir.join("Cargo.toml"),
+            "[package]\nname = \"core\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let engine = klass("core.Engine");
+        let core = mk_module_at("core@0.1.0", git.dir.clone(), vec![engine]);
+        git.commit_classes(std::slice::from_ref(&core));
+
+        let mut repo = Repository::new(git.dir.clone());
+        repo.insert_module(core);
+        let scaffold = suggest_tour(&repo, &DummyFw { relations: vec![] }, 5, Persona::NewDev);
+
+        let ranked = scaffold
+            .ranking
+            .iter()
+            .find(|m| m.module == "core@0.1.0")
+            .expect("ranked module");
+        assert_eq!(
+            ranked.commits_90d, 1,
+            "cargo `name@version` ids must join onto the chord module id"
+        );
+    }
+
+    #[test]
     fn persona_parse_falls_back_to_new_dev() {
         assert_eq!(Persona::parse("architect"), Persona::Architect);
         assert_eq!(Persona::parse("new-dev"), Persona::NewDev);
