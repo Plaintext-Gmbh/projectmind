@@ -346,6 +346,7 @@
   "presenter.exit": "Präsentationsmodus verlassen (Esc)",
   "presenter.scale": "Schriftgröße (+/-)",
   "presenter.narrator.toggle": "Vorleser umschalten (n)",
+  "presenter.autoplay.toggle": "Autoplay umschalten — selbstlaufende Demo (a)",
   "presenter.narrator.unavailable": "Keine OS-Sprachausgabe gefunden (say/espeak installieren). Vorleser ist aus.",
   "presenter.overlay.risk": "Risiko-Badges für diese Klasse ein-/ausblenden (r)",
   "presenter.overlay.pattern": "Pattern-Konformität für diese Klasse ein-/ausblenden (p)",

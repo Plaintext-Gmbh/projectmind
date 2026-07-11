@@ -346,6 +346,7 @@
   "presenter.exit": "Exit presenter mode (Esc)",
   "presenter.scale": "Font scale (+/-)",
   "presenter.narrator.toggle": "Toggle narrator (n)",
+  "presenter.autoplay.toggle": "Toggle autoplay — self-running demo (a)",
   "presenter.narrator.unavailable": "No OS speech engine found (install say/espeak). Narrator is off.",
   "presenter.overlay.risk": "Toggle risk badges for this class (r)",
   "presenter.overlay.pattern": "Toggle pattern compliance for this class (p)",

@@ -346,6 +346,7 @@
   "presenter.exit": "Esci dalla modalità presentazione (Esc)",
   "presenter.scale": "Dimensione carattere (+/-)",
   "presenter.narrator.toggle": "Attiva/disattiva narratore (n)",
+  "presenter.autoplay.toggle": "Attiva/disattiva la riproduzione automatica — demo autonoma (a)",
   "presenter.narrator.unavailable": "Nessun motore vocale di sistema trovato (installa say/espeak). Narratore disattivato.",
   "presenter.overlay.risk": "Mostra/nascondi i badge di rischio per questa classe (r)",
   "presenter.overlay.pattern": "Mostra/nascondi la conformità ai pattern per questa classe (p)",
