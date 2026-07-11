@@ -19,6 +19,7 @@ use std::thread;
 use std::time::Duration;
 
 use projectmind_core::artifact;
+use projectmind_core::doc_mentions;
 use projectmind_core::files::{self, MarkdownFile, MarkdownHit, ModuleFile};
 use projectmind_core::git::{self, ChangedFile};
 use projectmind_core::html::{self, HtmlFile, HtmlSnippet};
@@ -441,6 +442,25 @@ fn route_api(
         ("GET", "/api/class_outline") => {
             let fqn = required(query, "fqn")?;
             Ok(serde_json::to_value(class_outline_locked(&guard, fqn)?)?)
+        }
+        ("GET", "/api/docs_for_class") => {
+            // Code↔Doc bridge (#65): same core scan as the `docs_for_class`
+            // MCP tool and the Tauri command, so every host shows the same
+            // ranked mentions.
+            let fqn = required(query, "fqn")?;
+            let limit = query
+                .get("limit")
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(8)
+                .clamp(1, 50);
+            let repo = repo(&guard)?;
+            let (module, class) = repo
+                .find_class(fqn)
+                .ok_or_else(|| anyhow::anyhow!("class not found: {fqn}"))?;
+            let needle = doc_mentions::ClassNeedle::for_class(&repo.root, &module.root, class);
+            Ok(serde_json::to_value(doc_mentions::docs_for_class(
+                &repo.root, &needle, limit,
+            ))?)
         }
         ("GET", "/api/list_changes_since") => {
             let reference = required(query, "reference")?;

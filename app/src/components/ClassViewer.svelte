@@ -7,9 +7,10 @@
     MethodOutline,
     FieldOutline,
     AnnotationRef,
+    DocMentionHit,
   } from '../lib/api';
-  import { classOutline as fetchOutline } from '../lib/api';
-  import { classes, selectedClass } from '../lib/store';
+  import { classOutline as fetchOutline, docsForClass } from '../lib/api';
+  import { classes, selectedClass, fileView, viewMode } from '../lib/store';
   import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
   import { t } from '../lib/i18n';
 
@@ -132,6 +133,51 @@
       console.warn('class_outline failed:', err);
       if (outlineFqn === fqn) outline = null;
     }
+  }
+
+  // ----- Docs about this class (Code↔Doc bridge, #65) ---------------------
+
+  // Repo-internal Markdown docs mentioning the class, loaded in parallel to
+  // the outline with the same fqn-dedupe + race-guard pattern. Zero hits =
+  // the section is not rendered at all (deliberately quiet).
+  let docs: DocMentionHit[] = [];
+  let docsFqn: string | null = null;
+
+  $: if (klass && klass.fqn !== docsFqn) {
+    docsFqn = klass.fqn;
+    docs = [];
+    void loadDocs(klass.fqn);
+  }
+
+  async function loadDocs(fqn: string) {
+    try {
+      const hits = await docsForClass(fqn);
+      // Race guard: discard if the user clicked another class meanwhile.
+      if (docsFqn === fqn) docs = hits;
+    } catch (err) {
+      // Non-fatal — without hits the section simply stays hidden.
+      console.warn('docs_for_class failed:', err);
+      if (docsFqn === fqn) docs = [];
+    }
+  }
+
+  // Literal key record so the i18n unused-key scan sees every key verbatim.
+  const KIND_KEY = {
+    link: 'classDocs.kind.link',
+    fqn: 'classDocs.kind.fqn',
+    code: 'classDocs.kind.code',
+    name: 'classDocs.kind.name',
+  } as const;
+
+  function openDoc(hit: DocMentionHit) {
+    // Exactly the MarkdownIndex.open() pattern: point the file view at the
+    // doc and switch the main pane to the markdown renderer.
+    fileView.update((cur) => ({
+      path: hit.abs,
+      anchor: null,
+      nonce: (cur?.nonce ?? 0) + 1,
+    }));
+    viewMode.set('file');
   }
 
   function jumpToLine(line: number) {
@@ -491,6 +537,32 @@
               </ul>
             </div>
           {/if}
+        {/if}
+        <!-- Docs about this class (#65). Rendered independently of the
+             outline fetch and only when there is at least one hit — a class
+             without doc mentions shows no trace of the feature. -->
+        {#if docs.length > 0}
+          <div class="outline-section docs">
+            <h3>{$t('classDocs.title')} <span class="count">{docs.length}</span></h3>
+            <ul>
+              {#each docs as d (d.rel)}
+                <li>
+                  <button
+                    type="button"
+                    class="outline-row doc-row"
+                    on:click={() => openDoc(d)}
+                    title={`${d.rel}:${d.line}\n${d.snippet}`}
+                  >
+                    <span class="doc-title">{d.title}</span>
+                    <span class="doc-kind">{$t(KIND_KEY[d.kind])}</span>
+                    {#if d.count > 1}
+                      <span class="doc-count">×{d.count}</span>
+                    {/if}
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          </div>
         {/if}
       </aside>
     {/if}
@@ -890,5 +962,31 @@
     color: var(--fg-2);
     font-style: italic;
     text-align: center;
+  }
+
+  /* ----- Docs about this class (#65) ------------------------------------ */
+
+  /* The doc row has no visibility-glyph column, so it overrides the shared
+     .outline-row grid with a 3-column layout: title (ellipsed) + kind badge
+     + hit-count chip. */
+  .outline-row.doc-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+  .doc-row .doc-title {
+    color: var(--fg-0);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .doc-row .doc-kind {
+    /* 0.8em statt 10px: skaliert mit Zoom. */
+    font-size: 0.8em;
+    color: var(--accent-2);
+    white-space: nowrap;
+  }
+  .doc-row .doc-count {
+    /* 0.8em statt 10px: skaliert mit Zoom. */
+    font-size: 0.8em;
+    color: var(--fg-2);
   }
 </style>

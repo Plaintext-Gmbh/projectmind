@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use projectmind_browser_host::{self as browser_host, BrowserHostConfig};
 use projectmind_core::artifact::{self, ArtifactError, ArtifactFormat};
 use projectmind_core::coverage;
+use projectmind_core::doc_mentions;
 use projectmind_core::file_access;
 use projectmind_core::files;
 use projectmind_core::patterns::{self as core_patterns, Pattern, Scope as PatternScope};
@@ -133,6 +134,17 @@ fn fqn_schema() -> Value {
         "type": "object",
         "properties": {
             "fqn": { "type": "string", "description": "Fully-qualified class name" }
+        },
+        "required": ["fqn"]
+    })
+}
+
+fn docs_for_class_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "fqn":   { "type": "string", "description": "Fully-qualified class name" },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 12, "description": "Maximum number of documents to return" }
         },
         "required": ["fqn"]
     })
@@ -516,6 +528,11 @@ pub(crate) fn list() -> Value {
                 "inputSchema": no_args_schema()
             },
             {
+                "name": "docs_for_class",
+                "description": "Repo-internal Markdown documents that mention a class or link to its source file. Ranked: source-file link > FQN > inline-code name > bare distinctive name. Use to find the ADRs/runbooks/design docs behind the code you are reading.",
+                "inputSchema": docs_for_class_schema()
+            },
+            {
                 "name": "view_class",
                 "description": "Open a class in every ProjectMind viewer that is currently running (Desktop GUI and/or browser webapp from `open_browser_repo`). Use after the user says `show me class X` / `open class X`. Pushes UI state via the shared statefile — no per-viewer routing exists. Auto-launches the Desktop GUI if no viewer is up; takes precedence over manual GUI navigation.",
                 "inputSchema": fqn_schema()
@@ -642,6 +659,7 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "plugin_info" => plugin_info(state).await,
         "list_html" => list_html(state).await,
         "list_html_snippets" => list_html_snippets(state).await,
+        "docs_for_class" => docs_for_class(state, parsed.arguments).await,
         "view_class" => view_class(state, parsed.arguments).await,
         "view_diff" => view_diff(parsed.arguments),
         "view_file" => view_file(parsed.arguments),
@@ -1032,6 +1050,36 @@ async fn class_outline(state: &Mutex<ServerState>, args: Value) -> DispatchResul
         });
         Ok(text_result(
             serde_json::to_string_pretty(&body).unwrap_or_default(),
+        ))
+    })
+}
+
+#[derive(Deserialize)]
+struct DocsForClassArgs {
+    fqn: String,
+    #[serde(default = "default_docs_limit")]
+    limit: u32,
+}
+
+fn default_docs_limit() -> u32 {
+    12
+}
+
+/// Code↔Doc bridge (#65): rank the repo-internal Markdown documents that
+/// mention a class. Same core scan the GUI's `ClassViewer` "Docs" section uses.
+async fn docs_for_class(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
+    let args: DocsForClassArgs = serde_json::from_value(args)
+        .map_err(|e| DispatchError::invalid_params(format!("docs_for_class: {e}")))?;
+    let limit = args.limit.clamp(1, 50) as usize;
+    let state = state.lock().await;
+    with_repo(&state, |repo| {
+        let (module, class) = repo.find_class(&args.fqn).ok_or_else(|| {
+            DispatchError::invalid_params(format!("class not found: {}", args.fqn))
+        })?;
+        let needle = doc_mentions::ClassNeedle::for_class(&repo.root, &module.root, class);
+        let mentions = doc_mentions::docs_for_class(&repo.root, &needle, limit);
+        Ok(text_result(
+            serde_json::to_string_pretty(&mentions).unwrap_or_else(|_| "[]".into()),
         ))
     })
 }

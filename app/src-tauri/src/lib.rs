@@ -28,7 +28,7 @@ use projectmind_core::state::{self, UiState, ViewIntent};
 use projectmind_core::walkthrough::{
     self as wt, FeedbackEvent, FeedbackKind, FeedbackLog, Walkthrough,
 };
-use projectmind_core::{code_city, diagram, risk, tts, Engine, Repository};
+use projectmind_core::{code_city, diagram, doc_mentions, risk, tts, Engine, Repository};
 use projectmind_framework_lombok::LombokPlugin;
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_lang_java::JavaPlugin;
@@ -574,6 +574,31 @@ fn class_outline(fqn: String, state: State<'_, Arc<AppState>>) -> Result<ClassOu
     let report = projectmind_core::coverage::load(&repo.root);
     outline.coverage = class_coverage(report.as_ref(), class);
     Ok(outline)
+}
+
+/// Repo-internal Markdown documents that mention the class (#65). Thin
+/// wrapper around `projectmind_core::doc_mentions` — the same scan the
+/// `docs_for_class` MCP tool runs, so the GUI's "Docs" section and the LLM
+/// see identical data.
+#[tauri::command]
+fn docs_for_class(
+    fqn: String,
+    limit: Option<usize>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<doc_mentions::DocMention>, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    let (module, class) = repo
+        .find_class(&fqn)
+        .ok_or_else(|| format!("class not found: {fqn}"))?;
+    let needle = doc_mentions::ClassNeedle::for_class(&repo.root, &module.root, class);
+    Ok(doc_mentions::docs_for_class(
+        &repo.root,
+        &needle,
+        limit.unwrap_or(8).clamp(1, 50),
+    ))
 }
 
 #[tauri::command]
@@ -1329,6 +1354,7 @@ pub fn run() {
             walkthrough_query,
             show_class,
             class_outline,
+            docs_for_class,
             list_changes_since,
             file_recency,
             commit_activity,

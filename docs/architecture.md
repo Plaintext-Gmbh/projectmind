@@ -126,7 +126,7 @@ For Phase 1, all plugins are **statically registered** in `core::registry` via a
 
 ## MCP Tools
 
-38 tools as of v0.11 — the full name/parameter reference lives in the
+39 tools as of v0.11 + unreleased — the full name/parameter reference lives in the
 [README tool table](../README.md); this section only maps them onto the
 architecture. Grouped by concern:
 
@@ -146,7 +146,8 @@ architecture. Grouped by concern:
   `walkthrough_set_step`, `walkthrough_clear`, `walkthrough_feedback`,
   `walkthrough_query` (semantic tour search), `tour_scaffold` (auto-narrated
   tour skeleton), `risk_atlas`, `pattern_check`, `architect_briefing`
-- **Docs & artifacts** — `list_html`, `list_html_snippets`,
+- **Docs & artifacts** — `list_html`, `list_html_snippets`, `docs_for_class`
+  (ranked in-repo Markdown mentions of a class — the code↔doc bridge),
   `present_artifact`, `list_artifacts`
 
 The MCP server is the bus between the LLM and the IDE: every operation in the UI is, ultimately, one of these tools (so anything the user does is reproducible by the LLM, and vice versa).
