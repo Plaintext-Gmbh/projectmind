@@ -21,6 +21,7 @@ export type DiagramKind =
   | 'doc-graph'
   | 'c4-container'
   | 'c4-model'
+  | 'c4-component'
   | 'architecture-layers'
   | 'architecture-flow'
   | 'module-chord'

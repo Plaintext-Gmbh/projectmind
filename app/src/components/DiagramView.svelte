@@ -7,12 +7,25 @@
     showDiagram,
     scaffoldC4Model,
     mergeC4Model,
+    beanGraphData,
     fileRecency,
     commitActivity,
     listChangesSince,
     revealInFileManager,
   } from '../lib/api';
-  import type { ChangedFile, ClassEntry, DiagramKind, CommitActivity } from '../lib/api';
+  import type {
+    ChangedFile,
+    ClassEntry,
+    DiagramKind,
+    CommitActivity,
+    BeanGraphData,
+  } from '../lib/api';
+  import {
+    moduleList,
+    c4ComponentMermaid,
+    hiddenComponentCount,
+    type ModuleListEntry,
+  } from '../lib/diagrams/c4Component';
   import {
     classes,
     selectedClass,
@@ -93,6 +106,17 @@
   // c4-model round-trip (#142, V6.3): "Modell aktualisieren" merges new code
   // structure into docs/architecture.dsl without touching user edits.
   let merging = false;
+
+  // c4-component (#142, V6.4): the component-level zoom into ONE container.
+  // Reuses the bean_graph_data payload (no new backend data) — fetched once,
+  // cached across module-picker switches so flipping the dropdown re-renders
+  // the Mermaid text without a re-fetch. `c4Modules` is the picker list (sorted
+  // densest-first), `c4Module` the selected module id, and `c4HiddenCount` the
+  // "+N more" hint when the readability cap dropped some classes.
+  let c4Data: BeanGraphData | null = null;
+  let c4Modules: ModuleListEntry[] = [];
+  let c4Module = '';
+  let c4HiddenCount = 0;
 
   $: selectedDoc = docGraph?.nodes.find((n) => n.id === selectedDocId) ?? null;
   $: selectedOutgoing = selectedDocId
@@ -458,6 +482,50 @@
       }
       timelineRiver = null;
 
+      // c4-component (#142, V6.4): the container-zoom view. Reuses the
+      // bean_graph_data payload — fetched once and cached so the module
+      // dropdown re-renders without a re-fetch. The frontend builds the
+      // Mermaid `C4Component` text (c4Component.ts) and feeds it through the
+      // shared Mermaid renderer, exactly like c4-container / c4-model.
+      if (k === 'c4-component') {
+        docGraph = null;
+        drawIoXml = '';
+        folderMap = null;
+        selectedFolderNode = null;
+        languageStats = null;
+        architectureFlow = null;
+        moduleChord = null;
+        activityHeatmap = null;
+        c4ModelAbsent = false;
+        if (!c4Data) {
+          c4Data = await beanGraphData();
+          c4Modules = moduleList(c4Data);
+          // Default to the densest module (moduleList is sorted desc by class
+          // count); keep the current pick if it survives into the new payload.
+          if (!c4Modules.some((m) => m.id === c4Module)) {
+            c4Module = c4Modules[0]?.id ?? '';
+          }
+        }
+        if (c4Modules.length === 0) {
+          // No parsed classes → nothing to zoom into. Show a Mermaid-free hint
+          // via the error path's empty state instead of an invalid diagram.
+          mermaidSource = '';
+          svg = '';
+          c4HiddenCount = 0;
+          loading = false;
+          return;
+        }
+        mermaidSource = c4ComponentMermaid(c4Data, c4Module);
+        c4HiddenCount = hiddenComponentCount(mermaidSource);
+        const c4Id = `mermaid-${Date.now()}`;
+        const c4Result = await mermaid.render(c4Id, mermaidSource);
+        svg = c4Result.svg;
+        resetView();
+        await tick();
+        applyRenderedSvgSize();
+        return;
+      }
+
       const payload = await showDiagram(k);
       // c4-model (#142): if docs/architecture.dsl is not scaffolded yet the
       // backend returns a sentinel — show the "scaffold it" empty state
@@ -588,6 +656,27 @@
     } finally {
       merging = false;
     }
+  }
+
+  /// c4-component (#142, V6.4): the module picker changed. Re-render from the
+  /// already-fetched, cached payload — no network round-trip. Ignores no-op
+  /// re-selections of the current module.
+  function selectC4Module(id: string) {
+    if (!id || id === c4Module) return;
+    c4Module = id;
+    void render(kind, folderLayout, docGraphLayout);
+  }
+
+  /// Drop the cached bean-graph payload when the open repo changes so the
+  /// c4-component picker never shows stale modules from a previous repo. The
+  /// next render for the kind re-fetches + rebuilds the module list.
+  let c4DataRoot: string | null = null;
+  $: if (($repo?.root ?? null) !== c4DataRoot) {
+    c4DataRoot = $repo?.root ?? null;
+    c4Data = null;
+    c4Modules = [];
+    c4Module = '';
+    c4HiddenCount = 0;
   }
 
   /// Fit the freshly-rendered stage `<svg>` to the stage box at scale=1 so
@@ -1022,6 +1111,29 @@
       >
         {merging ? $t('diagram.c4Model.updating') : $t('diagram.c4Model.update')}
       </button>
+    {:else if kind === 'c4-component' && c4Modules.length > 0}
+      <!-- c4-component (#142, V6.4): the container picker. Zooms into ONE
+           module's classes as C4 components; switching re-renders from the
+           cached bean-graph payload (no re-fetch). -->
+      <span class="divider"></span>
+      <label class="c4-picker-label" for="c4-component-module">
+        {$t('diagram.c4Component.picker')}
+      </label>
+      <select
+        id="c4-component-module"
+        class="c4-picker"
+        value={c4Module}
+        on:change={(e) => selectC4Module((e.target as HTMLSelectElement).value)}
+      >
+        {#each c4Modules as m (m.id)}
+          <option value={m.id}>{m.label} ({m.classCount})</option>
+        {/each}
+      </select>
+      {#if c4HiddenCount > 0}
+        <span class="c4-hidden-hint" title={$t('diagram.c4Component.moreTitle')}>
+          {$t('diagram.c4Component.more', { count: c4HiddenCount })}
+        </span>
+      {/if}
     {/if}
     <span class="zoom-readout">{Math.round(scale * 100)}%</span>
     {#if kind === 'doc-graph' && docGraph}
@@ -1068,6 +1180,12 @@
       <button class="c4-scaffold" on:click={scaffoldModel} disabled={scaffolding}>
         {scaffolding ? $t('diagram.c4Model.scaffolding') : $t('diagram.c4Model.scaffold')}
       </button>
+    </div>
+  {:else if kind === 'c4-component' && c4Modules.length === 0}
+    <!-- c4-component (#142, V6.4): the bean-graph payload has no modules with
+         parsed classes, so there is nothing to zoom into. -->
+    <div class="c4-empty">
+      <p class="c4-empty-title">{$t('diagram.c4Component.empty')}</p>
     </div>
   {:else if drawIoXml}
     <div class="drawio-stage">
@@ -1248,6 +1366,36 @@
   .toolbar button.c4-update:disabled {
     opacity: 0.6;
     cursor: default;
+  }
+
+  /* c4-component (#142, V6.4): the container picker dropdown + its label. */
+  .c4-picker-label {
+    font-size: 11px;
+    color: var(--fg-2);
+    margin-right: 2px;
+  }
+
+  .c4-picker {
+    height: 24px;
+    max-width: 220px;
+    padding: 0 6px;
+    font-size: 12px;
+    color: var(--fg-1);
+    background: var(--bg-2);
+    border: 1px solid var(--bg-3);
+    border-radius: 4px;
+  }
+
+  .c4-picker:focus {
+    outline: none;
+    border-color: var(--accent-2);
+  }
+
+  .c4-hidden-hint {
+    font-size: 11px;
+    color: var(--fg-2);
+    padding-left: 4px;
+    white-space: nowrap;
   }
 
   .divider {

@@ -99,6 +99,7 @@ fn diagram_schema() -> Value {
                     "doc-graph",
                     "c4-container",
                     "c4-model",
+                    "c4-component",
                     "architecture-layers",
                     "architecture-flow",
                     "module-chord",
@@ -1370,6 +1371,11 @@ fn view_diagram(args: Value) -> DispatchResult {
         && args.kind != "inheritance-tree"
         && args.kind != "doc-graph"
         && args.kind != "c4-container"
+        && args.kind != "c4-model"
+        // c4-component (#142, V6.4): live-only kind like bean-graph-live —
+        // the viewer renders it from bean_graph_data; show_diagram doesn't
+        // serve it, but view_diagram may push it.
+        && args.kind != "c4-component"
         && args.kind != "architecture-layers"
         && args.kind != "architecture-flow"
         && args.kind != "module-chord"
@@ -2269,6 +2275,8 @@ mod tests {
         assert!(kinds.contains(&"bean-graph-live"));
         assert!(kinds.contains(&"timeline-river"));
         assert!(kinds.contains(&"code-city"));
+        // c4-component (#142, V6.4): live-only, frontend-rendered kind.
+        assert!(kinds.contains(&"c4-component"));
     }
 
     #[test]

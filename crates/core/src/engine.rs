@@ -232,6 +232,11 @@ impl Engine {
                 // c4-container so the "scaffold it" empty state is reachable
                 // even before the file exists.
                 out.insert("c4-model".to_string());
+                // c4-component (#142, V6.4) zooms into ONE container: the
+                // frontend picks a module and renders its classes as C4
+                // components from the bean_graph_data payload. Live-only like
+                // bean-graph-live — no show_diagram arm; the viewer renders it.
+                out.insert("c4-component".to_string());
                 out.insert("architecture-layers".to_string());
                 // architecture-flow is the prettier, interactive variant
                 // of architecture-layers — both stay available because

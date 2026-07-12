@@ -18,7 +18,7 @@ that speaks the **Model Context Protocol (MCP)**.
 </p>
 <p align="center"><sub>An AI agent authors this tour <strong>live over MCP</strong> — steps, line highlights and narration are pushed into the viewer. No human clicked anything.</sub></p>
 
-> **Status:** v0.11 — MCP server + desktop app for **macOS, Linux and Windows**, with signed auto-updates. Java + Rust language plugins, Spring + Lombok framework recognisers, fifteen diagram types (see the catalogue below — from bean graph and C4 container up to an animated live bean graph and a 3D code city), Markdown + HTML browsers (sandboxed), guided AI walkthroughs with quiz support, presenter mode with PDF tour export, an Architect's Cockpit (risk atlas, pattern-drift detection, semantic tour lookup, morning briefing), live AI-generated HTML/Markdown artifacts, and bidirectional MCP sync between LLM, desktop app and browser.
+> **Status:** v0.11 — MCP server + desktop app for **macOS, Linux and Windows**, with signed auto-updates. Java + Rust language plugins, Spring + Lombok framework recognisers, sixteen diagram types (see the catalogue below — from bean graph and C4 container up to an animated live bean graph and a 3D code city), Markdown + HTML browsers (sandboxed), guided AI walkthroughs with quiz support, presenter mode with PDF tour export, an Architect's Cockpit (risk atlas, pattern-drift detection, semantic tour lookup, morning briefing), live AI-generated HTML/Markdown artifacts, and bidirectional MCP sync between LLM, desktop app and browser.
 
 ## Quickstart
 
@@ -67,7 +67,7 @@ Modern AI-assisted development with CLI agents is great — until you want to *s
 The Tauri shell's main views (each disabled until a repository is open):
 
 - **Files** — module sidebar, class list, source viewer with stereotype filters, package drilldown. Also hosts every Markdown file in the repo (rendered preview, mermaid blocks, embedded images) and every `.html` / `.xhtml` / `.htm` / `.jsp` / `.vm` / `.ftl` file plus HTML snippets extracted from `.java` / `.kt` / `.groovy` / `.scala` string literals (Java text blocks supported). Toggle Rendered ↔ Source; Rendered uses a strict sandbox iframe (no JS, no network) so untrusted repo content stays inert.
-- **Diagrams** — the fifteen-kind diagram catalogue below; click a node to drill in. A collapsible mini-map overlay (thumbnail + viewport rectangle, click/drag to pan) keeps you oriented on large graphs.
+- **Diagrams** — the sixteen-kind diagram catalogue below; click a node to drill in. A collapsible mini-map overlay (thumbnail + viewport rectangle, click/drag to pan) keeps you oriented on large graphs.
 - **Compare** — branch & tag compare with commits / changed files / unified diff sub-tabs.
 - **Risk Atlas** — per-class risk (churn + complexity + coverage + fan-in) as a treemap.
 - **Patterns** — architecture-drift compliance heatmap (patterns × modules); violation cells drill into `file:line` lists.
@@ -76,7 +76,7 @@ A **Tour** / **Present** button appears while a guided walkthrough is active, an
 
 ## Diagram catalogue
 
-Fifteen diagram kinds. Core contributes the filesystem- and git-based ones
+Sixteen diagram kinds. Core contributes the filesystem- and git-based ones
 unconditionally; language and framework plugins contribute the rest, so the
 sidebar only offers what the open repo can actually render:
 
@@ -88,6 +88,7 @@ sidebar only offers what the open repo can actually render:
 - **Doc graph** — the repo's markdown files as a clickable graph (network / radial / orphans layouts, orphan + dangling-link counts).
 - **C4 container** — one container per module, rendered via draw.io (exportable).
 - **C4 model (editable)** — the round-trip sibling of C4 container ([#142](https://github.com/Plaintext-Gmbh/projectmind/issues/142)): `scaffold_c4_model` writes `docs/architecture.dsl` (a Structurizr-DSL subset) once, you hand-edit it in Git, and this kind parses it back to Mermaid. ProjectMind never overwrites the file, so the architecture is yours to own — JVM-free, no Structurizr CLI. When the code grows, the view's **Update model** button (or the `merge_c4_model` tool) folds the new modules, classes and relations in **additively** — your own edits, hand-added elements and comments are preserved byte-for-byte.
+- **C4 component** — the container-level zoom ([#142](https://github.com/Plaintext-Gmbh/projectmind/issues/142)): pick one module from a dropdown and see its classes as C4 components with their relations (intra-module `Rel`s; cross-module dependencies collapse to `Container_Ext` boundaries). Reuses the `bean_graph_data` payload — no new backend data — and the top classes by in-module fan-in are shown when a module is too dense to draw legibly.
 - **Architecture layers** — layered draw.io view, kept for export.
 - **Architecture flow** — interactive Controller / Service / Repository / Entity bands with flow arrows whose width tracks the relation count.
 - **Module chord** — cross-module coupling as a circular chord diagram.
@@ -157,7 +158,7 @@ custom agent — can connect to. It implements:
 | `view_class` | Open a class in every running viewer (desktop GUI and/or browser webapp); auto-launches the desktop GUI if none is up. |
 | `view_file` | Open an arbitrary file in every running viewer — Markdown rendered (mermaid + images), everything else as source. |
 | `view_diff` | Open the diff view between two refs (or ref vs working tree) in every running viewer. |
-| `view_diagram` | Open one of the fifteen diagram kinds in every running viewer. |
+| `view_diagram` | Open one of the sixteen diagram kinds in every running viewer. |
 | `start_gui` | Launch the ProjectMind desktop app if it isn't already running (the `view_*` tools auto-launch on demand, so call this only to bring up the window before any view intent). Honours `$PROJECTMIND_APP` for an override path. |
 | `open_browser_repo` | Start the in-process browser host that serves the ProjectMind webapp at a tokenized URL — same UI as the Tauri shell, but reachable from any browser. Default binds on `127.0.0.1`; pass `lan: true` to bind on `0.0.0.0` so the URL works from another device on the same WLAN (iPad / phone / second laptop). The bearer token in the URL fragment gates every API call. |
 | `browser_status` | Return the running browser host's bind address, tokenized URLs and open repo, or null if no host is started. Side-effect free — handy to re-surface the URL/token without restarting the host. |

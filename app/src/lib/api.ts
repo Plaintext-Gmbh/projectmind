@@ -511,6 +511,7 @@ export type DiagramKind =
   | 'doc-graph'
   | 'c4-container'
   | 'c4-model'
+  | 'c4-component'
   | 'architecture-layers'
   | 'architecture-flow'
   | 'module-chord'
@@ -520,10 +521,12 @@ export type DiagramKind =
   | 'code-city';
 
 /// Fetch the payload for a `show_diagram`-backed kind. NOTE: `timeline-river`,
-/// `bean-graph-live` and `code-city` are *not* served here — each has its own
-/// endpoint (`commitActivity()` / `beanGraphData()` / `codeCityData()`); the
-/// backend `show_diagram` command does not know those kinds. DiagramView
-/// routes them to their dedicated endpoints before ever calling `showDiagram`.
+/// `bean-graph-live`, `code-city` and `c4-component` are *not* served here —
+/// each has its own data endpoint (`commitActivity()` / `beanGraphData()` /
+/// `codeCityData()`; `c4-component` reuses `beanGraphData()` and builds the
+/// Mermaid text in the frontend). The backend `show_diagram` command does not
+/// know those kinds; DiagramView routes them to their dedicated endpoints
+/// before ever calling `showDiagram`.
 export async function showDiagram(kind: DiagramKind): Promise<string> {
   if (!isTauriRuntime()) return api<string>(`/api/show_diagram${query({ kind })}`);
   return invoke<string>('show_diagram', { kind });
