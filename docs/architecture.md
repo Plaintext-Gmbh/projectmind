@@ -163,7 +163,16 @@ architecture. Grouped by concern:
   that calls `merge_c4_model` once the model exists). Both actions are exposed
   across the same four surfaces as every other action (MCP tool, Tauri command,
   browser-host route, `api.ts` wrapper), all calling one
-  `core::c4_dsl::{scaffold_c4_model, merge_c4_model}`.
+  `core::c4_dsl::{scaffold_c4_model, merge_c4_model}`. The **`c4-component`**
+  diagram (V6.4, #142) is the C4 level-3 *zoom*: the user picks one container
+  (module) from a dropdown and the frontend renders that module's classes as C4
+  `Component`s with their relations. It carries **no new backend data** — the
+  viewer reuses the existing `bean_graph_data` payload and builds the Mermaid
+  `C4Component` text in a pure, unit-tested `app/src/lib/diagrams/c4Component.ts`
+  (`moduleList` for the picker; `c4ComponentMermaid` for the text, capping a
+  dense module to its top classes by in-module fan-in). So it is a **live-only**
+  kind like `bean-graph-live`: registered in `available_diagrams` and pushable
+  via `view_diagram`, but `show_diagram` has no arm for it.
 - **Viewer pushes (statefile intents)** — `view_class`, `view_file`,
   `view_diff`, `start_gui`
 - **Browser host** — `open_browser_repo`, `browser_status`, `stop_browser`

@@ -32,9 +32,9 @@
         return 'languages';
       default:
         // bean-graph, bean-graph-live, package-tree, inheritance-tree,
-        // c4-container, architecture-layers, module-chord, architecture-flow
-        // — and any future kind this frontend doesn't know yet, so nothing
-        // ever drops out of the sidebar.
+        // c4-container, c4-model, c4-component, architecture-layers,
+        // module-chord, architecture-flow — and any future kind this frontend
+        // doesn't know yet, so nothing ever drops out of the sidebar.
         return 'structure';
     }
   }
@@ -85,6 +85,8 @@
         return $t('diagram.c4Container');
       case 'c4-model':
         return $t('diagram.c4Model');
+      case 'c4-component':
+        return $t('diagram.c4Component');
       case 'architecture-layers':
         return $t('diagram.architectureLayers');
       case 'language-stats':
@@ -122,6 +124,8 @@
         return $t('diagram.description.c4Container');
       case 'c4-model':
         return $t('diagram.description.c4Model');
+      case 'c4-component':
+        return $t('diagram.description.c4Component');
       case 'architecture-layers':
         return $t('diagram.description.architectureLayers');
       case 'language-stats':
