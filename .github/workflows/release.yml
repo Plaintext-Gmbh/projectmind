@@ -187,7 +187,13 @@ jobs:
           path: |
             projectmind-mcp-${{ matrix.asset_suffix }}.tar.gz
             projectmind-mcp-${{ matrix.asset_suffix }}.tar.gz.sha256
-          retention-days: 30
+          # Purely a hand-off to the `publish` job later in this SAME run — the
+          # actual distributable lives in the GitHub Release afterward (which
+          # doesn't count against Actions artifact storage). 30 days here was
+          # needlessly burning storage quota for something dead within minutes
+          # of `publish` succeeding; 1 day (GitHub's minimum) still gives a
+          # window to inspect a failed `publish` step without rebuilding.
+          retention-days: 1
 
   app:
     name: desktopApp / ${{ matrix.asset_suffix }}
@@ -290,7 +296,9 @@ jobs:
           path: |
             projectmind-app-${{ matrix.asset_suffix }}.tar.gz
             projectmind-app-${{ matrix.asset_suffix }}.tar.gz.sha256
-          retention-days: 30
+          # See the mcp job's identical comment: hand-off to `publish` in this
+          # same run, superseded by the GitHub Release within minutes.
+          retention-days: 1
 
       - name: Upload updater assets
         if: always()
@@ -298,7 +306,7 @@ jobs:
         with:
           name: projectmind-updater-${{ matrix.asset_suffix }}
           path: updater-stage/
-          retention-days: 30
+          retention-days: 1
           if-no-files-found: ignore
 
   publish:

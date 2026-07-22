@@ -127,4 +127,7 @@ jobs:
         with:
           name: projectmind-mcp-linux
           path: target/release/projectmind-mcp
-          retention-days: 7
+          # Runs on every push to master AND every PR — 7 days was accumulating
+          # fast. 3 days still covers "grab yesterday's/this week's build for
+          # ad-hoc testing" without the steady-state storage cost.
+          retention-days: 3
