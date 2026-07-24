@@ -122,6 +122,29 @@ export async function openRepo(path: string): Promise<RepoSummary> {
   return invoke<RepoSummary>('open_repo', { path });
 }
 
+/// Re-parse the ALREADY-OPEN repo in place (Task 011, "living C4"). Reuses the
+/// open repo's root — no path needed — so new/changed classes, modules and
+/// diagrams show without re-selecting the repo. Tauri-only (the desktop shell
+/// owns the reparse pipeline + repo-watcher); callers gate this to desktop mode.
+export async function refreshRepo(): Promise<RepoSummary> {
+  invalidateRiskCache();
+  return invoke<RepoSummary>('refresh_repo');
+}
+
+/// Read the "living C4" auto-merge toggle (Task 011): when on, a refresh also
+/// folds new structure into docs/architecture.dsl (additive). Desktop-only.
+export async function getC4AutoMerge(): Promise<boolean> {
+  if (!isTauriRuntime()) return false;
+  return invoke<boolean>('get_c4_auto_merge');
+}
+
+/// Set the "living C4" auto-merge toggle (Task 011). Desktop-only; a no-op in
+/// the browser build, which has no repo-watcher.
+export async function setC4AutoMerge(enabled: boolean): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await invoke('set_c4_auto_merge', { enabled });
+}
+
 export async function openMarkdownFile(path: string): Promise<RepoSummary> {
   if (!isTauriRuntime()) return post<RepoSummary>('/api/open_markdown_file', { path });
   return invoke<RepoSummary>('open_markdown_file', { path });

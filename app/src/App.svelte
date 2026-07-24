@@ -28,9 +28,11 @@
     classSidebarVisible,
     presenterActive,
     demoAutostart,
+    refreshTick,
   } from './lib/store';
   import {
     openRepo,
+    refreshRepo,
     openMarkdownFile,
     listClasses,
     listModules,
@@ -44,7 +46,14 @@
     pendingMarkdownFile,
     setBrowserToken,
   } from './lib/api';
-  import type { ClassEntry, ModuleEntry, ModuleFile, TabDescriptor, UiState } from './lib/api';
+  import type {
+    ClassEntry,
+    ModuleEntry,
+    ModuleFile,
+    RepoSummary,
+    TabDescriptor,
+    UiState,
+  } from './lib/api';
   // Eagerly imported — small, almost-always rendered:
   import ClassViewer from './components/ClassViewer.svelte';
   import ModuleSidebar from './components/ModuleSidebar.svelte';
@@ -374,6 +383,7 @@
   let tokenInput = '';
   let unlistenState: (() => void) | null = null;
   let unlistenOpenMarkdownFile: (() => void) | null = null;
+  let unlistenRepoRefreshed: (() => void) | null = null;
   let statePoll: ReturnType<typeof setInterval> | null = null;
   let lastSeq = 0;
   // Drag-and-drop state. `dragOver` toggles the full-window overlay; in
@@ -628,6 +638,39 @@
       errorMessage.set(String(err));
     } finally {
       loading = false;
+    }
+  }
+
+  // Task 011 "living C4": apply an in-place reparse result. Unlike `load`, this
+  // keeps the current view (tab, open diagram, selection) — it only refreshes
+  // the backing data. Shared by the manual Refresh button and the desktop
+  // repo-watcher's `repo-refreshed` event so both behave identically.
+  async function applyRefresh(summary: RepoSummary) {
+    repo.set(summary);
+    try {
+      const [list, mods] = await Promise.all([listClasses(), listModules()]);
+      classes.set(list);
+      modules.set(mods);
+    } catch (err) {
+      errorMessage.set(String(err));
+    }
+    // Force live-data views (DiagramView) to re-render against the new model.
+    refreshTick.update((n) => n + 1);
+  }
+
+  let refreshing = false;
+  // Manual "Refresh" button: re-parse the open repo in place (desktop only).
+  async function refresh() {
+    if (refreshing || !get(repo)) return;
+    refreshing = true;
+    errorMessage.set(null);
+    try {
+      const summary = await refreshRepo();
+      await applyRefresh(summary);
+    } catch (err) {
+      errorMessage.set(String(err));
+    } finally {
+      refreshing = false;
     }
   }
 
@@ -945,6 +988,12 @@
         followingMcp.set(false);
         void loadMarkdownDocument(ev.payload);
       });
+      // Task 011 "living C4": the desktop repo-watcher (and the refresh_repo
+      // command) emit this after an in-place reparse. Refresh the backing data
+      // and re-render live views without touching the current view.
+      unlistenRepoRefreshed = await listen<RepoSummary>('repo-refreshed', (ev) => {
+        void applyRefresh(ev.payload);
+      });
       const pending = await pendingMarkdownFile();
       if (pending) {
         followingMcp.set(false);
@@ -997,6 +1046,7 @@
     document.removeEventListener('click', globalLinkGuard, true);
     unlistenState?.();
     unlistenOpenMarkdownFile?.();
+    unlistenRepoRefreshed?.();
     unlistenDragDrop?.();
     if (statePoll) clearInterval(statePoll);
     if (browserDropHintTimer) clearTimeout(browserDropHintTimer);
@@ -1220,6 +1270,15 @@
       <button on:click={pickAndOpen} disabled={loading}>
         {loading ? $t('status.loading') : $t('nav.openRepo')}
       </button>
+      {#if !browserMode}
+        <button
+          class="refresh-repo"
+          on:click={refresh}
+          disabled={!$repo || refreshing || loading}
+          title={$t('nav.refresh.tooltip')}
+          aria-label={$t('nav.refresh')}
+        >{refreshing ? '⟳…' : '⟳'}</button>
+      {/if}
       <button
         class="lang-toggle"
         on:click={toggleLang}
