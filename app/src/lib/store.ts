@@ -4,6 +4,11 @@ import type { ClassEntry, ModuleEntry, ModuleFile, RepoSummary } from './api';
 export const repo = writable<RepoSummary | null>(null);
 export const modules = writable<ModuleEntry[]>([]);
 export const classes = writable<ClassEntry[]>([]);
+/// Monotonic counter bumped on every in-place repo refresh (Task 011, "living
+/// C4"): the manual Refresh button and the desktop repo-watcher both increment
+/// it after a reparse. Live-data components (e.g. DiagramView) watch it to
+/// re-render against the freshly parsed model without a repo switch.
+export const refreshTick = writable(0);
 /// Module-files (PDFs, images, …) keyed by module id. App.svelte populates
 /// this map whenever moduleFilter / modules change. Lifted into the store so
 /// the modules-sidebar can derive per-module file counts for its badges, and
