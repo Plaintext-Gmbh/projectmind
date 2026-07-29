@@ -7,6 +7,8 @@
     showDiagram,
     scaffoldC4Model,
     mergeC4Model,
+    getC4AutoMerge,
+    setC4AutoMerge,
     beanGraphData,
     fileRecency,
     commitActivity,
@@ -36,6 +38,7 @@
     viewMode,
     repo,
     followingMcp,
+    refreshTick,
   } from '../lib/store';
   import {
     recencyColor,
@@ -106,6 +109,25 @@
   // c4-model round-trip (#142, V6.3): "Modell aktualisieren" merges new code
   // structure into docs/architecture.dsl without touching user edits.
   let merging = false;
+  // Task 011 "living C4": when on, the desktop repo-watcher also auto-merges
+  // new code structure into docs/architecture.dsl after a debounced change.
+  // Loaded from the backend when the c4-model view mounts; default OFF.
+  let autoMergeC4 = false;
+  onMount(() => {
+    void getC4AutoMerge()
+      .then((v) => (autoMergeC4 = v))
+      .catch(() => (autoMergeC4 = false));
+  });
+  async function toggleAutoMergeC4(e: Event) {
+    const enabled = (e.target as HTMLInputElement).checked;
+    autoMergeC4 = enabled;
+    try {
+      await setC4AutoMerge(enabled);
+    } catch (err) {
+      error = String(err);
+      autoMergeC4 = !enabled; // revert the optimistic flip on failure
+    }
+  }
 
   // c4-component (#142, V6.4): the component-level zoom into ONE container.
   // Reuses the bean_graph_data payload (no new backend data) — fetched once,
@@ -339,6 +361,15 @@
   $: diagramTransform = `translate(${tx}px, ${ty}px) scale(${scale})`;
 
   $: if (kind) {
+    void render(kind, folderLayout, docGraphLayout);
+  }
+
+  // Task 011 "living C4": re-render when an in-place repo refresh bumps the
+  // tick (manual Refresh button or desktop repo-watcher). Only fires on a real
+  // change — the initial value is captured so mount doesn't double-render.
+  let lastRefreshTick = get(refreshTick);
+  $: if ($refreshTick !== lastRefreshTick) {
+    lastRefreshTick = $refreshTick;
     void render(kind, folderLayout, docGraphLayout);
   }
 
@@ -1111,6 +1142,10 @@
       >
         {merging ? $t('diagram.c4Model.updating') : $t('diagram.c4Model.update')}
       </button>
+      <label class="c4-automerge" title={$t('diagram.c4Model.autoMerge.tooltip')}>
+        <input type="checkbox" checked={autoMergeC4} on:change={toggleAutoMergeC4} />
+        {$t('diagram.c4Model.autoMerge')}
+      </label>
     {:else if kind === 'c4-component' && c4Modules.length > 0}
       <!-- c4-component (#142, V6.4): the container picker. Zooms into ONE
            module's classes as C4 components; switching re-renders from the
@@ -1366,6 +1401,23 @@
   .toolbar button.c4-update:disabled {
     opacity: 0.6;
     cursor: default;
+  }
+
+  /* Task 011 "living C4": the auto-merge toggle next to "Update model". */
+  .c4-automerge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--fg-2);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .c4-automerge input {
+    width: auto;
+    margin: 0;
+    cursor: pointer;
   }
 
   /* c4-component (#142, V6.4): the container picker dropdown + its label. */

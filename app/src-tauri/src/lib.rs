@@ -15,10 +15,11 @@
     clippy::missing_panics_doc
 )]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use projectmind_core::artifact::{self, Artifact, ArtifactMeta};
 use projectmind_core::files::{self, MarkdownFile, MarkdownHit, ModuleFile};
 use projectmind_core::git::{self, ChangedFile};
@@ -58,6 +59,16 @@ pub struct AppState {
     /// file eagerly.
     pub code_graph: RwLock<Option<Box<dyn projectmind_plugin_api::CodeGraphStore>>>,
     pub pending_markdown_file: RwLock<Option<PathBuf>>,
+    /// Auto-merge toggle for the "living C4" repo-watcher (Task 011): when
+    /// enabled, a debounced source change also folds the new code structure
+    /// into `docs/architecture.dsl` via `c4_dsl::merge_c4_model` (additive,
+    /// non-destructive). Default OFF — conservative, because it writes to the
+    /// user's working tree; the GUI toggles it per session.
+    pub auto_merge_c4: AtomicBool,
+    /// The single recursive `notify` watcher on the open repo root (Task 011).
+    /// Held here so `open_repo` / `refresh_repo` can re-point it at a newly
+    /// opened repository without respawning the debounce thread.
+    pub repo_watch: Mutex<RepoWatch>,
 }
 
 impl AppState {
@@ -73,6 +84,53 @@ impl AppState {
             annotations: RwLock::new(None),
             code_graph: RwLock::new(None),
             pending_markdown_file: RwLock::new(None),
+            auto_merge_c4: AtomicBool::new(false),
+            repo_watch: Mutex::new(RepoWatch::default()),
+        }
+    }
+}
+
+/// Owns the live repo-root `notify` watcher and the path it currently watches.
+/// The watcher itself is created once by [`spawn_repo_watcher`]; opening a repo
+/// calls [`RepoWatch::retarget`] to move the OS watch to the new root.
+#[derive(Default)]
+pub struct RepoWatch {
+    watcher: Option<notify::RecommendedWatcher>,
+    watched: Option<PathBuf>,
+}
+
+impl std::fmt::Debug for RepoWatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RepoWatch")
+            .field("active", &self.watcher.is_some())
+            .field("watched", &self.watched)
+            .finish()
+    }
+}
+
+impl RepoWatch {
+    /// Point the watcher at `root` (recursive), unwatching the previous root.
+    /// No-op when already watching `root`, when the watcher failed to init, or
+    /// when `root` is not a directory (single-markdown-file "repos").
+    fn retarget(&mut self, root: &Path) {
+        use notify::{RecursiveMode, Watcher};
+        if self.watched.as_deref() == Some(root) {
+            return;
+        }
+        let Some(watcher) = self.watcher.as_mut() else {
+            return;
+        };
+        if let Some(old) = self.watched.take() {
+            let _ = watcher.unwatch(&old);
+        }
+        if !root.is_dir() {
+            return;
+        }
+        match watcher.watch(root, RecursiveMode::Recursive) {
+            Ok(()) => self.watched = Some(root.to_path_buf()),
+            Err(err) => {
+                tracing::warn!(error = %err, "could not watch repo root {}", root.display());
+            }
         }
     }
 }
@@ -219,7 +277,37 @@ fn open_repo(path: String, state: State<'_, Arc<AppState>>) -> Result<RepoSummar
         .engine
         .open_repo(std::path::Path::new(&path))
         .map_err(|e| e.to_string())?;
-    Ok(open_repository(repo, &state, ViewIntent::default()))
+    Ok(open_repository(repo, state.inner(), ViewIntent::default()))
+}
+
+/// Tauri command: re-parse the ALREADY-OPEN repo in place (Task 011, "living
+/// C4"). Reuses the open repo's root — the user does not re-select it — and runs
+/// the same `engine.open_repo` pipeline as [`open_repo`], then republishes state
+/// and emits `repo-refreshed` so the frontend re-fetches. Errors when no repo is
+/// open. This is the manual counterpart of the debounced repo-watcher, and the
+/// GUI sibling of the `refresh_repo` MCP tool.
+#[tauri::command]
+fn refresh_repo(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<RepoSummary, String> {
+    let root = state
+        .repo
+        .read()
+        .as_ref()
+        .map(|r| r.root.clone())
+        .ok_or_else(|| "no repository open".to_string())?;
+    reparse_and_publish(&app, state.inner(), &root)
+}
+
+/// Toggle "living C4" auto-merge (Task 011). When enabled, a watcher / manual
+/// refresh also folds new structure into `docs/architecture.dsl`. Default OFF.
+#[tauri::command]
+fn set_c4_auto_merge(enabled: bool, state: State<'_, Arc<AppState>>) {
+    state.auto_merge_c4.store(enabled, Ordering::Relaxed);
+}
+
+/// Current state of the "living C4" auto-merge toggle (Task 011).
+#[tauri::command]
+fn get_c4_auto_merge(state: State<'_, Arc<AppState>>) -> bool {
+    state.auto_merge_c4.load(Ordering::Relaxed)
 }
 
 /// Tauri command: open a Markdown document as a virtual repository.
@@ -235,7 +323,7 @@ fn open_markdown_file(
     let file = repo.root.clone();
     Ok(open_repository(
         repo,
-        &state,
+        state.inner(),
         ViewIntent::File {
             path: file,
             anchor: None,
@@ -243,11 +331,7 @@ fn open_markdown_file(
     ))
 }
 
-fn open_repository(
-    repo: Repository,
-    state: &State<'_, Arc<AppState>>,
-    new_view: ViewIntent,
-) -> RepoSummary {
+fn open_repository(repo: Repository, state: &Arc<AppState>, new_view: ViewIntent) -> RepoSummary {
     let markdown_count = files::list_markdown_files(&repo.root).len();
     let html_count =
         html::list_html_files(&repo.root).len() + html::find_html_snippets(&repo.root).len();
@@ -300,6 +384,10 @@ fn open_repository(
         }
     }
     *state.repo.write() = Some(repo);
+    // Point the "living C4" repo-watcher (Task 011) at this root. No-op for the
+    // single-markdown-file case (root is a file) and when the watcher failed to
+    // init — a failed watch never blocks opening the repo.
+    state.repo_watch.lock().retarget(&root);
     // Publish so the MCP server (and any other consumer) sees what we just opened.
     // Preserve the existing view intent when the repo path is unchanged — this
     // happens when applyState() loads the repo in response to an MCP-driven
@@ -1352,6 +1440,172 @@ fn spawn_state_watcher(handle: AppHandle) {
     });
 }
 
+/// Quiet period (ms) the repo-watcher waits after the last *relevant* source
+/// change before it re-parses. Coalesces editor-save bursts, `git checkout`
+/// and build storms into a single reparse. Kept in the 2–5 s band the spec
+/// calls for; 2 s stays responsive while still absorbing a rapid save series.
+const REPO_WATCH_DEBOUNCE_MS: u64 = 2_000;
+
+/// Should a filesystem path be ignored by the repo-watcher (Task 011)?
+///
+/// Pure and root-independent so it is unit-testable. Ignores:
+/// - build / dependency / VCS / tool dirs anywhere in the path (`target`,
+///   `node_modules`, `.git`, `.projectmind`) — these churn constantly and
+///   never change the parsed model;
+/// - our own C4 writes: `docs/architecture.dsl` and its `*.dsl.tmp` scratch
+///   sibling (any `.dsl` / `.tmp`). This is the recursion guard — an
+///   auto-merge writes the DSL, and that write must never re-trigger a
+///   reparse (which would auto-merge again → event → …).
+///
+/// A real `.rs` / `.java` (or any other) source edit is NOT ignored.
+fn should_ignore_path(path: &Path) -> bool {
+    use std::path::Component;
+    for comp in path.components() {
+        if let Component::Normal(os) = comp {
+            if let Some(name) = os.to_str() {
+                if matches!(name, "target" | "node_modules" | ".git" | ".projectmind") {
+                    return true;
+                }
+            }
+        }
+    }
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        let ext = ext.to_ascii_lowercase();
+        if ext == "dsl" || ext == "tmp" {
+            return true;
+        }
+    }
+    false
+}
+
+/// Does a raw `notify` event warrant a reparse? True only for a create / modify
+/// / remove (not access-only) touching at least one non-ignored path. Pure over
+/// the event so the debounce loop's trigger decision is unit-testable.
+fn event_is_relevant(ev: &notify::Result<notify::Event>) -> bool {
+    use notify::event::EventKind;
+    let Ok(ev) = ev else { return false };
+    if !matches!(
+        ev.kind,
+        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) | EventKind::Any
+    ) {
+        return false;
+    }
+    ev.paths.iter().any(|p| !should_ignore_path(p))
+}
+
+/// Re-parse `root` (the open repo) and republish so every viewer refreshes.
+/// Shared by the manual `refresh_repo` command and the debounced watcher, so
+/// the reparse path is single-sourced. When the auto-merge toggle is on it also
+/// folds new structure into `docs/architecture.dsl` (additive, non-destructive;
+/// its own `.dsl` write is ignored by the watcher, so no recursion). Emits
+/// `repo-refreshed` with the fresh summary so the frontend re-fetches in place.
+fn reparse_and_publish(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    root: &Path,
+) -> Result<RepoSummary, String> {
+    let repo = state.engine.open_repo(root).map_err(|e| e.to_string())?;
+    // `open_repository` preserves the current view when the root is unchanged
+    // (which it always is here), so a refresh keeps the user where they are.
+    let summary = open_repository(repo, state, ViewIntent::default());
+
+    if state.auto_merge_c4.load(Ordering::Relaxed) {
+        if let Some(repo) = state.repo.read().as_ref() {
+            let spring = SpringPlugin::new();
+            match c4_dsl::merge_c4_model(repo, &spring) {
+                Ok(outcome) => tracing::info!(
+                    added_containers = outcome.added_containers,
+                    added_components = outcome.added_components,
+                    added_relationships = outcome.added_relationships,
+                    "auto-merged C4 model after reparse"
+                ),
+                Err(err) => tracing::warn!(error = %err, "auto-merge_c4_model failed"),
+            }
+        }
+    }
+
+    // Tell the frontend to re-fetch classes/modules and re-render in place.
+    // Best-effort: emit failure never fails the reparse itself.
+    if let Err(err) = app.emit("repo-refreshed", &summary) {
+        tracing::warn!(error = %err, "failed to emit repo-refreshed");
+    }
+    Ok(summary)
+}
+
+/// Watch the open repo root recursively and, after a debounced quiet period,
+/// re-parse it (Task 011, "living C4"). Mirrors [`spawn_state_watcher`]: a
+/// single long-lived `notify` watcher + a debounce thread; a setup failure is
+/// logged and never blocks app start. The watcher is stored in [`AppState`] so
+/// `open_repo` can re-point it whenever a different repo is opened.
+fn spawn_repo_watcher(app: AppHandle, state: Arc<AppState>) {
+    use notify::{Event, RecommendedWatcher};
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
+    let watcher: RecommendedWatcher = match notify::recommended_watcher(tx) {
+        Ok(w) => w,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not create repo watcher");
+            return;
+        }
+    };
+
+    // Install the watcher and, if a repo is already open, start watching it now.
+    {
+        let mut guard = state.repo_watch.lock();
+        guard.watcher = Some(watcher);
+        let already_open = state.repo.read().as_ref().map(|r| r.root.clone());
+        if let Some(root) = already_open {
+            guard.retarget(&root);
+        }
+    }
+
+    let debounce = Duration::from_millis(REPO_WATCH_DEBOUNCE_MS);
+    thread::spawn(move || loop {
+        // Block until the first relevant event; a closed channel ends the thread.
+        match rx.recv() {
+            Ok(ev) if event_is_relevant(&ev) => {}
+            Ok(_) => continue,
+            Err(_) => break,
+        }
+        // Coalesce the burst: fire only after `debounce` of no further RELEVANT
+        // event. Irrelevant events (build/VCS/tool churn, our own DSL writes)
+        // are drained without extending the window, so they can neither trigger
+        // a reparse nor starve one during a long build.
+        let mut deadline = Instant::now() + debounce;
+        loop {
+            let now = Instant::now();
+            if now >= deadline {
+                break;
+            }
+            match rx.recv_timeout(deadline - now) {
+                Ok(ev) => {
+                    if event_is_relevant(&ev) {
+                        deadline = Instant::now() + debounce;
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => break,
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+        }
+        // Quiet again → exactly one reparse for the whole burst.
+        let Some(root) = state.repo.read().as_ref().map(|r| r.root.clone()) else {
+            continue;
+        };
+        match reparse_and_publish(&app, &state, &root) {
+            Ok(summary) => {
+                tracing::info!(
+                    classes = summary.classes,
+                    "repo-watcher reparsed after change"
+                );
+            }
+            Err(err) => tracing::warn!(error = %err, "repo-watcher reparse failed"),
+        }
+    });
+}
+
 fn markdown_launch_arg(args: impl IntoIterator<Item = String>) -> Option<PathBuf> {
     args.into_iter()
         .map(PathBuf::from)
@@ -1408,6 +1662,9 @@ pub fn run() {
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             open_repo,
+            refresh_repo,
+            set_c4_auto_merge,
+            get_c4_auto_merge,
             open_markdown_file,
             pending_markdown_file,
             list_classes,
@@ -1457,6 +1714,9 @@ pub fn run() {
                 queue_markdown_file(app.handle(), &setup_state, path);
             }
             spawn_state_watcher(app.handle().clone());
+            // Task 011 "living C4": recursive repo-root watcher → debounced
+            // reparse. Best-effort like the state watcher — never blocks start.
+            spawn_repo_watcher(app.handle().clone(), Arc::clone(&setup_state));
             spawn_heartbeat();
             Ok(())
         })
@@ -1511,6 +1771,79 @@ mod tests {
         let spring = SpringPlugin::new();
         let out = diagram::render_bean_graph(&repo, &spring);
         assert!(out.contains("no beans detected"));
+    }
+
+    #[test]
+    fn ignore_path_skips_build_vcs_tool_dirs_and_own_dsl_writes() {
+        // Build / dependency / VCS / tool output — ignored wherever they sit.
+        assert!(should_ignore_path(Path::new("/repo/target/debug/foo.rs")));
+        assert!(should_ignore_path(Path::new(
+            "/repo/node_modules/x/index.js"
+        )));
+        assert!(should_ignore_path(Path::new("/repo/.git/HEAD")));
+        assert!(should_ignore_path(Path::new(
+            "/repo/.projectmind/state/sessions.jsonl"
+        )));
+        assert!(should_ignore_path(Path::new(
+            "/repo/crates/core/target/x.rs"
+        )));
+        // Our own C4 writes (recursion guard): docs/architecture.dsl + tmp.
+        assert!(should_ignore_path(Path::new("/repo/docs/architecture.dsl")));
+        assert!(should_ignore_path(Path::new(
+            "/repo/docs/architecture.dsl.tmp"
+        )));
+
+        // Real source edits must NOT be ignored.
+        assert!(!should_ignore_path(Path::new("/repo/src/main.rs")));
+        assert!(!should_ignore_path(Path::new(
+            "/repo/src/main/java/com/acme/Foo.java"
+        )));
+        assert!(!should_ignore_path(Path::new("/repo/README.md")));
+        // A dir merely NAMED like the model file (no .dsl ext) is not ignored.
+        assert!(!should_ignore_path(Path::new("/repo/docs/architecture.md")));
+    }
+
+    #[test]
+    fn event_relevance_gates_reparse_trigger() {
+        use notify::event::{DataChange, EventKind, ModifyKind};
+        use notify::Event;
+
+        // Modify of a real source file → relevant.
+        let src = Ok(Event {
+            kind: EventKind::Modify(ModifyKind::Data(DataChange::Content)),
+            paths: vec![PathBuf::from("/repo/src/main.rs")],
+            attrs: notify::event::EventAttributes::default(),
+        });
+        assert!(event_is_relevant(&src));
+
+        // Modify touching only ignored paths (target/ + our own .dsl) → skipped.
+        let ignored = Ok(Event {
+            kind: EventKind::Modify(ModifyKind::Data(DataChange::Content)),
+            paths: vec![
+                PathBuf::from("/repo/target/debug/build/x"),
+                PathBuf::from("/repo/docs/architecture.dsl"),
+            ],
+            attrs: notify::event::EventAttributes::default(),
+        });
+        assert!(!event_is_relevant(&ignored));
+
+        // Access-only events never trigger a reparse.
+        let access = Ok(Event {
+            kind: EventKind::Access(notify::event::AccessKind::Read),
+            paths: vec![PathBuf::from("/repo/src/main.rs")],
+            attrs: notify::event::EventAttributes::default(),
+        });
+        assert!(!event_is_relevant(&access));
+
+        // An error from the backend is never relevant.
+        let err: notify::Result<Event> = Err(notify::Error::generic("boom"));
+        assert!(!event_is_relevant(&err));
+    }
+
+    #[test]
+    fn app_state_defaults_auto_merge_off() {
+        let s = AppState::new();
+        assert!(!s.auto_merge_c4.load(Ordering::Relaxed));
     }
 
     #[test]

@@ -479,6 +479,11 @@ pub(crate) fn list() -> Value {
                 "inputSchema": open_repo_schema()
             },
             {
+                "name": "refresh_repo",
+                "description": "Re-parse the ALREADY-OPEN repository in place — the 'living C4' refresh (#142). Re-runs the same parse pipeline as `open_repo` on the currently-open repo root (no `path` needed) and republishes the shared UI state, so every open viewer picks up new/changed classes, modules and relations and any regenerated diagram (`c4-container`, bean-graph, …) reflects the code as it is on disk right now. Use after the code changed on disk and you want the model current without asking the user to re-select the repo. Errors if no repository is open — call `open_repo` first. Does NOT touch `docs/architecture.dsl` (use `merge_c4_model` for the editable C4 model). Returns `{ root, modules, classes }`.",
+                "inputSchema": no_args_schema()
+            },
+            {
                 "name": "repo_info",
                 "description": "Return summary information about the currently open repository.",
                 "inputSchema": no_args_schema()
@@ -693,6 +698,7 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
 
     match parsed.name.as_str() {
         "open_repo" => open_repo(state, parsed.arguments).await,
+        "refresh_repo" => refresh_repo(state).await,
         "repo_info" => repo_info(state).await,
         "list_classes" => list_classes(state, parsed.arguments).await,
         "show_class" => show_class(state, parsed.arguments).await,
@@ -807,6 +813,63 @@ async fn open_repo(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
     publish_state(UiState {
         repo_root: Some(root),
         view: ViewIntent::default(),
+        ..UiState::default()
+    });
+
+    Ok(text_result(summary.to_string()))
+}
+
+/// Re-parse the currently-open repository in place (#142, "living C4").
+///
+/// Takes no arguments: it reuses the open repo's root and runs the exact same
+/// `engine.open_repo` pipeline `open_repo` does, then republishes state. This is
+/// the MCP counterpart of the GUI's `refresh_repo` command and repo-watcher —
+/// the single reparse path both surface, so no parse logic is duplicated.
+async fn refresh_repo(state: &Mutex<ServerState>) -> DispatchResult {
+    let mut server_state = state.lock().await;
+
+    // Reuse the open repo's root; there is nothing to refresh otherwise.
+    let root = server_state
+        .repo
+        .as_ref()
+        .map(|r| r.root.clone())
+        .ok_or_else(|| {
+            DispatchError::invalid_params("no repository open — call open_repo first")
+        })?;
+
+    let repo = server_state
+        .engine
+        .open_repo(&root)
+        .map_err(|e| DispatchError::internal(format!("refresh_repo failed: {e}")))?;
+
+    let summary = json!({
+        "root": repo.root,
+        "modules": repo.modules.len(),
+        "classes": repo.class_count(),
+    });
+
+    // Log a fresh health snapshot so `architect_briefing` sees the reparse,
+    // mirroring `open_repo`. Best-effort — never blocks the refresh.
+    let relations = server_state.engine.relations(&repo);
+    if let Err(err) = projectmind_core::session::snapshot_and_log(&repo, &relations) {
+        tracing::warn!(error = %err, "refresh_repo: failed to write session log");
+    }
+
+    server_state.repo = Some(repo);
+
+    // Same repo root → artifacts are kept (clear_on_repo_change is a no-op).
+    // The tour index rebuilds so `walkthrough_query` reflects the new code.
+    if let Err(err) = projectmind_core::tour_index::build_index_on_open(&root) {
+        tracing::warn!(error = %err, "refresh_repo: failed to build tour index");
+    }
+
+    // Republish so every open viewer re-renders against the reparsed model.
+    // Preserve the current view intent instead of clobbering it — a refresh
+    // should keep the user where they are, only refreshing the content.
+    let prev = state::read().ok().flatten().unwrap_or_default();
+    publish_state(UiState {
+        repo_root: Some(root),
+        view: prev.view,
         ..UiState::default()
     });
 
@@ -2171,6 +2234,7 @@ mod tests {
             .map(|t| t["name"].as_str().unwrap())
             .collect();
         assert!(names.contains(&"open_repo"));
+        assert!(names.contains(&"refresh_repo"));
         assert!(names.contains(&"show_class"));
         assert!(names.contains(&"list_changes_since"));
         assert!(names.contains(&"risk_atlas"));
@@ -2179,6 +2243,28 @@ mod tests {
         assert!(names.contains(&"tour_scaffold"));
         assert!(names.contains(&"present_artifact"));
         assert!(names.contains(&"list_artifacts"));
+    }
+
+    #[test]
+    fn refresh_repo_tool_registered_with_no_args() {
+        let v = list();
+        let tools = v["tools"].as_array().unwrap();
+        let rr = tools
+            .iter()
+            .find(|t| t["name"] == "refresh_repo")
+            .expect("refresh_repo tool registered");
+        // No-args tool: object schema with no required inputs.
+        assert_eq!(rr["inputSchema"]["type"], "object");
+        assert!(
+            rr["inputSchema"].get("required").is_none(),
+            "refresh_repo takes no arguments"
+        );
+        // Description points the model at the in-place reparse semantics.
+        let desc = rr["description"].as_str().unwrap();
+        assert!(
+            desc.contains("open_repo"),
+            "explains it reuses open_repo path"
+        );
     }
 
     #[test]
