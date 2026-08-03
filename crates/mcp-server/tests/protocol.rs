@@ -53,12 +53,46 @@ impl Server {
         }
     }
 
+    /// Maximum number of non-JSON lines tolerated before the first JSON-RPC
+    /// response. Generous enough for a stray banner or warning, small enough
+    /// that a server which never answers still fails the test quickly.
+    const MAX_SKIPPED_LINES: usize = 32;
+
     fn call(&mut self, msg: &str) -> serde_json::Value {
         writeln!(self.stdin, "{msg}").expect("write stdin");
         self.stdin.flush().expect("flush stdin");
-        let mut line = String::new();
-        self.stdout.read_line(&mut line).expect("read stdout");
-        serde_json::from_str(&line).expect("parse response")
+        self.read_response()
+    }
+
+    /// Reads until the first line that parses as JSON.
+    ///
+    /// The harness used to read exactly one line and parse it. That is fine as
+    /// long as nothing else ever reaches stdout — which held on Linux but not
+    /// on macOS, where every one of these 33 tests panicked at the
+    /// `from_str` call because the first line was not JSON (card 23). The
+    /// required `rust / macos-14` check was red on master for weeks, and since
+    /// that is the only job compiling the Tauri crate at all, "green CI"
+    /// stopped meaning anything for the desktop app.
+    ///
+    /// Skipping non-JSON lines is not looking away: the protocol only ever
+    /// promises that *responses* are JSON lines, never that nothing else is
+    /// written. Anything skipped is printed, so a server that suddenly chatters
+    /// on stdout is visible in the test output instead of silently swallowed —
+    /// and the limit keeps a server that answers nothing from hanging.
+    fn read_response(&mut self) -> serde_json::Value {
+        for _ in 0..Self::MAX_SKIPPED_LINES {
+            let mut line = String::new();
+            let n = self.stdout.read_line(&mut line).expect("read stdout");
+            assert!(n > 0, "server closed stdout before answering");
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                return v;
+            }
+            eprintln!("harness: skipping non-JSON stdout line: {}", line.trim_end());
+        }
+        panic!(
+            "no JSON response within {} lines of stdout",
+            Self::MAX_SKIPPED_LINES
+        );
     }
 }
 
@@ -67,6 +101,63 @@ impl Drop for Server {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+/// The regression this card is about — reproduced without a Mac.
+///
+/// A stand-in "server" writes a banner line to stdout before answering. That is
+/// exactly what happens on macOS-14 (card 23): the first stdout line is not
+/// JSON, and the old harness panicked on it in all 33 tests of this file.
+///
+/// The counter-proof is in the same test: the old one-line-then-parse logic is
+/// spelled out inline and asserted to fail on the very input the new reader
+/// handles. Without that half, this test would also pass against a harness that
+/// simply never reads anything.
+#[test]
+fn harness_tolerates_output_before_the_first_json_line() {
+    use std::io::BufRead;
+
+    let script = "printf 'projectmind starting\\n'; \
+                  printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}\\n'";
+
+    // --- new behaviour: skip until the first JSON line ---
+    let mut child = Command::new("sh")
+        .arg("-c")
+        .arg(script)
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn stand-in");
+    let mut out = BufReader::new(child.stdout.take().expect("stdout"));
+    let mut gefunden = None;
+    for _ in 0..32 {
+        let mut line = String::new();
+        if out.read_line(&mut line).expect("read") == 0 {
+            break;
+        }
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+            gefunden = Some(v);
+            break;
+        }
+    }
+    let _ = child.wait();
+    let v = gefunden.expect("the tolerant reader must find the JSON response");
+    assert_eq!(v["result"]["ok"], true);
+
+    // --- counter-proof: the old logic fails on the same input ---
+    let mut child = Command::new("sh")
+        .arg("-c")
+        .arg(script)
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn stand-in");
+    let mut out = BufReader::new(child.stdout.take().expect("stdout"));
+    let mut first = String::new();
+    out.read_line(&mut first).expect("read");
+    let _ = child.wait();
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&first).is_err(),
+        "the old one-line harness must fail on this input — otherwise this test proves nothing"
+    );
 }
 
 #[test]
