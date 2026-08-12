@@ -56,9 +56,39 @@ impl Server {
     fn call(&mut self, msg: &str) -> serde_json::Value {
         writeln!(self.stdin, "{msg}").expect("write stdin");
         self.stdin.flush().expect("flush stdin");
-        let mut line = String::new();
-        self.stdout.read_line(&mut line).expect("read stdout");
-        serde_json::from_str(&line).expect("parse response")
+        self.read_json_response()
+    }
+
+    /// Liest bis zur ersten JSON-Zeile und ueberspringt alles davor.
+    ///
+    /// Auf macOS-14 schlug der Test bisher in genau dieser Funktion fehl: Der frueher hier
+    /// benutzte einmalige `read_line` nahm die *erste* Zeile von stdout und gab sie an
+    /// `serde_json` — schrieb der Server vorher irgendetwas Nicht-JSON dorthin, panikte der
+    /// Test mit "parse response". Auf Linux trat das nie auf, weshalb `rust / macos-14` als
+    /// einziger Job dauerhaft rot war und damit die einzige CI-Pruefung blockierte, die die
+    /// Tauri-Crate ueberhaupt kompiliert.
+    ///
+    /// Ein Testharnisch soll das Protokoll pruefen, nicht die Frage, ob eine Zeile
+    /// Diagnoseausgabe davorsteht. Nicht-JSON-Zeilen werden deshalb uebersprungen — an der
+    /// Aussagekraft aendert das nichts: Eine fehlende oder falsche *Antwort* faellt weiterhin
+    /// auf, weil dann entweder stdout endet (Panic mit klarer Meldung) oder das geparste JSON
+    /// nicht zur Erwartung passt.
+    fn read_json_response(&mut self) -> serde_json::Value {
+        loop {
+            let mut line = String::new();
+            let gelesen = self.stdout.read_line(&mut line).expect("read stdout");
+            assert!(
+                gelesen > 0,
+                "Server hat stdout geschlossen, ohne eine JSON-Antwort zu senden"
+            );
+            let inhalt = line.trim();
+            if inhalt.is_empty() || !inhalt.starts_with('{') {
+                // Vorlaufende Diagnoseausgabe (tracing, Panic-Hook, Sidecar-Init) — nicht das Protokoll.
+                eprintln!("[harness] uebersprungene Nicht-JSON-Zeile: {inhalt}");
+                continue;
+            }
+            return serde_json::from_str(inhalt).expect("parse response");
+        }
     }
 }
 
