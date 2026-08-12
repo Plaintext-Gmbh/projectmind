@@ -7,10 +7,10 @@
 //! These tests build the binary (`cargo test` triggers the build), spawn it as a child
 //! process, write JSON-RPC requests to its stdin and parse responses from its stdout.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Cursor, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn binary_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_projectmind-mcp"))
@@ -38,7 +38,13 @@ impl Server {
         let mut cmd = Command::new(binary_path());
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            // Die Fehlerausgabe des Servers wird durchgereicht statt verworfen. Stirbt er vor der
+            // ersten Antwort, ist sie der einzige Hinweis auf das Warum — mit `Stdio::null()` war
+            // auf macOS-14 nur zu sehen, *dass* er stdout schliesst, nie weshalb (Karte 755).
+            //
+            // Bewusst `inherit` und nicht `piped`: eine Pipe, die niemand leert, blockiert einen
+            // gespraechigen Server, und ein haengender Test ist schlimmer als ein roter.
+            .stderr(Stdio::inherit())
             .env("PROJECTMIND_LOG", "error");
         if let Some(state) = state {
             cmd.env("PROJECTMIND_STATE", state);
@@ -56,40 +62,98 @@ impl Server {
     fn call(&mut self, msg: &str) -> serde_json::Value {
         writeln!(self.stdin, "{msg}").expect("write stdin");
         self.stdin.flush().expect("flush stdin");
-        self.read_json_response()
-    }
-
-    /// Liest bis zur ersten JSON-Zeile und ueberspringt alles davor.
-    ///
-    /// Auf macOS-14 schlug der Test bisher in genau dieser Funktion fehl: Der frueher hier
-    /// benutzte einmalige `read_line` nahm die *erste* Zeile von stdout und gab sie an
-    /// `serde_json` — schrieb der Server vorher irgendetwas Nicht-JSON dorthin, panikte der
-    /// Test mit "parse response". Auf Linux trat das nie auf, weshalb `rust / macos-14` als
-    /// einziger Job dauerhaft rot war und damit die einzige CI-Pruefung blockierte, die die
-    /// Tauri-Crate ueberhaupt kompiliert.
-    ///
-    /// Ein Testharnisch soll das Protokoll pruefen, nicht die Frage, ob eine Zeile
-    /// Diagnoseausgabe davorsteht. Nicht-JSON-Zeilen werden deshalb uebersprungen — an der
-    /// Aussagekraft aendert das nichts: Eine fehlende oder falsche *Antwort* faellt weiterhin
-    /// auf, weil dann entweder stdout endet (Panic mit klarer Meldung) oder das geparste JSON
-    /// nicht zur Erwartung passt.
-    fn read_json_response(&mut self) -> serde_json::Value {
-        loop {
-            let mut line = String::new();
-            let gelesen = self.stdout.read_line(&mut line).expect("read stdout");
-            assert!(
-                gelesen > 0,
-                "Server hat stdout geschlossen, ohne eine JSON-Antwort zu senden"
-            );
-            let inhalt = line.trim();
-            if inhalt.is_empty() || !inhalt.starts_with('{') {
-                // Vorlaufende Diagnoseausgabe (tracing, Panic-Hook, Sidecar-Init) — nicht das Protokoll.
-                eprintln!("[harness] uebersprungene Nicht-JSON-Zeile: {inhalt}");
-                continue;
-            }
-            return serde_json::from_str(inhalt).expect("parse response");
+        match lies_json_antwort(&mut self.stdout) {
+            Some(antwort) => antwort,
+            // Diese Meldung ist auf macOS-14 der Regelfall (Karte 755). Ohne den Zustand des
+            // Kindprozesses sagt sie nur, dass nichts kam — mit ihm unterscheidet sie einen
+            // Absturz (Signal) von einem geordneten Abbruch (Exit-Code) und von einem Server,
+            // der noch laeuft und bloss schweigt.
+            None => panic!(
+                "Server hat stdout geschlossen, ohne eine JSON-Antwort zu senden — {}",
+                self.zustand()
+            ),
         }
     }
+
+    /// Beschreibt, wie der Kindprozess dasteht — nur fuer Panikmeldungen.
+    ///
+    /// `try_wait` meldet direkt nach dem stdout-Ende oft noch „laeuft", weil der Prozess gerade
+    /// erst abbaut; deshalb ein zweiter Blick nach einer kurzen Pause. Bewusst kein `wait()`:
+    /// ein Server, der stdout schliesst und weiterlaeuft, wuerde den Test sonst aufhaengen.
+    fn zustand(&mut self) -> String {
+        for _ in 0..2 {
+            match self.child.try_wait() {
+                Ok(Some(status)) => return format!("Prozess beendet mit {status}"),
+                Ok(None) => std::thread::sleep(Duration::from_millis(100)),
+                Err(e) => return format!("Prozessstatus nicht ermittelbar: {e}"),
+            }
+        }
+        "Prozess laeuft noch, antwortet aber nicht".to_string()
+    }
+}
+
+/// Wie viele Nicht-JSON-Zeilen vor der ersten Antwort geduldet werden.
+///
+/// Grosszuegig genug fuer ein Banner oder eine Warnung, klein genug, dass ein Server, der nur
+/// plappert und nie antwortet, den Test scheitern laesst statt ihn endlos laufen zu lassen.
+const MAX_UEBERSPRUNGENE_ZEILEN: usize = 32;
+
+/// Liest bis zur ersten JSON-Zeile und ueberspringt alles davor. `None` heisst: die Quelle endete
+/// vorher — der Server hat also gar nicht geantwortet.
+///
+/// Ein Testharnisch soll das Protokoll pruefen, nicht die Frage, ob eine Zeile Diagnoseausgabe
+/// davorsteht. Nicht-JSON-Zeilen werden deshalb uebersprungen, aber jede einzelne wird gemeldet —
+/// an der Aussagekraft aendert das nichts: Eine fehlende oder falsche *Antwort* faellt weiterhin
+/// auf, weil dann entweder die Quelle endet (`None`) oder das geparste JSON nicht zur Erwartung
+/// passt.
+///
+/// Frei stehend statt als Methode, damit die drei Faelle unten ohne echten Serverprozess und
+/// damit auf jeder Plattform pruefbar sind — auf macOS kommt der Harnisch derzeit gar nicht so
+/// weit (Karte 755).
+fn lies_json_antwort(quelle: &mut impl BufRead) -> Option<serde_json::Value> {
+    for _ in 0..MAX_UEBERSPRUNGENE_ZEILEN {
+        let mut zeile = String::new();
+        let gelesen = quelle.read_line(&mut zeile).expect("read stdout");
+        if gelesen == 0 {
+            return None;
+        }
+        let inhalt = zeile.trim();
+        if inhalt.is_empty() || !inhalt.starts_with('{') {
+            // Vorlaufende Diagnoseausgabe (tracing, Panic-Hook, Sidecar-Init) — nicht das Protokoll.
+            eprintln!("[harness] uebersprungene Nicht-JSON-Zeile: {inhalt}");
+            continue;
+        }
+        return Some(serde_json::from_str(inhalt).expect("parse response"));
+    }
+    panic!("keine JSON-Antwort innerhalb von {MAX_UEBERSPRUNGENE_ZEILEN} Zeilen stdout");
+}
+
+/// Die Positivkontrolle zum Ueberspringen: ohne sie belegt kein Test, dass der Harnisch eine
+/// Bannerzeile ueberhaupt vertraegt — die 33 Protokolltests laufen auf Linux auch dann gruen,
+/// wenn nie etwas zu ueberspringen war.
+#[test]
+fn harnisch_ueberspringt_vorlauf_und_leerzeilen() {
+    let mut quelle = Cursor::new(
+        "Banner ohne JSON\n\n   \nwarnung: irgendwas\n{\"jsonrpc\":\"2.0\",\"id\":7}\n".to_string(),
+    );
+    let antwort = lies_json_antwort(&mut quelle).expect("Antwort nach dem Vorlauf");
+    assert_eq!(antwort["id"], 7);
+}
+
+/// Die Negativkontrolle: schweigt die Quelle, muss das als solches herauskommen und nicht als
+/// Parse-Fehler. Genau diese Verwechslung hat auf macOS jahrelang die falsche Ursache nahegelegt.
+#[test]
+fn harnisch_meldet_stumme_quelle_als_fehlende_antwort() {
+    let mut quelle = Cursor::new(String::new());
+    assert!(lies_json_antwort(&mut quelle).is_none());
+}
+
+/// Und die Abbruchbedingung: ein Server, der endlos plappert, darf den Test nicht aufhaengen.
+#[test]
+#[should_panic(expected = "keine JSON-Antwort")]
+fn harnisch_bricht_bei_endlosem_geplapper_ab() {
+    let geplapper = "kein json\n".repeat(MAX_UEBERSPRUNGENE_ZEILEN + 5);
+    let _ = lies_json_antwort(&mut Cursor::new(geplapper));
 }
 
 impl Drop for Server {
