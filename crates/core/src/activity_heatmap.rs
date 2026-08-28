@@ -150,9 +150,16 @@ pub fn build(root: &Path) -> ActivityHeatmap {
         let author = commit.author();
         let display = author
             .name()
+            .ok()
             .map(str::to_string)
             .filter(|s| !s.is_empty())
-            .or_else(|| author.email().map(str::to_string).filter(|s| !s.is_empty()))
+            .or_else(|| {
+                author
+                    .email()
+                    .ok()
+                    .map(str::to_string)
+                    .filter(|s| !s.is_empty())
+            })
             .unwrap_or_else(|| "unknown".to_string());
 
         let by_author = per_day.entry(date).or_default();

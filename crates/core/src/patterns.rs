@@ -357,7 +357,7 @@ fn each_class<'a>(
 ) -> impl Iterator<Item = (&'a str, &'a Path, &'a Class)> + 'a {
     repo.modules
         .values()
-        .filter(move |m| scope.module.as_deref().map_or(true, |f| f == m.id))
+        .filter(move |m| scope.module.as_deref().is_none_or(|f| f == m.id))
         .flat_map(|m| {
             m.classes
                 .values()

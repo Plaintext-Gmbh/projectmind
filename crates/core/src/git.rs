@@ -176,7 +176,9 @@ pub fn list_refs(repo_root: &Path) -> Result<Vec<GitRef>, GitError> {
     let mut tags: Vec<GitRef> = Vec::new();
     let tag_names = repo.tag_names(None)?;
     for maybe_name in &tag_names {
-        let Some(name) = maybe_name else { continue };
+        // git2 0.21: iteration yields Result<Option<&str>> — a non-UTF-8 or
+        // unreadable entry is skipped like a `None` used to be.
+        let Ok(Some(name)) = maybe_name else { continue };
         // A tag may point at an annotated-tag object; peel to commit so the
         // sha matches what `git log` would show.
         let target_sha = repo
@@ -316,16 +318,26 @@ pub fn file_recency(repo_root: &Path) -> Result<Vec<FileRecency>, GitError> {
         let commit_time = commit.time().seconds();
         let summary = commit
             .summary()
+            .ok()
+            .flatten()
             .map(ToString::to_string)
             .unwrap_or_default();
         let sha = oid.to_string();
         let short_sha: String = sha.chars().take(7).collect();
-        // git2 returns Option<&str> for both name and email; we promote
-        // empty strings to `None` too so consumers don't have to special-
-        // case malformed signatures.
+        // git2 0.21 returns Result<&str> for both name and email (Err on
+        // non-UTF-8); we promote empty strings to `None` too so consumers
+        // don't have to special-case malformed signatures.
         let author = commit.author();
-        let author_name = author.name().map(str::to_string).filter(|s| !s.is_empty());
-        let author_email = author.email().map(str::to_string).filter(|s| !s.is_empty());
+        let author_name = author
+            .name()
+            .ok()
+            .map(str::to_string)
+            .filter(|s| !s.is_empty());
+        let author_email = author
+            .email()
+            .ok()
+            .map(str::to_string)
+            .filter(|s| !s.is_empty());
 
         // First-parent diff; merge commits are skipped entirely (see
         // `first_parent_touched_paths`) so the "last edit" stays the real
@@ -511,6 +523,8 @@ pub fn commit_activity(repo_root: &Path) -> CommitActivity {
         let short_sha: String = sha.chars().take(7).collect();
         let summary = commit
             .summary()
+            .ok()
+            .flatten()
             .map(ToString::to_string)
             .unwrap_or_default();
 
