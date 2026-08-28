@@ -565,6 +565,43 @@ export async function readFileText(path: string): Promise<string> {
   return invoke<string>('read_file_text', { path });
 }
 
+/// Result of exporting the C4 model to draw.io (#142): the absolute path of
+/// `docs/architecture.drawio`, whether this call created it, and — for a
+/// merge into an existing file — how many cells were added below the
+/// existing drawing vs. kept byte-for-byte (the user's layout survives).
+export interface DrawioExportResult {
+  path: string;
+  created: boolean;
+  added: number;
+  kept: number;
+  pages: number;
+}
+
+/// Export the editable C4 model (`docs/architecture.dsl`, or the generated
+/// model when absent) to `docs/architecture.drawio` (#142). Creates the file,
+/// or merges missing elements into it while preserving every existing cell.
+/// Open the result with `fileView` — App routes `.drawio` paths to the
+/// embedded diagrams.net viewer/editor.
+export async function exportC4Drawio(): Promise<DrawioExportResult> {
+  if (!isTauriRuntime()) return post<DrawioExportResult>('/api/export_c4_drawio', {});
+  return invoke<DrawioExportResult>('export_c4_drawio');
+}
+
+/// Result of writing a `.drawio` file back from the embedded editor.
+export interface SaveDrawioResult {
+  path: string;
+  bytes: number;
+}
+
+/// Write the XML the embedded diagrams.net editor produced back to an
+/// existing `.drawio` file inside the open repo (#142, draw.io edit path). The
+/// host refuses paths outside the repo, non-.drawio files, oversized payloads
+/// and anything that is not a draw.io document.
+export async function saveDrawio(path: string, xml: string): Promise<SaveDrawioResult> {
+  if (!isTauriRuntime()) return post<SaveDrawioResult>('/api/save_drawio', { path, xml });
+  return invoke<SaveDrawioResult>('save_drawio', { path, xml });
+}
+
 /**
  * Reveal a file or folder in the OS file manager (Finder / Explorer / Files).
  * Desktop-only; in browser mode this is a no-op since the host file manager

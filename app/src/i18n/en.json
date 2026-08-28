@@ -76,6 +76,9 @@
   "diagram.c4Model.autoMerge.tooltip": "When on, changes on disk are also folded into docs/architecture.dsl automatically (additive — your edits stay). Off by default.",
   "diagram.c4Model.merged": "Added {containers} container(s), {components} component(s), {relationships} relation(s).",
   "diagram.c4Model.upToDate": "Model already up to date — nothing to add.",
+  "diagram.c4Model.exportDrawio": "Export draw.io",
+  "diagram.c4Model.exporting": "Exporting…",
+  "diagram.c4Model.exportDrawio.tooltip": "Write docs/architecture.drawio from the model and open it in the editor. Re-exporting keeps your layout — only missing elements are added.",
   "diagram.c4Component": "C4 component",
   "diagram.c4Component.picker": "Container",
   "diagram.c4Component.empty": "No modules with parsed classes to zoom into.",
@@ -375,5 +378,12 @@
   "presenter.overlay.risk": "Toggle risk badges for this class (r)",
   "presenter.overlay.pattern": "Toggle pattern compliance for this class (p)",
   "presenter.loading": "Loading step…",
-  "presenter.empty": "This tour has no steps."
+  "presenter.empty": "This tour has no steps.",
+  "drawio.edit": "Edit",
+  "drawio.edit.tooltip": "Edit in the embedded diagrams.net editor and save back into the repo. The diagram XML is sent to embed.diagrams.net.",
+  "drawio.done": "Done",
+  "drawio.editHint": "Save in the editor writes the file; Exit or Done returns to the viewer.",
+  "drawio.saving": "Saving…",
+  "drawio.saved": "Saved {time}",
+  "drawio.saveFailed": "Save failed: {error}"
 }

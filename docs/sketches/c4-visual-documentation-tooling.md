@@ -6,6 +6,25 @@
 > draw.io / diagrams.net integration is a first-class candidate because ProjectMind
 > already has a `.drawio` viewer surface.
 
+## Status (August 2026) — evaluation concluded
+
+The layered workflow below is implemented; this section records the outcome per
+candidate so the table underneath reads as history, not as an open question.
+
+| Candidate | Verdict | What shipped / why not |
+|---|---|---|
+| **Structurizr DSL** | ✅ **adopted** (subset, Rust-native) | `docs/architecture.dsl` is the canonical, versioned model: `scaffold_c4_model` writes it once, `parse_c4_dsl` reads it back, `merge_c4_model` folds new code structure in additively. No JVM, no Structurizr CLI — the parser/renderer is `core::c4_dsl` (PRs #223–#225). |
+| **Mermaid C4** | ✅ **adopted** for generated views | `c4-container` (generated), `c4-model` (the DSL rendered back), `c4-component` (container zoom, PR #226). Exactly the "generated output target" role this sketch proposed. |
+| **draw.io / diagrams.net** | ✅ **adopted** — Phase A, B **and** C | A: `.drawio` files render in the embedded viewer. B: the viewer's **Edit** mode is the full embedded editor with save-back into the repo (`save_drawio`). C: `export_c4_drawio` writes `docs/architecture.drawio` from the model with draw.io's C4 shapes. The semantic-drift risk named below is handled exactly as proposed: every cell carries `pmId` / `pmKind` metadata, so a re-export is a layout-preserving merge that never destroys human layout (`core::c4_drawio`). |
+| **LikeC4** | ❌ **evaluated, not adopted** | Its strengths — a repo-local DSL, a merged model across files, embeddable web views — are the capabilities the Rust-native Structurizr subset already covers for ProjectMind's needs, and its cost is real: a Node/TypeScript toolchain in the Rust analysis path plus a *second* canonical model format competing with `architecture.dsl`. A LikeC4 *export* would be cheap but would only add a format nobody asked for. Revisit if a multi-repo architecture model or LikeC4's view DSL becomes a concrete requirement. |
+| **D2** | ❌ not adopted | Attractive rendering, but a general-purpose diagram language; Mermaid already fills the generated-preview role and draw.io the polished-output role. |
+| **PlantUML + C4-PlantUML** | ❌ not adopted | Would add a second rendering runtime and overlaps Structurizr; no ProjectMind repo currently runs a PlantUML pipeline. |
+| **Ilograph / IcePanel / Lucid / Miro** | ⏸ deferred | SaaS workshop tools stay outside the repo-first model. |
+
+Remaining ideas that were *not* part of #142 and stay open as separate topics:
+a self-hosted diagrams.net build for repos that must not send diagram XML to
+`embed.diagrams.net`, and per-relationship `c4Technology` labels in the DSL.
+
 ## TL;DR
 
 | Tooling path | Recommendation | Best fit | Main trade-off |

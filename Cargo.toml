@@ -77,6 +77,11 @@ quick-xml = "0.39"
 # Pattern matching (HTML snippet detection)
 regex = "1"
 
+# draw.io page decoding (legacy compressed .drawio files are
+# base64(deflate(urlencode(xml)))) — both already in the tree transitively.
+flate2 = "1"
+base64 = "0.22"
+
 # Persistence (code-graph cache + per-repo config)
 # rusqlite `bundled` compiles SQLite in: portable build, no system libsqlite.
 # toml stays on 0.9.x — the 1.x line raised its MSRV to 1.85, workspace is 1.80.

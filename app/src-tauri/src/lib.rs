@@ -30,7 +30,9 @@ use projectmind_core::tour_suggest::{self, Persona};
 use projectmind_core::walkthrough::{
     self as wt, FeedbackEvent, FeedbackKind, FeedbackLog, Walkthrough,
 };
-use projectmind_core::{c4_dsl, code_city, diagram, doc_mentions, risk, tts, Engine, Repository};
+use projectmind_core::{
+    c4_drawio, c4_dsl, code_city, diagram, doc_mentions, risk, tts, Engine, Repository,
+};
 use projectmind_framework_lombok::LombokPlugin;
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_lang_java::JavaPlugin;
@@ -1091,6 +1093,40 @@ fn merge_c4_model(state: State<'_, Arc<AppState>>) -> Result<c4_dsl::MergeModelR
     c4_dsl::merge_c4_model(repo, &spring).map_err(|e| e.to_string())
 }
 
+/// Export the C4 model to `docs/architecture.drawio` (#142): create the file
+/// from the editable model, or merge missing elements into it while keeping
+/// every existing cell (and thus the user's layout) byte-for-byte. Mirrors the
+/// `export_c4_drawio` MCP tool and the browser-host `POST /api/export_c4_drawio`
+/// route — all three call `c4_drawio::export_c4_drawio` in core.
+#[tauri::command]
+fn export_c4_drawio(
+    state: State<'_, Arc<AppState>>,
+) -> Result<c4_drawio::DrawioExportResult, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    let spring = SpringPlugin::new();
+    c4_drawio::export_c4_drawio(repo, &spring).map_err(|e| e.to_string())
+}
+
+/// Write the XML the embedded diagrams.net editor produced back to an
+/// existing `.drawio` file inside the open repo (#142, draw.io edit path).
+/// `c4_drawio::save_drawio` enforces the repo boundary, the extension, a size
+/// cap and a draw.io root element, and writes atomically.
+#[tauri::command]
+fn save_drawio(
+    path: String,
+    xml: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<c4_drawio::SaveDrawioResult, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    c4_drawio::save_drawio(&repo.root, std::path::Path::new(&path), &xml).map_err(|e| e.to_string())
+}
+
 fn now_secs() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
@@ -1703,6 +1739,8 @@ pub fn run() {
             self_demo,
             scaffold_c4_model,
             merge_c4_model,
+            export_c4_drawio,
+            save_drawio,
             end_walkthrough,
             speak,
             open_external,
