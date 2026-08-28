@@ -8,8 +8,11 @@
     FieldOutline,
     AnnotationRef,
     DocMentionHit,
+    CodeLink,
+    CodeLinkKind,
   } from '../lib/api';
-  import { classOutline as fetchOutline, docsForClass } from '../lib/api';
+  import { classOutline as fetchOutline, docsForClass, codeLinks } from '../lib/api';
+  import { openUrl } from '../lib/openUrl';
   import { classes, selectedClass, fileView, viewMode } from '../lib/store';
   import { createShiftWheelZoom } from '../lib/shiftWheelZoom';
   import { t } from '../lib/i18n';
@@ -168,6 +171,55 @@
     code: 'classDocs.kind.code',
     name: 'classDocs.kind.name',
   } as const;
+
+  // ----- External references (Code↔Doc bridge, external half, #65) -------
+
+  // Confluence / Jira / issue-tracker / doc-URL references in the class's
+  // source file. Same load pattern as the docs above; zero hits = no section.
+  let links: CodeLink[] = [];
+  let linksFqn: string | null = null;
+
+  $: if (klass && klass.fqn !== linksFqn) {
+    linksFqn = klass.fqn;
+    links = [];
+    void loadLinks(klass.fqn);
+  }
+
+  async function loadLinks(fqn: string) {
+    try {
+      const hits = await codeLinks(fqn);
+      if (linksFqn === fqn) links = hits;
+    } catch (err) {
+      console.warn('code_links failed:', err);
+      if (linksFqn === fqn) links = [];
+    }
+  }
+
+  // Literal key record so the i18n unused-key scan sees every key verbatim.
+  const LINK_KIND_KEY = {
+    confluence: 'classLinks.kind.confluence',
+    jira: 'classLinks.kind.jira',
+    issue: 'classLinks.kind.issue',
+    url: 'classLinks.kind.url',
+  } as const;
+  const LINK_KIND_ORDER: CodeLinkKind[] = ['confluence', 'jira', 'issue', 'url'];
+
+  $: linkGroups = LINK_KIND_ORDER.map((kind) => ({
+    kind,
+    items: links.filter((l) => l.kind === kind),
+  })).filter((g) => g.items.length > 0);
+
+  /// A reference with a URL opens in the system browser; a bare Jira key
+  /// without a configured base jumps to the line that mentions it.
+  function openLink(l: CodeLink) {
+    if (l.url) void openUrl(l.url);
+    else jumpToLine(l.line);
+  }
+
+  function linkTitle(l: CodeLink): string {
+    const hint = l.url ? $t('classLinks.open') : $t('classLinks.noUrl');
+    return `${l.context}\n${hint}`;
+  }
 
   function openDoc(hit: DocMentionHit) {
     // Exactly the MarkdownIndex.open() pattern: point the file view at the
@@ -562,6 +614,43 @@
                 </li>
               {/each}
             </ul>
+          </div>
+        {/if}
+        <!-- External references (#65): Confluence / Jira / issues / doc URLs
+             the source points at. Grouped by kind; hidden without hits. -->
+        {#if linkGroups.length > 0}
+          <div class="outline-section links">
+            <h3>{$t('classLinks.title')} <span class="count">{links.length}</span></h3>
+            {#each linkGroups as g (g.kind)}
+              <div class="link-group">
+                {$t(LINK_KIND_KEY[g.kind])} <span class="count">{g.items.length}</span>
+              </div>
+              <ul>
+                {#each g.items as l (`${l.kind}:${l.label}`)}
+                  <li class="link-item">
+                    <button
+                      type="button"
+                      class="outline-row link-row"
+                      on:click={() => openLink(l)}
+                      title={linkTitle(l)}
+                    >
+                      <span class="link-label" class:external={!!l.url}>{l.label}</span>
+                      {#if l.count > 1}
+                        <span class="doc-count">×{l.count}</span>
+                      {/if}
+                    </button>
+                    <button
+                      type="button"
+                      class="link-line"
+                      on:click={() => jumpToLine(l.line)}
+                      title={$t('classLinks.jump', { line: l.line })}
+                    >
+                      :{l.line}
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {/each}
           </div>
         {/if}
       </aside>
@@ -988,5 +1077,49 @@
     /* 0.8em statt 10px: skaliert mit Zoom. */
     font-size: 0.8em;
     color: var(--fg-2);
+  }
+
+  /* ----- External references (#65) --------------------------------------- */
+
+  .link-group {
+    /* 0.75em statt 10px: skaliert mit Zoom. */
+    font-size: 0.75em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--fg-2);
+    padding: 6px 6px 2px;
+  }
+  .link-item {
+    display: flex;
+    align-items: baseline;
+    gap: 2px;
+  }
+  .outline-row.link-row {
+    flex: 1;
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .link-row .link-label {
+    color: var(--fg-0);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .link-row .link-label.external {
+    color: var(--accent-2);
+  }
+  .link-line {
+    flex: none;
+    font-family: var(--mono);
+    /* 0.8em statt 10px: skaliert mit Zoom. */
+    font-size: 0.8em;
+    color: var(--fg-2);
+    background: transparent;
+    border: 0;
+    padding: 4px 6px;
+    cursor: pointer;
+  }
+  .link-line:hover {
+    color: var(--fg-0);
   }
 </style>

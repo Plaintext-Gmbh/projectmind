@@ -277,6 +277,31 @@ export async function docsForClass(fqn: string, limit = 8): Promise<DocMentionHi
   return invoke<DocMentionHit[]>('docs_for_class', { fqn, limit });
 }
 
+/// Classification of an external reference found in a class's source
+/// (Code↔Doc bridge, external half, #65). Mirrors `code_links::CodeLinkKind`.
+export type CodeLinkKind = 'confluence' | 'jira' | 'issue' | 'url';
+
+/// One external reference: a Confluence page, Jira ticket, issue-tracker
+/// item or documentation URL the source refers to. `url` is null for a bare
+/// Jira key when the repo has no `[docs.external] jira_base` configured — the
+/// viewer then jumps to the source line instead of opening a browser.
+export interface CodeLink {
+  kind: CodeLinkKind;
+  label: string;
+  url: string | null;
+  line: number;
+  context: string;
+  count: number;
+  in_class: boolean;
+}
+
+/// External documentation the class's source refers to (#65). Dual-mode like
+/// `docsForClass`; the `code_links` MCP tool serves the same list to the LLM.
+export async function codeLinks(fqn: string): Promise<CodeLink[]> {
+  if (!isTauriRuntime()) return api<CodeLink[]>(`/api/code_links${query({ fqn })}`);
+  return invoke<CodeLink[]>('code_links', { fqn });
+}
+
 export async function listChangesSince(reference: string, to?: string): Promise<ChangedFile[]> {
   if (!isTauriRuntime()) {
     return api<ChangedFile[]>(`/api/list_changes_since${query({ reference, to })}`);

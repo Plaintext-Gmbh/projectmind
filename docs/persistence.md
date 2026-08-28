@@ -52,7 +52,16 @@ backend = "json"       # default — the only annotation backend today
 [persistence.code_graph]
 backend = "sqlite"     # "none" (default) | "memory" | "sqlite"
 path = "cache/graph.db"  # optional, sqlite only; relative = repo-relative
+
+[docs.external]        # Code↔Doc bridge, external references (#65) — all optional
+jira_base = "https://acme.atlassian.net/browse/"  # makes bare PAY-1234 keys clickable
+jira_projects = ["PAY", "OPS"]                    # only these prefixes; also matched in string literals
 ```
+
+The `[docs.external]` section is not persistence — it shares the file because
+the file is *the* per-repo settings surface. Without it, `code_links` still
+reports Confluence / Jira / issue-tracker URLs and heuristically detected
+ticket keys on comment lines (see [`projectmind_core::code_links`](../crates/core/src/code_links.rs)).
 
 Discovery order: `<repo>/.projectmind/config.toml`, then `$XDG_CONFIG_HOME/projectmind/defaults.toml` (machine-wide default for repos without their own file), then built-in defaults. Files are not merged — the first one found wins whole.
 

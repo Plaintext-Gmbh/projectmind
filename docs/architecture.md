@@ -198,7 +198,14 @@ architecture. Grouped by concern:
   it in present + autoplay via the `tour_suggest::self_demo` core path — same
   code the `▶ Demo` button, the Tauri command and the browser host take),
   `risk_atlas`, `pattern_check`, `architect_briefing`
-- **Docs & artifacts** — `list_html`, `list_html_snippets`, `docs_for_class`
+- **Docs & artifacts** — `list_html`, `list_html_snippets`, `docs_for_class`,
+  `code_links` (Code↔Doc bridge, external half, #65: `core::code_links` sweeps
+  the class's source for Confluence / Jira / issue-tracker / doc-URL
+  references — unambiguous tracker URLs anywhere, plain URLs and ticket keys
+  on comment lines only, licence / schema hosts denied; `[docs.external]` in
+  `.projectmind/config.toml` supplies `jira_base` for clickable keys and a
+  `jira_projects` allow-list; shown as the class viewer's **References**
+  section)
   (ranked in-repo Markdown mentions of a class — the code↔doc bridge),
   `present_artifact`, `list_artifacts`
 

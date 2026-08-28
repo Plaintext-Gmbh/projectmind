@@ -131,6 +131,7 @@ custom agent — can connect to. It implements:
 | `find_class` | Case-insensitive substring search by simple or fully-qualified name. |
 | `class_outline` | Methods, fields, annotations and visibility of a class — without source. |
 | `docs_for_class` | Repo-internal Markdown documents that mention a class or link to its source file, ranked by precision (source-file link > FQN > inline-code name > bare distinctive name). The bridge from code to the ADRs / design docs / runbooks behind it. |
+| `code_links` | The external half of the Code↔Doc bridge ([#65](https://github.com/Plaintext-Gmbh/projectmind/issues/65)): Confluence pages, Jira tickets (keys like `PAY-1234` and browse URLs), GitHub / GitLab issues and PRs, and documentation URLs the class's source refers to — one sweep over the file, licence headers / XML schemas / local endpoints filtered out. Bare ticket keys become clickable when `.projectmind/config.toml` sets `[docs.external] jira_base`; `jira_projects` pins the accepted prefixes. The class viewer shows the same list as its **References** section. |
 | `show_class` | Source of a class with optional line-range highlights. |
 | `relations` | The full bean / injection graph as JSON: `{from, to, kind, cross_module}` edges. |
 | `list_changes_since` | Files changed since a given git ref. |

@@ -25,13 +25,14 @@ use projectmind_core::files::{self, MarkdownFile, MarkdownHit, ModuleFile};
 use projectmind_core::git::{self, ChangedFile};
 use projectmind_core::heartbeat;
 use projectmind_core::html::{self, HtmlFile, HtmlSnippet};
+use projectmind_core::persistence::ExternalDocsConfig;
 use projectmind_core::state::{self, UiState, ViewIntent};
 use projectmind_core::tour_suggest::{self, Persona};
 use projectmind_core::walkthrough::{
     self as wt, FeedbackEvent, FeedbackKind, FeedbackLog, Walkthrough,
 };
 use projectmind_core::{
-    c4_drawio, c4_dsl, code_city, diagram, doc_mentions, risk, tts, Engine, Repository,
+    c4_drawio, c4_dsl, code_city, code_links, diagram, doc_mentions, risk, tts, Engine, Repository,
 };
 use projectmind_framework_lombok::LombokPlugin;
 use projectmind_framework_spring::SpringPlugin;
@@ -689,6 +690,29 @@ fn docs_for_class(
         &repo.root,
         &needle,
         limit.unwrap_or(8).clamp(1, 50),
+    ))
+}
+
+/// External documentation the class's source refers to (#65, Code↔Doc
+/// bridge, external half): Confluence / Jira / issue-tracker / doc URLs.
+/// Same `projectmind_core::code_links` sweep the `code_links` MCP tool runs.
+#[tauri::command]
+fn code_links(
+    fqn: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<code_links::CodeLink>, String> {
+    let guard = state.repo.read();
+    let repo = guard
+        .as_ref()
+        .ok_or_else(|| "no repository open".to_string())?;
+    let (module, class) = repo
+        .find_class(&fqn)
+        .ok_or_else(|| format!("class not found: {fqn}"))?;
+    let config = ExternalDocsConfig::load(&repo.root);
+    Ok(code_links::code_links_for_class(
+        &module.root,
+        class,
+        &config,
     ))
 }
 
@@ -1711,6 +1735,7 @@ pub fn run() {
             show_class,
             class_outline,
             docs_for_class,
+            code_links,
             list_changes_since,
             file_recency,
             commit_activity,

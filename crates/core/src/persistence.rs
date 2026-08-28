@@ -56,6 +56,54 @@ pub const CONFIG_FILE: &str = "config.toml";
 struct ConfigFile {
     #[serde(default)]
     persistence: PersistenceConfig,
+    #[serde(default)]
+    docs: DocsConfig,
+}
+
+/// The `[docs]` section: documentation-bridge settings
+/// ([#65](https://github.com/Plaintext-Gmbh/projectmind/issues/65)).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DocsConfig {
+    /// `[docs.external]`
+    #[serde(default)]
+    pub external: ExternalDocsConfig,
+}
+
+/// `[docs.external]` — how references to external documentation found in
+/// source code (Jira keys, Confluence URLs, …) are interpreted by
+/// `core::code_links`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ExternalDocsConfig {
+    /// Jira browse base, e.g. `https://acme.atlassian.net/browse/`. When
+    /// set, bare ticket keys (`PAY-1234`) become clickable URLs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jira_base: Option<String>,
+    /// Ticket-key prefixes that belong to this repo (`["PAY", "OPS"]`).
+    /// When non-empty, only these prefixes are reported — and they are
+    /// reported everywhere in the source, string literals included. When
+    /// empty, keys are detected heuristically on comment lines only.
+    #[serde(default)]
+    pub jira_projects: Vec<String>,
+}
+
+impl ExternalDocsConfig {
+    /// Load the `[docs.external]` section for `repo_root` using the same
+    /// discovery order as [`PersistenceConfig::load`]. Never fails: a
+    /// missing or malformed config yields the defaults (the malformed case
+    /// is already logged by the persistence resolver on repo open).
+    #[must_use]
+    pub fn load(repo_root: &Path) -> Self {
+        let candidates = std::iter::once(PersistenceConfig::config_path(repo_root))
+            .chain(PersistenceConfig::user_defaults_path());
+        for candidate in candidates {
+            if let Ok(text) = std::fs::read_to_string(&candidate) {
+                return parse_file(&text)
+                    .map(|(file, _)| file.docs.external)
+                    .unwrap_or_default();
+            }
+        }
+        Self::default()
+    }
 }
 
 /// The `[persistence]` section: backend selection per data class.
@@ -222,11 +270,18 @@ impl PersistenceConfig {
     /// warned"). A syntactically broken document is an `Err` with the
     /// TOML diagnostics.
     pub fn parse(text: &str) -> Result<(Self, Vec<String>), String> {
-        let value: toml::Value = toml::from_str(text).map_err(|e| e.to_string())?;
-        let warnings = unknown_key_warnings(&value);
-        let file: ConfigFile = value.try_into().map_err(|e| e.to_string())?;
+        let (file, warnings) = parse_file(text)?;
         Ok((file.persistence, warnings))
     }
+}
+
+/// Parse the whole `config.toml` document (all sections) plus unknown-key
+/// warnings. Shared by the persistence and docs loaders.
+fn parse_file(text: &str) -> Result<(ConfigFile, Vec<String>), String> {
+    let value: toml::Value = toml::from_str(text).map_err(|e| e.to_string())?;
+    let warnings = unknown_key_warnings(&value);
+    let file: ConfigFile = value.try_into().map_err(|e| e.to_string())?;
+    Ok((file, warnings))
 }
 
 /// Walk the parsed document and flag keys the schema doesn't know.
@@ -236,10 +291,12 @@ impl PersistenceConfig {
 fn unknown_key_warnings(value: &toml::Value) -> Vec<String> {
     let mut warnings = Vec::new();
     let known: &[(&str, &[&str])] = &[
-        ("", &["persistence"]),
+        ("", &["persistence", "docs"]),
         ("persistence", &["annotations", "code_graph"]),
         ("persistence.annotations", &["backend"]),
         ("persistence.code_graph", &["backend", "path"]),
+        ("docs", &["external"]),
+        ("docs.external", &["jira_base", "jira_projects"]),
     ];
     for (prefix, keys) in known {
         let table = prefix
@@ -396,6 +453,53 @@ pub fn resolve_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn docs_external_section_parses_without_unknown_key_warnings() {
+        let text = "[persistence.annotations]\nbackend = \"json\"\n\n[docs.external]\njira_base = \"https://acme.atlassian.net/browse/\"\njira_projects = [\"PAY\", \"OPS\"]\n";
+        let (file, warnings) = parse_file(text).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(
+            file.docs.external.jira_base.as_deref(),
+            Some("https://acme.atlassian.net/browse/")
+        );
+        assert_eq!(file.docs.external.jira_projects, vec!["PAY", "OPS"]);
+        // Persistence side untouched by the new section.
+        assert_eq!(file.persistence.annotations.backend, "json");
+
+        let (_, warnings) = parse_file("[docs.external]\njira_bas = 1\n").unwrap();
+        assert_eq!(
+            warnings,
+            vec!["unknown config key `docs.external.jira_bas` (ignored)"]
+        );
+    }
+
+    #[test]
+    fn docs_external_load_defaults_when_absent_or_malformed() {
+        let dir = std::env::temp_dir().join(format!("pm-docs-cfg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(CONFIG_DIR)).unwrap();
+        assert_eq!(
+            ExternalDocsConfig::load(&dir).jira_projects,
+            Vec::<String>::new()
+        );
+        std::fs::write(
+            dir.join(CONFIG_DIR).join(CONFIG_FILE),
+            "[docs.external]\njira_projects = [\"PM\"]\n",
+        )
+        .unwrap();
+        assert_eq!(ExternalDocsConfig::load(&dir).jira_projects, vec!["PM"]);
+        std::fs::write(
+            dir.join(CONFIG_DIR).join(CONFIG_FILE),
+            "this is = not [ toml",
+        )
+        .unwrap();
+        assert_eq!(
+            ExternalDocsConfig::load(&dir),
+            ExternalDocsConfig::default()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);

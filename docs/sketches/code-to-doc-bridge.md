@@ -11,8 +11,8 @@
 | Concept | State |
 |---|---|
 | Doc graph (Markdown ↔ Markdown) | ✅ shipped — `doc-graph` diagram kind, MCP `show_diagram` route, `<DocGraph>` Svelte renderer |
-| Code ↔ doc bridge — in-repo Markdown only (Phase A, this sketch) | proposed |
-| Code ↔ doc bridge — Confluence / Jira (Phase B) | blocked on Confluence MCP bridge (Phase 2) |
+| Code ↔ doc bridge — in-repo Markdown only (Phase A, this sketch) | ✅ shipped — `docs_for_class` MCP tool + the class viewer's **Docs** section (#219) |
+| Code ↔ doc bridge — Confluence / Jira (Phase B) | ✅ shipped as **`code_links`** — the regex sweep + **References** side-bar from the original plan (Confluence / Jira / issue URLs anywhere, doc URLs and ticket keys on comment lines, `[docs.external]` config for clickable keys). The hover **live preview** through a Confluence MCP bridge was *not* built — it needs an authenticated bridge server nobody has asked for yet; the side-bar already delivers the navigation. |
 
 The original issue conflated the Confluence variant with the in-repo variant. They have
 very different costs: the in-repo variant reuses the existing Markdown index plus the
@@ -109,7 +109,12 @@ Two reasons.
   fence/backtick filter cuts the false-positive rate to roughly zero on the repos we've
   inspected.
 
-## Phase B — Confluence / Jira (deferred)
+## Phase B — Confluence / Jira
+
+> **Status (August 2026):** the reference *surface* shipped as `core::code_links`
+> (MCP tool `code_links`, Tauri command, browser-host route, References side-bar in
+> the class viewer). What follows is the original analysis of the *live preview*
+> variant, which remains unbuilt for the reasons given.
 
 The Phase B variant needs a Confluence MCP server we don't yet ship, plus:
 

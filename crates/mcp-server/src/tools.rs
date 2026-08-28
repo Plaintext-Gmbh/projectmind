@@ -19,6 +19,7 @@ use projectmind_core::state::{self, UiState, ViewIntent};
 use projectmind_core::tour_suggest::{self, Persona};
 use projectmind_core::walkthrough::{self as wt, QuizQuestion, Walkthrough, WalkthroughStep};
 use projectmind_core::{c4_drawio, c4_dsl, diagram, git, html};
+use projectmind_core::{code_links, persistence::ExternalDocsConfig};
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_plugin_api::FrameworkPlugin;
 use serde::Deserialize;
@@ -579,6 +580,11 @@ pub(crate) fn list() -> Value {
                 "inputSchema": docs_for_class_schema()
             },
             {
+                "name": "code_links",
+                "description": "External documentation a class's source refers to (Code↔Doc bridge, #65): Confluence pages, Jira tickets (keys like PAY-1234 and browse URLs), issue-tracker items (GitHub / GitLab issues + PRs) and documentation URLs on comment lines. One regex sweep over the class's file; licence headers, XML schemas and local endpoints are filtered out. Bare Jira keys become clickable when `.projectmind/config.toml` sets `[docs.external] jira_base`; `jira_projects` restricts (and widens to string literals) the accepted prefixes. Returns `[{ kind: confluence|jira|issue|url, label, url|null, line, context, count, in_class }]` ordered by first occurrence. Use to find the ticket / spec / design page behind the code you are reading, or when the user asks `which Jira ticket introduced this` / `where is this documented externally`.",
+                "inputSchema": fqn_schema()
+            },
+            {
                 "name": "view_class",
                 "description": "Open a class in every ProjectMind viewer that is currently running (Desktop GUI and/or browser webapp from `open_browser_repo`). Use after the user says `show me class X` / `open class X`. Pushes UI state via the shared statefile — no per-viewer routing exists. Auto-launches the Desktop GUI if no viewer is up; takes precedence over manual GUI navigation.",
                 "inputSchema": fqn_schema()
@@ -727,6 +733,7 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "list_html" => list_html(state).await,
         "list_html_snippets" => list_html_snippets(state).await,
         "docs_for_class" => docs_for_class(state, parsed.arguments).await,
+        "code_links" => code_links(state, parsed.arguments).await,
         "view_class" => view_class(state, parsed.arguments).await,
         "view_diff" => view_diff(parsed.arguments),
         "view_file" => view_file(parsed.arguments),
@@ -1211,6 +1218,30 @@ async fn docs_for_class(state: &Mutex<ServerState>, args: Value) -> DispatchResu
         let mentions = doc_mentions::docs_for_class(&repo.root, &needle, limit);
         Ok(text_result(
             serde_json::to_string_pretty(&mentions).unwrap_or_else(|_| "[]".into()),
+        ))
+    })
+}
+
+#[derive(Deserialize)]
+struct CodeLinksArgs {
+    fqn: String,
+}
+
+/// Code↔Doc bridge, external half (#65): Confluence / Jira / issue-tracker /
+/// doc-URL references in the class's source. Same core sweep the GUI's
+/// "References" section and the browser-host route run.
+async fn code_links(state: &Mutex<ServerState>, args: Value) -> DispatchResult {
+    let args: CodeLinksArgs = serde_json::from_value(args)
+        .map_err(|e| DispatchError::invalid_params(format!("code_links: {e}")))?;
+    let state = state.lock().await;
+    with_repo(&state, |repo| {
+        let (module, class) = repo.find_class(&args.fqn).ok_or_else(|| {
+            DispatchError::invalid_params(format!("class not found: {}", args.fqn))
+        })?;
+        let config = ExternalDocsConfig::load(&repo.root);
+        let links = code_links::code_links_for_class(&module.root, class, &config);
+        Ok(text_result(
+            serde_json::to_string_pretty(&links).unwrap_or_else(|_| "[]".into()),
         ))
     })
 }
