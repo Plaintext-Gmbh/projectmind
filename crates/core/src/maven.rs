@@ -99,23 +99,19 @@ fn parse_pom(path: &Path) -> std::io::Result<ParsedPom> {
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) => {
-                let name = e
-                    .name()
-                    .as_ref()
-                    .iter()
-                    .map(|b| char::from(*b))
-                    .collect::<String>();
-                path_stack.push(name);
+                // quick-xml 0.42: names are already decoded `&str`.
+                path_stack.push(e.name().as_ref().to_string());
             }
             Ok(Event::End(_)) => {
                 path_stack.pop();
             }
             Ok(Event::Text(t)) => {
-                // quick-xml 0.39 removed BytesText::unescape(); decode bytes
-                // to a string and run the entity unescaper from the escape
-                // module. Preserves the prior "decoded + unescaped" behavior.
-                let decoded = t.decode().unwrap_or_default();
-                let text = quick_xml::escape::unescape(&decoded)
+                // quick-xml 0.42: text events carry the decoded-but-still-
+                // escaped content as `Cow<str>`; run the entity unescaper
+                // from the escape module. Preserves the prior "decoded +
+                // unescaped" behavior.
+                let raw = t.into_inner();
+                let text = quick_xml::escape::unescape(&raw)
                     .unwrap_or_default()
                     .to_string();
                 let depth = path_stack.len();

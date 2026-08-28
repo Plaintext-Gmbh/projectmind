@@ -27,7 +27,9 @@
 //! [`Walkthrough`]: crate::walkthrough::Walkthrough
 //! [`Repository`]: crate::repository::Repository
 
-use printpdf::{BuiltinFont, IndirectFontRef, Mm, PdfDocument, PdfDocumentReference};
+use printpdf::{
+    BuiltinFont, Mm, Op, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions, Point, Pt, TextItem,
+};
 
 /// A tour flattened into everything the PDF layout needs — nothing more.
 ///
@@ -155,25 +157,77 @@ fn char_boundary(s: &str, n: usize) -> usize {
     s.char_indices().nth(n).map_or_else(|| s.len(), |(i, _)| i)
 }
 
+/// Pages under construction: one op list per page. printpdf 0.12 builds a
+/// document from complete page op lists (no mutable page/layer handles any
+/// more), so text is accumulated here and turned into [`PdfPage`]s at the end.
+#[derive(Default)]
+struct Pages {
+    ops: Vec<Vec<Op>>,
+}
+
+impl Pages {
+    /// Open a fresh page; returns its index.
+    fn add_page(&mut self) -> usize {
+        self.ops.push(Vec::new());
+        self.ops.len() - 1
+    }
+
+    /// Draw one run of text in the built-in Helvetica at `font_size` pt with
+    /// its baseline at (`x`, `y`) mm from the bottom-left corner.
+    fn use_text(&mut self, page: usize, text: &str, font_size: f32, x: f32, y: f32) {
+        let ops = &mut self.ops[page];
+        ops.push(Op::StartTextSection);
+        ops.push(Op::SetFont {
+            font: PdfFontHandle::Builtin(BuiltinFont::Helvetica),
+            size: Pt(font_size),
+        });
+        ops.push(Op::SetTextCursor {
+            pos: Point {
+                x: Mm(x).into_pt(),
+                y: Mm(y).into_pt(),
+            },
+        });
+        ops.push(Op::ShowText {
+            items: vec![TextItem::Text(text.to_string())],
+        });
+        ops.push(Op::EndTextSection);
+    }
+
+    fn into_document(self, title: &str) -> Vec<u8> {
+        let pages = self
+            .ops
+            .into_iter()
+            .map(|ops| PdfPage::new(Mm(PAGE_W), Mm(PAGE_H), ops))
+            .collect();
+        let mut warnings = Vec::new();
+        let bytes = PdfDocument::new(title)
+            .with_pages(pages)
+            .save(&PdfSaveOptions::default(), &mut warnings);
+        if !warnings.is_empty() {
+            tracing::debug!(
+                count = warnings.len(),
+                "printpdf warnings while saving tour"
+            );
+        }
+        bytes
+    }
+}
+
 /// A tiny cursor that flows text down a page, opening a fresh page when it
 /// runs out of vertical room. Keeps [`render_pdf`] readable.
 struct Flow<'a> {
-    doc: &'a PdfDocumentReference,
-    font: &'a IndirectFontRef,
-    page: printpdf::PdfPageIndex,
-    layer: printpdf::PdfLayerIndex,
+    pages: &'a mut Pages,
+    page: usize,
     /// Current baseline, measured in mm from the page bottom.
     y: f32,
 }
 
 impl<'a> Flow<'a> {
-    fn new(doc: &'a PdfDocumentReference, font: &'a IndirectFontRef) -> Self {
-        let (page, layer) = doc.add_page(Mm(PAGE_W), Mm(PAGE_H), "step");
+    fn new(pages: &'a mut Pages) -> Self {
+        let page = pages.add_page();
         Self {
-            doc,
-            font,
+            pages,
             page,
-            layer,
             y: PAGE_H - MARGIN_TOP,
         }
     }
@@ -185,9 +239,7 @@ impl<'a> Flow<'a> {
     /// Ensure at least `need` mm of vertical space remain; page-break if not.
     fn ensure(&mut self, need: f32) {
         if self.y - need < MARGIN_BOTTOM {
-            let (page, layer) = self.doc.add_page(Mm(PAGE_W), Mm(PAGE_H), "cont");
-            self.page = page;
-            self.layer = layer;
+            self.page = self.pages.add_page();
             self.y = PAGE_H - MARGIN_TOP;
         }
     }
@@ -197,8 +249,7 @@ impl<'a> Flow<'a> {
     fn write_line(&mut self, text: &str, font_size: f32, x: f32) {
         let lh = Self::line_height(font_size);
         self.ensure(lh);
-        let layer = self.doc.get_page(self.page).get_layer(self.layer);
-        layer.use_text(text, font_size, Mm(x), Mm(self.y), self.font);
+        self.pages.use_text(self.page, text, font_size, x, self.y);
         self.y -= lh;
     }
 
@@ -225,27 +276,23 @@ impl<'a> Flow<'a> {
 ///
 /// # Errors
 ///
-/// Returns an error only if `printpdf` fails to serialise the document — in
-/// practice never for well-formed input, but surfaced rather than panicked.
+/// Kept as a `Result` for API stability; printpdf 0.12 serialises
+/// infallibly (it reports non-fatal findings as warnings, logged at debug).
 pub fn render_pdf(tour: &RenderTour) -> anyhow::Result<Vec<u8>> {
-    let (doc, cover_page, cover_layer) =
-        PdfDocument::new(&tour.title, Mm(PAGE_W), Mm(PAGE_H), "cover");
-    let font = doc
-        .add_builtin_font(BuiltinFont::Helvetica)
-        .map_err(|e| anyhow::anyhow!("add font: {e}"))?;
+    let mut pages = Pages::default();
 
     // ----- Cover page --------------------------------------------------
     {
-        let layer = doc.get_page(cover_page).get_layer(cover_layer);
+        let cover = pages.add_page();
         let mut y = PAGE_H - 90.0;
         for line in wrap_text(&tour.title, chars_per_line(HEADING_SIZE + 7.0)) {
-            layer.use_text(&line, HEADING_SIZE + 7.0, Mm(MARGIN_X), Mm(y), &font);
+            pages.use_text(cover, &line, HEADING_SIZE + 7.0, MARGIN_X, y);
             y -= Flow::line_height(HEADING_SIZE + 7.0);
         }
         y -= 6.0;
         if !tour.summary.is_empty() {
             for line in wrap_text(&tour.summary, chars_per_line(BODY_SIZE)) {
-                layer.use_text(&line, BODY_SIZE, Mm(MARGIN_X), Mm(y), &font);
+                pages.use_text(cover, &line, BODY_SIZE, MARGIN_X, y);
                 y -= Flow::line_height(BODY_SIZE);
             }
             y -= 6.0;
@@ -255,11 +302,11 @@ pub fn render_pdf(tour: &RenderTour) -> anyhow::Result<Vec<u8>> {
             tour.steps.len(),
             if tour.steps.len() == 1 { "" } else { "s" }
         );
-        layer.use_text(&footer, META_SIZE, Mm(MARGIN_X), Mm(y), &font);
+        pages.use_text(cover, &footer, META_SIZE, MARGIN_X, y);
     }
 
     // ----- One section per step ----------------------------------------
-    let mut flow = Flow::new(&doc, &font);
+    let mut flow = Flow::new(&mut pages);
     for (i, step) in tour.steps.iter().enumerate() {
         // Keep a step's heading with at least a couple of following lines.
         flow.ensure(Flow::line_height(HEADING_SIZE) * 3.0);
@@ -297,8 +344,7 @@ pub fn render_pdf(tour: &RenderTour) -> anyhow::Result<Vec<u8>> {
         flow.gap(6.0);
     }
 
-    doc.save_to_bytes()
-        .map_err(|e| anyhow::anyhow!("save pdf: {e}"))
+    Ok(pages.into_document(&tour.title))
 }
 
 /// Emit the code snippet with a right-aligned gutter line number. Wraps

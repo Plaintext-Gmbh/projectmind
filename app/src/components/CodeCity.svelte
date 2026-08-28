@@ -298,6 +298,8 @@
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(container.clientWidth || 1, container.clientHeight || 1);
+    // three.js owns this canvas; Svelte never renders into `container`.
+    // eslint-disable-next-line svelte/no-dom-manipulating
     container.appendChild(renderer.domElement);
 
     // Near plane 0.1: at walking eye height the camera gets close to facades;

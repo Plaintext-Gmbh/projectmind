@@ -89,17 +89,16 @@ impl CodeGraphStore for MemoryCodeGraphStore {
     }
 
     fn query(&self, q: &GraphQuery) -> ApiResult<Vec<GraphNode>> {
-        // `map_or(true, …)` instead of `is_none_or` — the latter needs
-        // Rust 1.82 and the workspace MSRV is 1.80.
+        // `is_none_or` (stable since 1.82; workspace MSRV is 1.85).
         let limit = q.limit.map_or(usize::MAX, |l| l as usize);
         Ok(self
             .nodes
             .values()
-            .filter(|n| q.kind.as_deref().map_or(true, |k| n.kind == k))
+            .filter(|n| q.kind.as_deref().is_none_or(|k| n.kind == k))
             .filter(|n| {
                 q.label_contains
                     .as_deref()
-                    .map_or(true, |needle| label_matches(&n.label, needle))
+                    .is_none_or(|needle| label_matches(&n.label, needle))
             })
             .take(limit)
             .cloned()
