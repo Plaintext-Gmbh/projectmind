@@ -29,6 +29,7 @@ use projectmind_core::walkthrough::{
     self as wt, FeedbackEvent, FeedbackKind, FeedbackLog, Walkthrough,
 };
 use projectmind_core::{c4_drawio, c4_dsl, diagram, risk, Engine, Repository};
+use projectmind_core::{code_links, persistence::ExternalDocsConfig};
 use projectmind_framework_lombok::LombokPlugin;
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_lang_java::JavaPlugin;
@@ -461,6 +462,21 @@ fn route_api(
             let needle = doc_mentions::ClassNeedle::for_class(&repo.root, &module.root, class);
             Ok(serde_json::to_value(doc_mentions::docs_for_class(
                 &repo.root, &needle, limit,
+            ))?)
+        }
+        ("GET", "/api/code_links") => {
+            // Code↔Doc bridge, external half (#65): same core sweep as the
+            // `code_links` MCP tool and Tauri command.
+            let fqn = required(query, "fqn")?;
+            let repo = repo(&guard)?;
+            let (module, class) = repo
+                .find_class(fqn)
+                .ok_or_else(|| anyhow::anyhow!("class not found: {fqn}"))?;
+            let config = ExternalDocsConfig::load(&repo.root);
+            Ok(serde_json::to_value(code_links::code_links_for_class(
+                &module.root,
+                class,
+                &config,
             ))?)
         }
         ("GET", "/api/list_changes_since") => {
