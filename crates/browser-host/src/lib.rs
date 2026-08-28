@@ -28,7 +28,7 @@ use projectmind_core::tour_suggest::{self, Persona};
 use projectmind_core::walkthrough::{
     self as wt, FeedbackEvent, FeedbackKind, FeedbackLog, Walkthrough,
 };
-use projectmind_core::{c4_dsl, diagram, risk, Engine, Repository};
+use projectmind_core::{c4_drawio, c4_dsl, diagram, risk, Engine, Repository};
 use projectmind_framework_lombok::LombokPlugin;
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_lang_java::JavaPlugin;
@@ -733,6 +733,24 @@ fn route_api(
             let outcome = c4_dsl::merge_c4_model(repo, &spring)?;
             Ok(serde_json::to_value(outcome)?)
         }
+        ("POST", "/api/export_c4_drawio") => {
+            // Export the C4 model to docs/architecture.drawio (#142): create,
+            // or layout-preserving merge. Same `c4_drawio::export_c4_drawio`
+            // core path the `export_c4_drawio` MCP tool and Tauri command take.
+            let repo = repo(&guard)?;
+            let spring = SpringPlugin::new();
+            let outcome = c4_drawio::export_c4_drawio(repo, &spring)?;
+            Ok(serde_json::to_value(outcome)?)
+        }
+        ("POST", "/api/save_drawio") => {
+            // Save-back from the embedded diagrams.net editor (#142). The
+            // core guard rejects anything that is not an existing `.drawio`
+            // file inside the opened repo, or not a draw.io document.
+            let input: SaveDrawioInput = serde_json::from_slice(body)?;
+            let repo = repo(&guard)?;
+            let outcome = c4_drawio::save_drawio(&repo.root, Path::new(&input.path), &input.xml)?;
+            Ok(serde_json::to_value(outcome)?)
+        }
         ("POST", "/api/end_walkthrough") => {
             wt::clear()?;
             let prev = state::read().ok().flatten().unwrap_or_default();
@@ -779,6 +797,13 @@ struct SelfDemoArgs {
 /// Body of `POST /api/add_annotation`. Mirrors the Tauri-side
 /// `AnnotationInput`. Caller-supplied id is ignored — the store
 /// allocates a fresh one.
+/// Body of `POST /api/save_drawio`.
+#[derive(Deserialize)]
+struct SaveDrawioInput {
+    path: String,
+    xml: String,
+}
+
 #[derive(Deserialize)]
 struct AnnotationInput {
     file: String,

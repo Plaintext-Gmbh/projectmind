@@ -76,6 +76,9 @@
   "diagram.c4Model.autoMerge.tooltip": "Wenn aktiv, werden Änderungen auf der Platte automatisch auch in docs/architecture.dsl eingefaltet (additiv — deine Edits bleiben). Standardmäßig aus.",
   "diagram.c4Model.merged": "{containers} Container, {components} Components, {relationships} Relationen ergänzt.",
   "diagram.c4Model.upToDate": "Modell bereits aktuell — nichts zu ergänzen.",
+  "diagram.c4Model.exportDrawio": "draw.io exportieren",
+  "diagram.c4Model.exporting": "Wird exportiert…",
+  "diagram.c4Model.exportDrawio.tooltip": "docs/architecture.drawio aus dem Modell schreiben und im Editor öffnen. Ein erneuter Export behält dein Layout — nur fehlende Elemente werden ergänzt.",
   "diagram.c4Component": "C4-Komponente",
   "diagram.c4Component.picker": "Container",
   "diagram.c4Component.empty": "Keine Module mit geparsten Klassen zum Hineinzoomen.",
@@ -375,5 +378,12 @@
   "presenter.overlay.risk": "Risiko-Badges für diese Klasse ein-/ausblenden (r)",
   "presenter.overlay.pattern": "Pattern-Konformität für diese Klasse ein-/ausblenden (p)",
   "presenter.loading": "Schritt wird geladen…",
-  "presenter.empty": "Diese Tour hat keine Schritte."
+  "presenter.empty": "Diese Tour hat keine Schritte.",
+  "drawio.edit": "Bearbeiten",
+  "drawio.edit.tooltip": "Im eingebetteten diagrams.net-Editor bearbeiten und ins Repo zurückspeichern. Das Diagramm-XML wird an embed.diagrams.net gesendet.",
+  "drawio.done": "Fertig",
+  "drawio.editHint": "Speichern im Editor schreibt die Datei; Beenden oder Fertig kehrt zur Ansicht zurück.",
+  "drawio.saving": "Wird gespeichert…",
+  "drawio.saved": "Gespeichert {time}",
+  "drawio.saveFailed": "Speichern fehlgeschlagen: {error}"
 }

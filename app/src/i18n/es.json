@@ -76,6 +76,9 @@
   "diagram.c4Model.autoMerge.tooltip": "Si está activado, los cambios en disco también se incorporan automáticamente a docs/architecture.dsl (aditivo — tus ediciones se conservan). Desactivado por defecto.",
   "diagram.c4Model.merged": "Añadidos {containers} contenedor(es), {components} componente(s), {relationships} relación(es).",
   "diagram.c4Model.upToDate": "El modelo ya está al día — nada que añadir.",
+  "diagram.c4Model.exportDrawio": "Exportar draw.io",
+  "diagram.c4Model.exporting": "Exportando…",
+  "diagram.c4Model.exportDrawio.tooltip": "Escribe docs/architecture.drawio a partir del modelo y lo abre en el editor. Volver a exportar conserva tu diseño — solo se añaden los elementos que faltan.",
   "diagram.c4Component": "Componente C4",
   "diagram.c4Component.picker": "Contenedor",
   "diagram.c4Component.empty": "No hay módulos con clases analizadas donde hacer zoom.",
@@ -375,5 +378,12 @@
   "presenter.overlay.risk": "Mostrar/ocultar insignias de riesgo de esta clase (r)",
   "presenter.overlay.pattern": "Mostrar/ocultar conformidad de patrones de esta clase (p)",
   "presenter.loading": "Cargando paso…",
-  "presenter.empty": "Este tour no tiene pasos."
+  "presenter.empty": "Este tour no tiene pasos.",
+  "drawio.edit": "Editar",
+  "drawio.edit.tooltip": "Edita en el editor diagrams.net integrado y guarda en el repositorio. El XML del diagrama se envía a embed.diagrams.net.",
+  "drawio.done": "Listo",
+  "drawio.editHint": "Guardar en el editor escribe el archivo; Salir o Listo vuelve al visor.",
+  "drawio.saving": "Guardando…",
+  "drawio.saved": "Guardado {time}",
+  "drawio.saveFailed": "Error al guardar: {error}"
 }

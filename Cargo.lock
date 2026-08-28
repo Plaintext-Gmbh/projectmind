@@ -4083,8 +4083,10 @@ name = "projectmind-core"
 version = "0.11.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "dirs",
  "fastembed",
+ "flate2",
  "git2",
  "ignore",
  "nucleo-matcher",

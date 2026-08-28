@@ -7,6 +7,7 @@
     showDiagram,
     scaffoldC4Model,
     mergeC4Model,
+    exportC4Drawio,
     getC4AutoMerge,
     setC4AutoMerge,
     beanGraphData,
@@ -109,6 +110,10 @@
   // c4-model round-trip (#142, V6.3): "Modell aktualisieren" merges new code
   // structure into docs/architecture.dsl without touching user edits.
   let merging = false;
+  // c4-model → draw.io (#142, visual review surface): writes or
+  // layout-preservingly updates docs/architecture.drawio, then opens it in
+  // the embedded diagrams.net viewer/editor.
+  let exporting = false;
   // Task 011 "living C4": when on, the desktop repo-watcher also auto-merges
   // new code structure into docs/architecture.dsl after a debounced change.
   // Loaded from the backend when the c4-model view mounts; default OFF.
@@ -689,6 +694,28 @@
     }
   }
 
+  /// Export the C4 model to docs/architecture.drawio (#142) and open the file
+  /// in the draw.io view (App routes `.drawio` paths there), where the user
+  /// can switch to Edit and save back. Re-exporting is a merge: cells that
+  /// already exist keep their layout, only missing elements are added.
+  async function exportDrawio() {
+    exporting = true;
+    error = null;
+    try {
+      const result = await exportC4Drawio();
+      fileView.update((cur) => ({
+        path: result.path,
+        anchor: null,
+        nonce: (cur?.nonce ?? 0) + 1,
+      }));
+      viewMode.set('file');
+    } catch (err) {
+      error = String(err);
+    } finally {
+      exporting = false;
+    }
+  }
+
   /// c4-component (#142, V6.4): the module picker changed. Re-render from the
   /// already-fetched, cached payload — no network round-trip. Ignores no-op
   /// re-selections of the current module.
@@ -1146,6 +1173,16 @@
         <input type="checkbox" checked={autoMergeC4} on:change={toggleAutoMergeC4} />
         {$t('diagram.c4Model.autoMerge')}
       </label>
+      <!-- draw.io export (#142): hand-editable diagram next to the model,
+           opened straight away in the embedded editor. -->
+      <button
+        class="c4-update"
+        on:click={exportDrawio}
+        disabled={exporting}
+        title={$t('diagram.c4Model.exportDrawio.tooltip')}
+      >
+        {exporting ? $t('diagram.c4Model.exporting') : $t('diagram.c4Model.exportDrawio')}
+      </button>
     {:else if kind === 'c4-component' && c4Modules.length > 0}
       <!-- c4-component (#142, V6.4): the container picker. Zooms into ONE
            module's classes as C4 components; switching re-renders from the

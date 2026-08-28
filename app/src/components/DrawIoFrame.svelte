@@ -1,44 +1,50 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
+  import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { wheelDelta } from '../lib/shiftWheelZoom';
+  import {
+    EMBED_ORIGIN,
+    embedUrl,
+    loadMessage,
+    parseEmbedMessage,
+    savedStatusMessage,
+  } from '../lib/drawioEmbed';
 
   export let xml: string;
   export let title = 'draw.io diagram';
+  /// Edit mode (#142): show the full diagrams.net editor instead of the bare
+  /// canvas, let the mouse through to it, and relay its Save / Exit buttons
+  /// as `save` (detail: xml) / `exit` events. The parent decides what to do
+  /// with the XML (DrawIoView writes it back into the repo) and calls
+  /// `acknowledgeSaved()` so the editor drops its "unsaved" marker.
+  export let editable = false;
+
+  const dispatch = createEventDispatcher<{ save: string; exit: boolean }>();
 
   // diagrams.net embed protocol — `proto=json` lets us postMessage the XML
   // payload after the iframe loads, so we don't have to encode it into the
   // URL (which has a hard size limit on every browser).
   //
   // Privacy note: the .drawio XML is sent into an iframe pointed at
-  // embed.diagrams.net (a third-party service). For repos with sensitive
-  // diagrams, build the Tauri shell with a self-hosted draw.io viewer or
-  // run the .drawio file through a local converter first.
-  const EMBED_ORIGIN = 'https://embed.diagrams.net';
-  // URL parameter cheatsheet for the diagrams.net embed:
-  //   embed=1       — embed mode (required for postMessage protocol)
-  //   ui=atlas      — UI variant (left over from the menu/toolbar layout)
-  //   proto=json    — load XML via postMessage(json) instead of URL
-  //   splash=0      — no welcome splash
-  //   toolbar=0     — no top toolbar
-  //   libraries=0   — no shape library panel
-  //   chrome=0      — kill the rest of the chrome (menubar, status bar,
-  //                   format/outline sidebars) so only the canvas shows.
-  //                   Pan/zoom inside the iframe is now disabled because
-  //                   `pointer-events: none` on the frame routes the mouse
-  //                   to our wrapper instead — see the .stage block below.
-  //   dark=auto     — follow OS dark mode
-  const EMBED_URL = `${EMBED_ORIGIN}/?embed=1&ui=atlas&proto=json&splash=0&toolbar=0&libraries=0&chrome=0&dark=auto`;
+  // embed.diagrams.net (a third-party service) in both modes. For repos with
+  // sensitive diagrams, build the Tauri shell with a self-hosted draw.io
+  // viewer or run the .drawio file through a local converter first.
+  //
+  // URL parameters live in lib/drawioEmbed.ts (unit-tested); switching mode
+  // changes the src, which reloads the iframe — the {#key} below makes that
+  // explicit and resets the init handshake.
+  $: embedSrc = embedUrl(editable ? 'edit' : 'view');
 
   let frame: HTMLIFrameElement;
   let stage: HTMLDivElement;
   let initialised = false;
 
-  // Pan + zoom state — identical model to DiagramView so the gesture feels
-  // the same everywhere: plain wheel and Shift+wheel both zoom (Shift parity
-  // matches the text/code viewers), drag-anywhere pans. We apply a single
-  // `translate(...) scale(...)` transform to the iframe; `pointer-events:
-  // none` on the iframe forwards the mouse to this wrapper so the iframe's
-  // own draw.io scroll/pan can't fight us.
+  // Pan + zoom state (view mode only) — identical model to DiagramView so
+  // the gesture feels the same everywhere: plain wheel and Shift+wheel both
+  // zoom (Shift parity matches the text/code viewers), drag-anywhere pans.
+  // We apply a single `translate(...) scale(...)` transform to the iframe;
+  // `pointer-events: none` on the iframe forwards the mouse to this wrapper
+  // so the iframe's own draw.io scroll/pan can't fight us. In edit mode the
+  // editor owns the mouse and the transform is reset.
   let scale = 1;
   let tx = 0;
   let ty = 0;
@@ -48,17 +54,20 @@
   let dragStartTx = 0;
   let dragStartTy = 0;
 
-  $: frameTransform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  $: frameTransform = editable ? 'none' : `translate(${tx}px, ${ty}px) scale(${scale})`;
 
   $: if (xml) initialised = false;
+  $: if (editable !== undefined) initialised = false;
 
   function sendLoad() {
     if (!xml || !frame?.contentWindow) return;
     initialised = true;
-    frame.contentWindow.postMessage(
-      JSON.stringify({ action: 'load', xml, autosave: 0 }),
-      EMBED_ORIGIN,
-    );
+    frame.contentWindow.postMessage(loadMessage(xml, editable ? title : undefined), EMBED_ORIGIN);
+  }
+
+  /// Parent calls this after it persisted the XML from a `save` event.
+  export function acknowledgeSaved() {
+    frame?.contentWindow?.postMessage(savedStatusMessage(), EMBED_ORIGIN);
   }
 
   function onMessage(ev: MessageEvent) {
@@ -68,29 +77,35 @@
     // iframe smuggling messages back at us.
     if (ev.source !== frame?.contentWindow) return;
     if (ev.origin !== EMBED_ORIGIN) return;
-    let data: { event?: string };
-    try {
-      data = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
-    } catch {
-      return;
+    const msg = parseEmbedMessage(ev.data);
+    if (!msg) return;
+    switch (msg.event) {
+      case 'init':
+        if (!initialised) sendLoad();
+        break;
+      case 'save':
+        if (editable && 'xml' in msg) dispatch('save', msg.xml);
+        break;
+      case 'exit':
+        if (editable) dispatch('exit', 'modified' in msg ? msg.modified : false);
+        break;
+      default:
+        break;
     }
-    if (data?.event === 'init' && !initialised) sendLoad();
   }
 
   // Once xml lands AND the iframe is ready, we dispatch the load action.
   // The iframe announces "init" via postMessage; we react to that above.
   $: if (xml && frame && !initialised) {
     try {
-      frame.contentWindow?.postMessage(
-        JSON.stringify({ action: 'status' }),
-        EMBED_ORIGIN,
-      );
+      frame.contentWindow?.postMessage(JSON.stringify({ action: 'status' }), EMBED_ORIGIN);
     } catch {
       // ignore
     }
   }
 
   function onWheel(e: WheelEvent) {
+    if (editable) return;
     if (e.cancelable) e.preventDefault();
     e.stopPropagation();
     const delta = wheelDelta(e);
@@ -123,7 +138,7 @@
   }
 
   function onMouseDown(e: MouseEvent) {
-    if (e.button !== 0) return;
+    if (editable || e.button !== 0) return;
     dragging = true;
     dragStartX = e.clientX;
     dragStartY = e.clientY;
@@ -149,6 +164,7 @@
 <div
   class="stage"
   class:dragging
+  class:editable
   bind:this={stage}
   use:nonPassiveWheel={onWheel}
   on:mousedown={onMouseDown}
@@ -156,14 +172,16 @@
   on:mouseup={endDrag}
   on:mouseleave={endDrag}
 >
-  <iframe
-    bind:this={frame}
-    class="frame"
-    style="transform: {frameTransform}; transform-origin: 0 0;"
-    {title}
-    src={EMBED_URL}
-    allow="clipboard-read; clipboard-write"
-  ></iframe>
+  {#key embedSrc}
+    <iframe
+      bind:this={frame}
+      class="frame"
+      style="transform: {frameTransform}; transform-origin: 0 0;"
+      {title}
+      src={embedSrc}
+      allow="clipboard-read; clipboard-write"
+    ></iframe>
+  {/key}
 </div>
 
 <style>
@@ -179,6 +197,9 @@
   .stage.dragging {
     cursor: grabbing;
   }
+  .stage.editable {
+    cursor: default;
+  }
   .frame {
     /* Block the iframe from receiving pointer events so plain mouse
        interactions (wheel, drag) hit the wrapper above and feed our pan/
@@ -193,5 +214,9 @@
     height: 100%;
     border: 0;
     background: var(--bg-0);
+  }
+  /* Edit mode: the editor owns the mouse. */
+  .stage.editable .frame {
+    pointer-events: auto;
   }
 </style>

@@ -18,7 +18,7 @@ use projectmind_core::session::{self, Since};
 use projectmind_core::state::{self, UiState, ViewIntent};
 use projectmind_core::tour_suggest::{self, Persona};
 use projectmind_core::walkthrough::{self as wt, QuizQuestion, Walkthrough, WalkthroughStep};
-use projectmind_core::{c4_dsl, diagram, git, html};
+use projectmind_core::{c4_drawio, c4_dsl, diagram, git, html};
 use projectmind_framework_spring::SpringPlugin;
 use projectmind_plugin_api::FrameworkPlugin;
 use serde::Deserialize;
@@ -406,6 +406,11 @@ fn scaffold_c4_model_schema() -> Value {
     })
 }
 
+/// JSON Schema for the `export_c4_drawio` tool — no arguments.
+fn export_c4_drawio_schema() -> Value {
+    no_args_schema()
+}
+
 /// JSON Schema for the `merge_c4_model` tool — no arguments.
 fn merge_c4_model_schema() -> Value {
     json!({
@@ -669,6 +674,11 @@ pub(crate) fn list() -> Value {
                 "inputSchema": merge_c4_model_schema()
             },
             {
+                "name": "export_c4_drawio",
+                "description": "Export the C4 model to a hand-editable draw.io diagram (#142) — write `docs/architecture.drawio` from the EDITABLE model (`docs/architecture.dsl` when present, else the generated model). Page 1 is the container view (persons, one boundary per software system, containers, cross-container relationships); every container with components gets its own component page. Uses draw.io's built-in C4 shapes, and every cell carries the model identity in its metadata (`pmId`, `pmKind`), so re-running is a LAYOUT-PRESERVING MERGE: cells that already exist in the file are kept byte-for-byte (the architect's manual layout, colours and annotations survive) and only missing elements are added, in a row below the existing drawing. Never deletes cells. Legacy compressed .drawio pages are decompressed on read; the file is written as plain XML so it diffs in Git. The desktop app / browser viewer opens the file in an embedded diagrams.net editor with save-back (Edit mode in the draw.io view). Returns `{ path, created, added, kept, pages }`. Use when the user says `export the architecture to draw.io` / `give me a C4 diagram I can edit` / `refresh the draw.io diagram`.",
+                "inputSchema": export_c4_drawio_schema()
+            },
+            {
                 "name": "open_browser_repo",
                 "description": "Start the in-process browser host that serves the ProjectMind webapp at a tokenized URL, then surface that URL to the user verbatim — they will open it themselves; you cannot. Use after `open in browser` / `im Browser zeigen` / `show me on my iPad / phone / laptop`. Pass `lan: true` whenever the user mentions a remote device (iPad, phone, second machine on the same WLAN) — otherwise the URL is `http://127.0.0.1:...` and unreachable from anything but this machine. The bearer token in the URL fragment gates every API call regardless of bind address. Idempotent: calling again with a different `path` reopens the host on the existing port; call `browser_status` first to avoid restarting the host. Once the user has opened the URL, every subsequent `view_*` / `walkthrough_*` push will mirror to that browser tab in addition to the Desktop GUI.",
                 "inputSchema": open_browser_repo_schema()
@@ -736,6 +746,7 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "self_demo" => self_demo(state, parsed.arguments).await,
         "scaffold_c4_model" => scaffold_c4_model(state).await,
         "merge_c4_model" => merge_c4_model(state).await,
+        "export_c4_drawio" => export_c4_drawio(state).await,
         "open_browser_repo" => open_browser_repo(state, parsed.arguments).await,
         "browser_status" => browser_status(),
         "stop_browser" => stop_browser(),
@@ -2105,6 +2116,28 @@ async fn scaffold_c4_model(state: &Mutex<ServerState>) -> DispatchResult {
             "ok": true,
             "path": outcome.path,
             "created": outcome.created,
+        }))
+        .unwrap_or_else(|_| "{}".into());
+        Ok(text_result(body))
+    })
+}
+
+/// Export the C4 model to `docs/architecture.drawio` (#142) — create or
+/// layout-preserving merge. Same `c4_drawio::export_c4_drawio` core path the
+/// Tauri command and browser-host route take.
+async fn export_c4_drawio(state: &Mutex<ServerState>) -> DispatchResult {
+    let state = state.lock().await;
+    with_repo(&state, |repo| {
+        let spring = SpringPlugin::new();
+        let outcome = c4_drawio::export_c4_drawio(repo, &spring)
+            .map_err(|e| DispatchError::internal(format!("export_c4_drawio: {e}")))?;
+        let body = serde_json::to_string_pretty(&json!({
+            "ok": true,
+            "path": outcome.path,
+            "created": outcome.created,
+            "added": outcome.added,
+            "kept": outcome.kept,
+            "pages": outcome.pages,
         }))
         .unwrap_or_else(|_| "{}".into());
         Ok(text_result(body))

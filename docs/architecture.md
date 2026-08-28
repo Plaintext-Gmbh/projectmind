@@ -172,7 +172,22 @@ architecture. Grouped by concern:
   (`moduleList` for the picker; `c4ComponentMermaid` for the text, capping a
   dense module to its top classes by in-module fan-in). So it is a **live-only**
   kind like `bean-graph-live`: registered in `available_diagrams` and pushable
-  via `view_diagram`, but `show_diagram` has no arm for it.
+  via `view_diagram`, but `show_diagram` has no arm for it. The **draw.io
+  export** (`core::c4_drawio`, #142 layer 3) is the visual review surface:
+  `export_c4_drawio` reads the editable DSL (or generates the model), renders
+  it as an uncompressed `mxfile` with draw.io's C4 shapes (container page +
+  one page per container with components), and — because every cell carries
+  `pmId` / `pmKind` metadata — re-exports via `merge_c4_drawio` as a
+  layout-preserving, additive merge (existing cells byte-identical, new ones
+  in a row below, legacy compressed pages decompressed on read). The
+  `.drawio` viewer's Edit mode swaps the bare canvas for the full embedded
+  diagrams.net editor (`app/src/lib/drawioEmbed.ts` holds the tested
+  protocol helpers); its Save goes through `save_drawio` (Tauri command /
+  browser-host route), which delegates to `core::c4_drawio::save_drawio` —
+  the single write path, guarding repo boundary, extension, size and root
+  element before an atomic write. Exposed as the `export_c4_drawio` MCP
+  tool, the Tauri commands `export_c4_drawio` / `save_drawio` and the
+  browser-host routes `POST /api/export_c4_drawio` / `POST /api/save_drawio`.
 - **Viewer pushes (statefile intents)** — `view_class`, `view_file`,
   `view_diff`, `start_gui`
 - **Browser host** — `open_browser_repo`, `browser_status`, `stop_browser`
