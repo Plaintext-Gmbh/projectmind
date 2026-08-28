@@ -18,7 +18,7 @@ that speaks the **Model Context Protocol (MCP)**.
 </p>
 <p align="center"><sub>An AI agent authors this tour <strong>live over MCP</strong> — steps, line highlights and narration are pushed into the viewer. No human clicked anything.</sub></p>
 
-> **Status:** v0.11 — MCP server + desktop app for **macOS, Linux and Windows**, with signed auto-updates. Java + Rust language plugins, Spring + Lombok framework recognisers, sixteen diagram types (see the catalogue below — from bean graph and C4 container up to an animated live bean graph and a 3D code city), Markdown + HTML browsers (sandboxed), guided AI walkthroughs with quiz support, presenter mode with PDF tour export, an Architect's Cockpit (risk atlas, pattern-drift detection, semantic tour lookup, morning briefing), live AI-generated HTML/Markdown artifacts, and bidirectional MCP sync between LLM, desktop app and browser.
+> **Status:** v0.12 — MCP server + desktop app for **macOS, Linux and Windows**, with signed auto-updates. Java + Rust language plugins, Spring + Lombok framework recognisers, sixteen diagram types (see the catalogue below — from bean graph and C4 container up to an animated live bean graph and a 3D code city), an editable C4 model with draw.io export and in-app editing, Markdown + HTML browsers (sandboxed), the Code↔Doc bridge (repo docs and Confluence / Jira / issue references per class), guided AI walkthroughs with quiz support, presenter mode with PDF tour export, an Architect's Cockpit (risk atlas, pattern-drift detection, semantic tour lookup, morning briefing), live AI-generated HTML/Markdown artifacts, and bidirectional MCP sync between LLM, desktop app and browser.
 
 ## Quickstart
 

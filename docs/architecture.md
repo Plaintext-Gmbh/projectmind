@@ -126,7 +126,7 @@ For Phase 1, all plugins are **statically registered** in `core::registry` via a
 
 ## MCP Tools
 
-40 tools as of v0.11 + unreleased — the full name/parameter reference lives in the
+45 tools as of v0.12 — the full name/parameter reference lives in the
 [README tool table](../README.md); this section only maps them onto the
 architecture. Grouped by concern:
 
