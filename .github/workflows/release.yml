@@ -95,9 +95,24 @@ jobs:
             sed -i "s/\"version\": \"$CURRENT\"/\"version\": \"$NEW\"/" "$f"
           done
 
+      # RELEASE_PAT if present, else the workflow token. The distinction is not
+      # cosmetic: GitHub deliberately does NOT start workflow runs for events
+      # created with GITHUB_TOKEN (it would let a workflow trigger itself), so
+      # a release PR opened by the workflow token gets its `ci` runs parked in
+      # `action_required` and they never report. master requires
+      # `rust / ubuntu-22.04` and `rust / macos-14`, so the PR sits at
+      # MERGEABLE/BLOCKED until a human clicks "Approve and run" — measured on
+      # v0.13.0, 29.08.2026.
+      #
+      # With a RELEASE_PAT (a fine-grained PAT with contents:write and
+      # pull_requests:write) the PR is authored by a real account, the checks
+      # run on their own and the release needs no babysitting. Without it
+      # everything works exactly as before, only the PR body now says what to
+      # click instead of leaving the reader to figure it out.
       - name: Open release PR
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || github.token }}
+          BOT_TOKEN: ${{ secrets.RELEASE_PAT && 'pat' || 'workflow' }}
           NEW: ${{ steps.ver.outputs.new }}
           TAG: ${{ steps.ver.outputs.tag }}
           BRANCH: ${{ steps.ver.outputs.branch }}
@@ -107,8 +122,24 @@ jobs:
           git add -A
           git commit -m "chore(release): bump version to ${NEW}"
           git push -u origin "$BRANCH"
-          body=$(printf '%s\n\n%s\n\n%s\n' \
+
+          if [ "$BOT_TOKEN" = "pat" ]; then
+            hinweis="Checks run automatically (RELEASE_PAT is configured)."
+          else
+            hinweis=$(printf '%s\n' \
+              "**The checks on this PR need one click before they run.** This PR was opened with the workflow token, and GitHub does not start workflow runs for GITHUB_TOKEN events — the \`ci\` runs sit in \`action_required\`, while master requires \`rust / ubuntu-22.04\` and \`rust / macos-14\`. Open the Checks tab and press **Approve and run**, or:" \
+              "" \
+              "\`\`\`" \
+              "gh run list --branch ${BRANCH}" \
+              "gh api -X POST repos/${GITHUB_REPOSITORY}/actions/runs/<id>/approve" \
+              "\`\`\`" \
+              "" \
+              "To remove this step for good, add a fine-grained PAT with contents:write and pull_requests:write as the \`RELEASE_PAT\` secret.")
+          fi
+
+          body=$(printf '%s\n\n%s\n\n%s\n\n%s\n' \
             "Automated release bump to **${NEW}**." \
+            "$hinweis" \
             "Merge this PR, then push the tag: \`git tag ${TAG} origin/master && git push origin ${TAG}\`. The Release workflow will pick up the tag-push and build+publish the binaries." \
             "If \`gh pr create\` fails with \"GitHub Actions is not permitted to create or approve pull requests\", enable the corresponding setting under Org → Settings → Actions → General.")
           gh pr create \
