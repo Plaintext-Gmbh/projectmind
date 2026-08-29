@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Walkthrough `diff` steps written to the published schema no longer fail to parse.** `walkthrough_step_schema` advertises the base ref of a `kind: "diff"` step as `ref`, but `WalkthroughTarget::Diff` only accepted `reference` (the Rust name — `ref` is a keyword), so a schema-conform `walkthrough_start` call answered `missing field \`reference\``. The field now carries `#[serde(alias = "ref")]`: both spellings deserialise, serialisation is unchanged (`reference`, which the GUI types read). Regression test in `crates/core/src/walkthrough.rs`. Salvaged from the May branch `feature/tour-diff-line-anchors`.
+- **`pm:file:/path#L10-L20` links and `anchor`s now land on the lines in plain-text files.** `WalkthroughView` has documented the `#L10-L20` suffix on `pm:file:` narration links for months, and `FileView` accepted an `anchor` — but for anything that was not markdown the viewer rendered a bare `<pre>` and dropped the anchor on the floor. Plain text / source files are now rendered as numbered, addressable rows (`id="L<n>"`, non-selectable line number in the gutter, same idea as the walkthrough source pane); an anchor of the form `L12`, `12`, `L10-L20`, `10-20`, `line-12` or `lines-10-20` scrolls the first line into view, pulses it and highlights the whole range while dimming the rest. Heading-slug anchors for markdown behave exactly as before. Salvaged from the same May branch.
+
 ## [0.12.0] — 2026-08-28
 
 _This section also covers everything shipped in the v0.9.0, v0.10.0 and v0.11.0 tags (May–July 2026), whose entries stayed under Unreleased when those releases were cut._

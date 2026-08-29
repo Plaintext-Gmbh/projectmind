@@ -33,6 +33,9 @@
   let scroller: HTMLDivElement;
   let toc: TocEntry[] = [];
   let activeHeadingId: string | null = null;
+  /// True while a line range is highlighted in a plain-text file; dims the
+  /// other lines so the range stands out (see `.has-line-highlight`).
+  let plainHasHighlight = false;
 
   /// Zoom factor for content text. Wheel zoom (Shift+wheel) is bound on the
   /// scroller via `use:zoomAction`; keyboard zoom (Cmd/Ctrl + + / − / 0) is
@@ -157,6 +160,7 @@
     content = '';
     toc = [];
     activeHeadingId = null;
+    plainHasHighlight = false;
     try {
       if (isImage(p)) {
         mediaUrl = await fileAssetUrl(p);
@@ -176,7 +180,14 @@
         if (anchor) await scrollToAnchor(anchor);
         else if (scroller) scroller.scrollTop = 0;
       } else {
-        html = `<pre class="plain">${escapeHtml(content)}</pre>`;
+        // Plain text / source: one numbered, addressable line per row so a
+        // `pm:file:/path#L10-L20` link (WalkthroughView narration) or an
+        // MCP `anchor` can land on a line range. Before this, such anchors
+        // were silently ignored for anything that wasn't markdown.
+        html = renderPlainText(content);
+        await tick();
+        if (anchor) await scrollToPlainAnchor(anchor);
+        else if (scroller) scroller.scrollTop = 0;
       }
     } catch (err) {
       error = String(err);
@@ -251,6 +262,11 @@
 
   async function scrollToAnchor(slug: string) {
     if (!host) return;
+    // `L12` / `12-20` style anchors address lines, not headings.
+    if (resolveLineRange(slug)) {
+      await scrollToPlainAnchor(slug);
+      return;
+    }
     const id = resolveAnchor(slug);
     if (!id) return;
     const el = host.querySelector<HTMLElement>(`#${cssEscape(id)}`);
@@ -405,6 +421,52 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+
+  /// Plain-text rendering: every line becomes `<span id="L<n>" class="plain-line"
+  /// data-line="<n>">` with a non-selectable line number, so line anchors have
+  /// something to scroll to and highlight. Mirrors the markup the walkthrough's
+  /// source pane uses (`data-line-no`), kept local because this viewer has its
+  /// own anchor semantics (heading slugs for markdown).
+  function renderPlainText(src: string): string {
+    return `<pre class="plain"><code>${src
+      .split('\n')
+      .map((line, idx) => {
+        const n = idx + 1;
+        return `<span id="L${n}" class="plain-line" data-line="${n}"><span class="plain-lineno">${n}</span><span class="plain-code">${escapeHtml(line) || ' '}</span></span>`;
+      })
+      .join('\n')}</code></pre>`;
+  }
+
+  /// Accepts `L12`, `12`, `L10-L20`, `10-20`, `line-12`, `lines-10-20`.
+  /// Returns null for anything else (then the anchor is treated as a slug).
+  function resolveLineRange(raw: string | null): { from: number; to: number } | null {
+    const value = raw?.trim();
+    if (!value) return null;
+    const m = value.match(/^(?:line-|lines-|L)?(\d+)(?:-(?:L)?(\d+))?$/i);
+    if (!m) return null;
+    const from = Number.parseInt(m[1], 10);
+    const to = Number.parseInt(m[2] ?? m[1], 10);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from < 1 || to < 1) return null;
+    return { from: Math.min(from, to), to: Math.max(from, to) };
+  }
+
+  async function scrollToPlainAnchor(raw: string) {
+    if (!host) return;
+    const range = resolveLineRange(raw);
+    if (!range) return;
+    const lines = host.querySelectorAll<HTMLElement>('.plain-line');
+    plainHasHighlight = true;
+    for (const line of Array.from(lines)) {
+      const n = Number.parseInt(line.dataset.line ?? '', 10);
+      line.classList.toggle('line-highlight', n >= range.from && n <= range.to);
+    }
+    await tick();
+    const el = host.querySelector<HTMLElement>(`#L${range.from}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 1200);
   }
 
   // ----- Zoom ---------------------------------------------------------------
@@ -592,6 +654,7 @@
         {:else}
           <div
             class="content"
+            class:has-line-highlight={plainHasHighlight}
             bind:this={host}
             style="font-size: {$zoom}em;"
             on:click={onContentClick}
@@ -1041,5 +1104,34 @@
     padding: 16px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--bg-3);
+  }
+
+  /* Plain-text line rows (see renderPlainText). */
+  .content :global(.plain-line) {
+    display: block;
+    border-left: 3px solid transparent;
+    padding-right: 12px;
+    scroll-margin-top: 48px;
+  }
+  .content :global(.plain-lineno) {
+    display: inline-block;
+    min-width: 4ch;
+    margin-right: 12px;
+    padding: 0 8px;
+    color: var(--fg-2);
+    text-align: right;
+    user-select: none;
+  }
+  .content.has-line-highlight :global(.plain-line) {
+    opacity: 0.58;
+  }
+  .content.has-line-highlight :global(.plain-line.line-highlight) {
+    opacity: 1;
+    border-left-color: var(--accent-2);
+    background: color-mix(in srgb, var(--accent-2) 14%, transparent);
+  }
+  .content :global(.plain-line.flash) {
+    background: color-mix(in srgb, var(--accent-2) 26%, transparent);
+    transition: background 1s ease;
   }
 </style>

@@ -86,6 +86,14 @@ pub enum WalkthroughTarget {
     /// A unified diff between two refs (or `ref` vs working tree).
     Diff {
         /// Base ref (e.g. `HEAD~5`, branch name).
+        ///
+        /// The MCP step schema (`walkthrough_step_schema` in the server)
+        /// calls this field `ref` — `reference` is only the Rust name
+        /// because `ref` is a keyword. Without the alias a schema-conform
+        /// `{"kind":"diff","ref":"HEAD~1"}` failed with "missing field
+        /// `reference`". Serialisation stays `reference` (the GUI types
+        /// read that); only deserialisation accepts both spellings.
+        #[serde(alias = "ref")]
         reference: String,
         /// Optional target ref. `None` means working tree.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -542,6 +550,34 @@ mod tests {
         clear().unwrap();
         assert!(read_body().unwrap().is_none());
         assert!(read_feedback().unwrap().events.is_empty());
+    }
+
+    #[test]
+    fn diff_target_accepts_schema_ref_field() {
+        // The MCP step schema advertises `ref`, the struct is named
+        // `reference` — both must parse, and `focus` stays optional.
+        let step: WalkthroughStep = serde_json::from_value(serde_json::json!({
+            "title": "Diff",
+            "target": { "kind": "diff", "ref": "HEAD~1", "to": "HEAD" }
+        }))
+        .unwrap();
+        match step.target {
+            WalkthroughTarget::Diff {
+                reference,
+                to,
+                focus,
+            } => {
+                assert_eq!(reference, "HEAD~1");
+                assert_eq!(to.as_deref(), Some("HEAD"));
+                assert!(focus.is_none());
+            }
+            other => panic!("wrong target: {other:?}"),
+        }
+        let long: WalkthroughTarget =
+            serde_json::from_str(r#"{"kind":"diff","reference":"main"}"#).unwrap();
+        assert!(
+            matches!(long, WalkthroughTarget::Diff { ref reference, .. } if reference == "main")
+        );
     }
 
     #[test]
