@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] — 2026-08-29
+
 ### Fixed
 
 - **Walkthrough `diff` steps written to the published schema no longer fail to parse.** `walkthrough_step_schema` advertises the base ref of a `kind: "diff"` step as `ref`, but `WalkthroughTarget::Diff` only accepted `reference` (the Rust name — `ref` is a keyword), so a schema-conform `walkthrough_start` call answered `missing field \`reference\``. The field now carries `#[serde(alias = "ref")]`: both spellings deserialise, serialisation is unchanged (`reference`, which the GUI types read). Regression test in `crates/core/src/walkthrough.rs`. Salvaged from the May branch `feature/tour-diff-line-anchors`.
