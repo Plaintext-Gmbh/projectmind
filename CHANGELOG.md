@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`module_cycles` — dependency cycles between modules, and the cheapest edge that actually breaks each one.** `module_chord` draws how strongly modules are coupled but never says whether that coupling is *circular*, and a cycle is the one coupling defect that cannot be lived with: the modules in it cannot be released, tested or reasoned about on their own. A tool that stops at "you have a cycle" is a tool nobody acts on, so the new `projectmind_core::module_cycles` answers the question a reader actually has — **what do I change?** Per cycle it reports the mutually reachable modules, the **shortest round trip** (`["a", "b", "c", "a"]`, so the loop can be seen instead of inferred from a set), every edge inside it with the number of class references behind it, and the **cuts**: single edges whose removal genuinely breaks the component, cheapest first, each carrying the exact class references that would have to move. That last list is the work order. Cuts are verified rather than guessed — every candidate edge is removed and the component recomputed, so an edge that leaves the ring intact is never offered, and a component built from several independent cycles honestly reports *no* single-edge cut instead of suggesting a change that would not fix anything. Strongly connected components are computed by mutual reachability rather than Tarjan: `n` is the number of modules, which a human maintains in dozens, and in exchange the cut evaluation (which recomputes components on subgraphs repeatedly) stays ten obvious lines. Exposed as the **`module_cycles` MCP tool**, which reads the engine's aggregated relations rather than a single plugin — a cycle that only becomes visible through a second framework plugin is still a cycle. 8 core tests cover acyclic graphs, two- and three-module rings, the shortest round trip, cut verification (a redundant edge that does not break the ring must not be offered), cut ordering with its references, independent rings, and that `Annotated` relations create no cycles.
+
 ## [0.12.1] — 2026-08-29
 
 ### Fixed

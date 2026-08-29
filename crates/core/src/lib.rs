@@ -36,6 +36,7 @@ pub mod html;
 pub mod language_stats;
 pub mod maven;
 pub mod module_chord;
+pub mod module_cycles;
 pub mod patterns;
 pub mod persistence;
 pub mod repository;

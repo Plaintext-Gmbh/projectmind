@@ -12,6 +12,7 @@ use projectmind_core::coverage;
 use projectmind_core::doc_mentions;
 use projectmind_core::file_access;
 use projectmind_core::files;
+use projectmind_core::module_cycles;
 use projectmind_core::patterns::{self as core_patterns, Pattern, Scope as PatternScope};
 use projectmind_core::risk::{self, Options as RiskOptions, Weights as RiskWeights};
 use projectmind_core::session::{self, Since};
@@ -560,6 +561,11 @@ pub(crate) fn list() -> Value {
                 "inputSchema": no_args_schema()
             },
             {
+                "name": "module_cycles",
+                "description": "Find dependency cycles between modules and, for each one, the single edges whose removal actually breaks it — cheapest first, with the exact class references that would have to move. Answers 'what do I change?', not just 'you have a cycle'. Empty cuts mean no single edge suffices.",
+                "inputSchema": no_args_schema()
+            },
+            {
                 "name": "plugin_info",
                 "description": "List active plugins (languages and frameworks).",
                 "inputSchema": no_args_schema()
@@ -729,6 +735,7 @@ pub(crate) async fn call(state: &Mutex<ServerState>, params: Value) -> DispatchR
         "module_summary" => module_summary(state).await,
         "list_module_files" => list_module_files(state, parsed.arguments).await,
         "relations" => relations(state).await,
+        "module_cycles" => module_cycles(state).await,
         "plugin_info" => plugin_info(state).await,
         "list_html" => list_html(state).await,
         "list_html_snippets" => list_html_snippets(state).await,
@@ -1293,6 +1300,23 @@ async fn list_module_files(state: &Mutex<ServerState>, args: Value) -> DispatchR
         );
         Ok(text_result(
             serde_json::to_string_pretty(&entries).unwrap_or_else(|_| "[]".into()),
+        ))
+    })
+}
+
+/// Module dependency cycles with an actionable cut list.
+///
+/// Uses the engine's aggregated relations rather than a single plugin: a cycle
+/// that only becomes visible through a second framework plugin is still a
+/// cycle, and this tool exists to be believed.
+async fn module_cycles(state: &Mutex<ServerState>) -> DispatchResult {
+    let state = state.lock().await;
+    let engine = &state.engine;
+    with_repo(&state, |repo| {
+        let relations = engine.relations(repo);
+        let report = module_cycles::build_from_relations(repo, &relations);
+        Ok(text_result(
+            serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".into()),
         ))
     })
 }
