@@ -544,7 +544,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert!(warnings.is_empty());
+        assert_eq!(warnings, Vec::<String>::new());
         assert_eq!(config.annotations.backend, "json");
         assert_eq!(config.code_graph.backend, "sqlite");
         assert_eq!(
@@ -556,7 +556,7 @@ mod tests {
     #[test]
     fn empty_document_is_all_defaults() {
         let (config, warnings) = PersistenceConfig::parse("").unwrap();
-        assert!(warnings.is_empty());
+        assert_eq!(warnings, Vec::<String>::new());
         assert_eq!(config, PersistenceConfig::default());
         assert_eq!(config.annotations.backend, "json");
         assert_eq!(config.code_graph.backend, "none");

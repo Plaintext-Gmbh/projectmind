@@ -457,7 +457,7 @@ mod tests {
         assert_eq!(render.steps[0].target, "note");
         assert_eq!(render.steps[0].narration, "hi");
         // No repo → no code resolved.
-        assert!(render.steps[0].code.is_empty());
+        assert_eq!(render.steps[0].code, Vec::<String>::new());
     }
 
     #[test]
@@ -505,8 +505,8 @@ mod tests {
         std::fs::write(&path, "").unwrap();
         let mut out = RenderStep::default();
         resolve_file(&mut out, &path, &[LineRange { from: 1, to: 5 }]);
-        assert!(out.code.is_empty());
-        assert!(out.location.is_empty());
+        assert_eq!(out.code, Vec::<String>::new());
+        assert_eq!(out.location, "");
         let _ = std::fs::remove_file(&path);
     }
 

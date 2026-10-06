@@ -449,7 +449,7 @@ mod tests {
 
         let report = build(&repo, &plugin);
 
-        assert!(report.cycles.is_empty());
+        assert_eq!(report.cycles, Vec::<ModuleCycle>::new());
         assert_eq!(report.modules_scanned, 2);
         assert_eq!(report.cross_edges, 1);
         assert_eq!(report.modules_in_cycles, 0);

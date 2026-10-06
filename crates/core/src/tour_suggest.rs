@@ -1066,7 +1066,7 @@ mod tests {
             other => panic!("expected atlas target, got {other:?}"),
         }
         // No facts → empty narration.
-        assert!(ws.narration.is_empty());
+        assert_eq!(ws.narration, "");
 
         // Note step round-trips to a Note target.
         let note_step = SuggestedStep {

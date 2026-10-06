@@ -646,7 +646,7 @@ mod tests {
             WalkthroughTarget::Risk { fqn, focus, show } => {
                 assert_eq!(fqn, "a.b.C");
                 assert!(focus.is_none());
-                assert!(show.is_empty());
+                assert_eq!(show, Vec::<RiskSignal>::new());
             }
             other => panic!("wrong target: {other:?}"),
         }
@@ -777,8 +777,8 @@ mod tests {
         let body: Walkthrough = serde_json::from_str(with_quiz).unwrap();
         assert_eq!(body.quiz.len(), 1);
         assert_eq!(body.quiz[0].answer, 1);
-        assert!(body.quiz[0].step_refs.is_empty());
-        assert!(body.quiz[0].explanation.is_empty());
+        assert_eq!(body.quiz[0].step_refs, Vec::<u32>::new());
+        assert_eq!(body.quiz[0].explanation, "");
     }
 
     #[test]
