@@ -1651,7 +1651,7 @@ mod tests {
         assert!(dsl.contains("softwareSystem"));
         let model = parse_c4_dsl(&dsl);
         assert_eq!(model.systems.len(), 1);
-        assert!(model.systems[0].containers.is_empty());
+        assert_eq!(model.systems[0].containers, Vec::<C4Container>::new());
     }
 
     #[test]

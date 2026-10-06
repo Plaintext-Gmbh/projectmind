@@ -782,7 +782,11 @@ fn walkthrough_query_returns_grep_fallback_without_embed_feature() {
         body["fallback"], "grep",
         "no embed feature → grep fallback: {body}"
     );
-    assert!(body["steps"].as_array().unwrap().is_empty());
+    assert_eq!(
+        body["steps"],
+        serde_json::json!([]),
+        "grep fallback carries no steps: {body}"
+    );
     assert_eq!(body["confidence"], 0.0);
     std::fs::remove_dir_all(&dir).ok();
 }

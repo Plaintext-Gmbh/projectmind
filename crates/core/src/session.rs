@@ -961,7 +961,7 @@ mod tests {
         // Also shows up in risk_delta.up.
         assert_eq!(b.risk_delta.up.len(), 1);
         assert_eq!(b.risk_delta.up[0].fqn, "x.X");
-        assert!(b.risk_delta.down.is_empty());
+        assert_eq!(b.risk_delta.down, Vec::<RiskMove>::new());
     }
 
     #[test]
@@ -988,10 +988,10 @@ mod tests {
             record(2000, vec![scored("a.A", 55.0, "cooling")], &[]),
         ];
         let b = briefing(&hist, Since::LastSession);
-        assert!(b.new_hotspots.is_empty());
+        assert_eq!(b.new_hotspots, Vec::<NewHotspot>::new());
         assert_eq!(b.risk_delta.down.len(), 1);
         assert!(b.risk_delta.down[0].delta < 0.0);
-        assert!(b.risk_delta.up.is_empty());
+        assert_eq!(b.risk_delta.up, Vec::<RiskMove>::new());
     }
 
     #[test]
@@ -1045,7 +1045,7 @@ mod tests {
             record(2000, vec![scored("a.A", 50.0, "x")], &[("Layered", 2)]),
         ];
         let b = briefing(&hist, Since::LastSession);
-        assert!(b.pattern_drift.is_empty());
+        assert_eq!(b.pattern_drift, Vec::<PatternDrift>::new());
     }
 
     #[test]
@@ -1180,7 +1180,10 @@ mod tests {
     #[test]
     fn missing_log_reads_empty() {
         let repo = TempRepo::new("missing");
-        assert!(load_history(repo.path()).unwrap().is_empty());
+        assert_eq!(
+            load_history(repo.path()).unwrap(),
+            Vec::<SessionRecord>::new()
+        );
     }
 
     #[test]

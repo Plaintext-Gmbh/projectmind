@@ -207,7 +207,7 @@ mod tests {
     #[test]
     fn class_defaults_are_empty() {
         let c = Class::default();
-        assert!(c.fqn.is_empty());
+        assert_eq!(c.fqn, "");
         assert!(c.methods.is_empty());
         assert_eq!(c.kind, ClassKind::Class);
     }

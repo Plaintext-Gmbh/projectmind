@@ -1683,7 +1683,7 @@ mod tests {
             req.headers.get("host").map(String::as_str),
             Some("localhost")
         );
-        assert!(req.body.is_empty());
+        assert_eq!(req.body, Vec::<u8>::new());
     }
 
     #[test]
@@ -1751,7 +1751,7 @@ mod tests {
         let raw = b"POST /api/foo HTTP/1.1\r\nContent-Length: not-a-number\r\n\r\n";
         let req = parse_request(Cursor::new(raw)).expect("parse ok");
         assert_eq!(req.method, "POST");
-        assert!(req.body.is_empty());
+        assert_eq!(req.body, Vec::<u8>::new());
     }
 
     #[test]
@@ -1759,7 +1759,7 @@ mod tests {
         let raw = b"POST /api/foo HTTP/1.1\r\nHost: localhost\r\n\r\n";
         let req = parse_request(Cursor::new(raw)).expect("parse ok");
         assert_eq!(req.method, "POST");
-        assert!(req.body.is_empty());
+        assert_eq!(req.body, Vec::<u8>::new());
     }
 
     #[test]
@@ -1803,7 +1803,7 @@ mod tests {
         // The set of LAN IPs depends on the test host (and may be empty in CI),
         // so we only assert the invariant: the first URL is always loopback.
         let urls = access_urls(8123, "deadbeef", true);
-        assert!(!urls.is_empty());
+        assert_ne!(urls, Vec::<String>::new());
         assert_eq!(urls[0], "http://127.0.0.1:8123/#token=deadbeef");
     }
 

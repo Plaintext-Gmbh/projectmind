@@ -142,7 +142,7 @@ mod tests {
             .classes
             .insert("a.Bar".into(), class_with_class_anns("a.Bar", &["Service"]));
         LombokPlugin.enrich(&mut module).unwrap();
-        assert!(module.classes["a.Bar"].stereotypes.is_empty());
+        assert_eq!(module.classes["a.Bar"].stereotypes, Vec::<String>::new());
         assert!(!module.classes["a.Bar"].extras.contains_key("lombok"));
     }
 
