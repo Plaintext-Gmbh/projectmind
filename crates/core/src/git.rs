@@ -1012,7 +1012,7 @@ mod tests {
         // secs_ago is monotonic within a module (drops in newest-first order).
         let auth = by_module.get("auth").unwrap();
         assert!(auth.commits[0].secs_ago <= auth.commits[1].secs_ago);
-        assert!(!auth.commits[0].sha.is_empty());
+        assert_ne!(auth.commits[0].sha, "");
         assert_eq!(auth.commits[0].summary, "auth two");
     }
 

@@ -184,7 +184,7 @@ fn next_seq() -> u64 {
         }
     }
     let previous = SEQ
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |seq| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |seq| {
             Some(seq.checked_add(1).unwrap_or(1))
         })
         .unwrap_or_else(|seq| seq);

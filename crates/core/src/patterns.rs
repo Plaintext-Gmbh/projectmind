@@ -1011,21 +1011,21 @@ mod tests {
     fn di_scanner_ignores_new_of_plain_type() {
         let beans: Vec<String> = Vec::new();
         let hits = find_bean_instantiations("var list = new ArrayList<>();", 5, &beans, "X");
-        assert!(hits.is_empty());
+        assert_eq!(hits, Vec::<(String, u32, f64)>::new());
     }
 
     #[test]
     fn di_scanner_ignores_commented_out_new() {
         let beans = vec!["UserService".to_string()];
         let hits = find_bean_instantiations("// this.svc = new UserService();", 5, &beans, "X");
-        assert!(hits.is_empty());
+        assert_eq!(hits, Vec::<(String, u32, f64)>::new());
     }
 
     #[test]
     fn di_scanner_ignores_self_type() {
         let beans = vec!["Builder".to_string()];
         let hits = find_bean_instantiations("return new Builder();", 5, &beans, "Builder");
-        assert!(hits.is_empty());
+        assert_eq!(hits, Vec::<(String, u32, f64)>::new());
     }
 
     // ---- NoStaticState ----

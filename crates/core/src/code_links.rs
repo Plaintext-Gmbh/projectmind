@@ -463,7 +463,10 @@ public class PaymentService {
     #[test]
     fn licence_headers_and_schemas_are_ignored() {
         let src = "// This Source Code Form is subject to the terms of the Mozilla Public\n// License, v. 2.0. If a copy of the MPL was not distributed with this\n// file, You can obtain one at https://mozilla.org/MPL/2.0/.\n// http://www.apache.org/licenses/LICENSE-2.0\n/* xmlns=\"http://www.w3.org/2001/XMLSchema\" */\n// http://localhost:8080/health\n";
-        assert!(code_links_in_text(src, &cfg(), None).is_empty());
+        assert_eq!(
+            code_links_in_text(src, &cfg(), None),
+            Vec::<CodeLink>::new()
+        );
     }
 
     #[test]
@@ -575,7 +578,10 @@ public class PaymentService {
             file: "nope.java".into(),
             ..Default::default()
         };
-        assert!(code_links_for_class(&dir, &ghost, &cfg()).is_empty());
+        assert_eq!(
+            code_links_for_class(&dir, &ghost, &cfg()),
+            Vec::<CodeLink>::new()
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
