@@ -100,7 +100,7 @@ jobs:
       # created with GITHUB_TOKEN (it would let a workflow trigger itself), so
       # a release PR opened by the workflow token gets its `ci` runs parked in
       # `action_required` and they never report. master requires
-      # `rust / ubuntu-22.04` and `rust / macos-14`, so the PR sits at
+      # `rust / ubuntu-22.04` and `rust / macos-15`, so the PR sits at
       # MERGEABLE/BLOCKED until a human clicks "Approve and run" — measured on
       # v0.13.0, 29.08.2026.
       #
@@ -127,7 +127,7 @@ jobs:
             hinweis="Checks run automatically (RELEASE_PAT is configured)."
           else
             hinweis=$(printf '%s\n' \
-              "**The checks on this PR need one click before they run.** This PR was opened with the workflow token, and GitHub does not start workflow runs for GITHUB_TOKEN events — the \`ci\` runs sit in \`action_required\`, while master requires \`rust / ubuntu-22.04\` and \`rust / macos-14\`. Open the Checks tab and press **Approve and run**, or:" \
+              "**The checks on this PR need one click before they run.** This PR was opened with the workflow token, and GitHub does not start workflow runs for GITHUB_TOKEN events — the \`ci\` runs sit in \`action_required\`, while master requires \`rust / ubuntu-22.04\` and \`rust / macos-15\`. Open the Checks tab and press **Approve and run**, or:" \
               "" \
               "\`\`\`" \
               "gh run list --branch ${BRANCH}" \
@@ -167,7 +167,7 @@ jobs:
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             asset_suffix: linux-x86_64
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
             asset_suffix: macos-arm64
           - os: windows-2022
@@ -240,7 +240,7 @@ jobs:
           # one bundle so we only need one Mac runner. Tauri accepts
           # `universal-apple-darwin`; rustup needs the two concrete arch
           # targets.
-          - os: macos-14
+          - os: macos-15
             target: universal-apple-darwin
             rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
             asset_suffix: macos-universal
