@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Dev-only dependency alerts:** `vitest` / `@vitest/ui` 4.1.11 → 4.1.12 (`@vitest/mocker`, alerts #70/#76). `minimatch` 10.2.6 → 11.0.8 via a pnpm override (alert #93). eslint 10.14 and typescript-eslint 8.72 still declare `minimatch ^10`, so no upstream bump closes it. eslint runs clean on 11.
+
+### Changed
+
+- **CI: `scripts/ci.sh check` now fails on mismatched Tauri versions.** The new `ci.sh tauri-versions` compares the resolved versions in `Cargo.lock` and `app/pnpm-lock.yaml`: `tauri` ↔ `@tauri-apps/api`, `tauri-plugin-X` ↔ `@tauri-apps/plugin-X`. It fails unless major/minor match, which is the rule `tauri build` enforces. The PR CI runs no `tauri build`, so the 0.14.0 mismatch (crate 2.14.1, NPM 2.13.1) only surfaced in the tag run. This check reports it in the PR.
+
 ## [0.14.1] — 2026-11-12
 
 ### Fixed
