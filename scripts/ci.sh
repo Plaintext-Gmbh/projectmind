@@ -78,10 +78,19 @@ cmd_test() {
     local cargo_args=(--workspace)
     if [[ "${PROJECTMIND_SKIP_TAURI_APP:-}" == "1" ]]; then
         cargo_args+=(--exclude projectmind-app)
+        cargo test "${cargo_args[@]}" --all-targets
     else
         ensure_sidecar_placeholder
+        # Karte 1960: zwei Laeufe statt einem. tauri-build (Build-Skript von projectmind-app)
+        # kopiert die externalBin-Sidecars nach target/<profile>/ — den leeren Platzhalter also
+        # nach target/debug/projectmind-mcp, genau ueber den Server, den tests/protocol.rs per
+        # CARGO_BIN_EXE_projectmind-mcp startet. Laeuft das Build-Skript im selben cargo-Lauf wie
+        # die Protokolltests (etwa nach einem Abhaengigkeits-Update), ist der Server danach leer.
+        # Ohne projectmind-app laeuft das Build-Skript nicht, und cargo legt den echten Server
+        # wieder an; die App-Crate testet danach allein.
+        cargo test --workspace --exclude projectmind-app --all-targets
+        cargo test -p projectmind-app --all-targets
     fi
-    cargo test "${cargo_args[@]}" --all-targets
     cargo test "${cargo_args[@]}" --doc
 }
 
