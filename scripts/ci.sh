@@ -25,8 +25,11 @@ usage() {
 Usage: $(basename "$0") <command> [args]
 
 Commands:
-  check                       cargo fmt --check + cargo clippy --workspace
-  test                        cargo test --workspace --all-targets + --doc
+  check                       tauri-versions + cargo fmt --check + cargo clippy --workspace
+  tauri-versions [<Cargo.lock> <pnpm-lock.yaml>]
+                              Tauri crate and @tauri-apps NPM package resolved to the
+                              same major.minor (what tauri build enforces)
+  test                       cargo test --workspace --all-targets + --doc
   install-deps                Install Linux Tauri build deps via apt (no-op on macOS)
   release-build [<target>]    cargo build --release --bin projectmind-mcp [--target <target>]
   release-smoke               release-build + stdio JSON-RPC ping against the binary
@@ -63,7 +66,41 @@ sha256() {
     fi
 }
 
+# Karte 2013: `tauri build` bricht ab, wenn ein Tauri-Crate und sein NPM-Gegenstueck
+# (tauri <-> @tauri-apps/api, tauri-plugin-X <-> @tauri-apps/plugin-X) nicht auf derselben
+# Major/Minor stehen. Die PR-CI faehrt kein `tauri build`, darum fiel v0.14.0 erst im Tag-Lauf
+# auf (Crate 2.14.1, NPM 2.13.1). Verglichen werden die aufgeloesten Versionen beider Lockfiles.
+cmd_tauri_versions() {
+    local cargo_lock="${1:-Cargo.lock}" pnpm_lock="${2:-app/pnpm-lock.yaml}"
+    local crates npm name ver npm_name npm_ver geprueft=0 fehler=0
+    crates="$(awk '/^name = "/ {n=$3; gsub(/"/, "", n)}
+        /^version = "/ {v=$3; gsub(/"/, "", v); if (n ~ /^tauri(-plugin-[a-z-]+)?$/) print n, v}' "$cargo_lock")"
+    npm="$(awk '/^importers:/ {imp=1; next}
+        imp && /^packages:/ {exit}
+        imp && /^      .?@tauri-apps\/(api|plugin-[a-z-]+).?:$/ {k=$1; gsub(/[^A-Za-z0-9@\/._-]/, "", k); next}
+        imp && k != "" && /^        version: / {v=$2; sub(/\(.*/, "", v); print k, v; k=""}' "$pnpm_lock")"
+    while read -r name ver; do
+        [[ -n "$name" ]] || continue
+        case "$name" in
+            tauri) npm_name="@tauri-apps/api" ;;
+            *)     npm_name="@tauri-apps/${name#tauri-}" ;;
+        esac
+        npm_ver="$(awk -v n="$npm_name" '$1 == n {print $2; exit}' <<<"$npm")"
+        [[ -n "$npm_ver" ]] || continue # kein NPM-Gegenstueck (z. B. single-instance)
+        geprueft=$((geprueft + 1))
+        if [[ "${ver%.*}" != "${npm_ver%.*}" ]]; then
+            echo "FEHLER: $name $ver vs. $npm_name $npm_ver — Major/Minor muessen gleich sein, sonst bricht tauri build" >&2
+            fehler=1
+        fi
+    done <<<"$crates"
+    # Ohne ein einziges Paar ist der Parser kaputt, nicht die Versionen.
+    [[ "$geprueft" -gt 0 ]] || { echo "FEHLER: keine Tauri-Paare in $cargo_lock / $pnpm_lock gefunden" >&2; return 1; }
+    [[ "$fehler" == 0 ]] || return 1
+    echo "tauri-versions: $geprueft Paare gleich (Major/Minor)"
+}
+
 cmd_check() {
+    cmd_tauri_versions
     cargo fmt --all -- --check
     local cargo_args=(--workspace --all-targets)
     if [[ "${PROJECTMIND_SKIP_TAURI_APP:-}" == "1" ]]; then
@@ -486,6 +523,7 @@ PY
 
 case "${1:-}" in
     check)             shift; cmd_check "$@" ;;
+    tauri-versions)    shift; cmd_tauri_versions "$@" ;;
     test)              shift; cmd_test "$@" ;;
     install-deps)      shift; cmd_install_deps "$@" ;;
     release-build)     shift; cmd_release_build "$@" ;;
