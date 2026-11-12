@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.14.0] — 2026-11-12
+## [0.14.1] — 2026-11-12
+
+### Fixed
+
+- **Release build: `@tauri-apps/plugin-updater` raised to 2.14.1 to match the Rust crate.** `tauri build` refuses mismatched major/minor versions between an NPM plugin package and its crate; 0.14.0 had only raised the crate (for the `zip` security fix), so its desktop bundles failed to build and 0.14.0 was never published. 0.14.1 is the first release carrying the 0.14.0 changes below.
+
+## [0.14.0] — 2026-11-12 (tagged, not published)
 
 ### Security
 
