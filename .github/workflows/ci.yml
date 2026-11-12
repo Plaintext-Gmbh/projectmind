@@ -96,6 +96,13 @@ jobs:
           PROJECTMIND_SKIP_TAURI_APP: ${{ runner.os == 'Linux' && '1' || '' }}
         run: ./scripts/ci.sh test
 
+      - name: Diagnose Sidecar-Ueberschreibung (Karte 1960, nur Diagnose-PR)
+        if: always() && matrix.os == 'macos-15'
+        run: |
+          ls -la target/debug/projectmind-mcp app/src-tauri/binaries/ || true
+          file target/debug/projectmind-mcp || true
+          echo "Groesse target/debug/projectmind-mcp: $(wc -c < target/debug/projectmind-mcp) Byte"
+
   releaseBuild:
     name: releaseBuild (linux)
     runs-on: ubuntu-22.04
