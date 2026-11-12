@@ -13,7 +13,20 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn binary_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_projectmind-mcp"))
+    let path = PathBuf::from(env!("CARGO_BIN_EXE_projectmind-mcp"));
+    // Karte 1960: Auf macOS kopierte tauri-build den leeren Sidecar-Platzhalter aus
+    // `scripts/ci.sh` (ensure_sidecar_placeholder) ueber genau diesen Pfad. Eine 0-Byte-Datei
+    // startet execvp ueber /bin/sh als leeres Skript: exit 0 ohne Ausgabe, und jeder
+    // Protokolltest meldete nur «stdout geschlossen» (Karten 23, 755). Laut statt still:
+    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    assert!(
+        size > 0,
+        "{} ist leer ({size} Byte) — vermutlich hat der Tauri-Sidecar-Platzhalter den \
+         gebauten MCP-Server ueberschrieben; die Tests der MCP-Crate nicht im selben \
+         cargo-Lauf wie projectmind-app ausfuehren (scripts/ci.sh cmd_test)",
+        path.display()
+    );
+    path
 }
 
 struct Server {
