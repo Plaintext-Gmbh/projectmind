@@ -18,7 +18,7 @@ fn binary_path() -> PathBuf {
     // `scripts/ci.sh` (ensure_sidecar_placeholder) ueber genau diesen Pfad. Eine 0-Byte-Datei
     // startet execvp ueber /bin/sh als leeres Skript: exit 0 ohne Ausgabe, und jeder
     // Protokolltest meldete nur «stdout geschlossen» (Karten 23, 755). Laut statt still:
-    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    let size = std::fs::metadata(&path).map_or(0, |m| m.len());
     assert!(
         size > 0,
         "{} ist leer ({size} Byte) — vermutlich hat der Tauri-Sidecar-Platzhalter den \
