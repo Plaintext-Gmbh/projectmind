@@ -45,7 +45,14 @@ impl Server {
             // Bewusst `inherit` und nicht `piped`: eine Pipe, die niemand leert, blockiert einen
             // gespraechigen Server, und ein haengender Test ist schlimmer als ein roter.
             .stderr(Stdio::inherit())
-            .env("PROJECTMIND_LOG", "error");
+            .env(
+                "PROJECTMIND_LOG",
+                // Karte 1960: in der CI per PROJECTMIND_TEST_LOG ueberschreibbar (macOS-Diagnose).
+                std::env::var("PROJECTMIND_TEST_LOG")
+                    .ok()
+                    .filter(|v| !v.is_empty())
+                    .unwrap_or_else(|| "error".into()),
+            );
         if let Some(state) = state {
             cmd.env("PROJECTMIND_STATE", state);
         }

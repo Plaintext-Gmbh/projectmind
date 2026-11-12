@@ -24,6 +24,8 @@ jobs:
       contents: read
     env:
       PROJECTMIND_SKIP_TAURI_APP: ${{ matrix.os == 'ubuntu-22.04' && '1' || '' }}
+      # Karte 1960 (nur Diagnose-PR): Server-Logs der Protokolltests auf macOS sichtbar machen.
+      PROJECTMIND_TEST_LOG: ${{ matrix.os == 'macos-15' && 'debug' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -81,6 +83,13 @@ jobs:
         env:
           PROJECTMIND_SKIP_TAURI_APP: ${{ runner.os == 'Linux' && '1' || '' }}
         run: ./scripts/ci.sh check
+
+      - name: Diagnose fd-Limits (Karte 1960, nur Diagnose-PR)
+        if: matrix.os == 'macos-15'
+        run: |
+          echo "ulimit -n (soft): $(ulimit -n)  hard: $(ulimit -Hn)"
+          sysctl kern.maxfiles kern.maxfilesperproc || true
+          sysctl hw.ncpu || true
 
       - name: Tests + doctests
         env:
